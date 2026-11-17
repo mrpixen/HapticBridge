@@ -353,8 +353,11 @@ internal static class FeelConnectTests
         await client.PairAsync("synthetic-refresh-buffer-code", Array.Empty<string>());
         fixture.VideoRoom = "replacement-video";
         fixture.Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
-        await Until(() => client.CurrentPercent == 36);
-        Assert(premature == 0 && client.Diagnostics.AcceptedCues == 1, "first new-room cue before join ACK survives refresh without premature output");
+        await Until(() => client.Diagnostics.AcceptedCues == 1 && !refreshing);
+        Assert(premature == 0 && client.CurrentPercent == 0, "untimed V2 received before join ACK is counted but cannot replay after refresh");
+        fixture.Socket.Push(Frame("replacement-video", "room:message", "{\"ver\":2,\"percents\":[42]}"));
+        await Until(() => client.CurrentPercent == 42);
+        Assert(client.CurrentPercent == 42, "fresh post-refresh V2 can start output");
     }
 
     static async Task RemovedBufferedRoomAndPublisherLeave()

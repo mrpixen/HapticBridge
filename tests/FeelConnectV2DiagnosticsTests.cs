@@ -32,22 +32,22 @@ internal static class FeelConnectV2DiagnosticsTests
         var protocol = Decoder();
         var output = Accept(protocol, "[0,0,0]");
         var zeros = protocol.V2Diagnostics;
-        Assert(output.IsStop && output.Percent == 0, "all-zero batch remains a stop");
+        Assert(!output.IsStop && output.Percent == 0 && output.Samples.SequenceEqual(new[] { 0d, 0d, 0d }), "all-zero input preserves its ordered batch and zero final diagnostic");
         Assert(zeros.AcceptedBatches == 1 && zeros.Samples == 3 && zeros.PositiveSamples == 0 && zeros.MixedBatches == 0,
             "all-zero traffic is distinguishable from absent traffic");
         Assert(zeros.LastBatchSamples == 3 && zeros.LastBatchMaximum == 0 && zeros.LastBatchFinal == 0, "all-zero last batch summary");
 
         output = Accept(protocol, "[25,0]", 200);
         var mixed = protocol.V2Diagnostics;
-        Assert(output.IsStop && output.Percent == 0 && protocol.Percent == 0, "positive-then-zero does not change final-value output policy");
+        Assert(!output.IsStop && output.Percent == 0 && protocol.Percent == 0 && output.Samples.SequenceEqual(new[] { 25d, 0d }), "positive-then-zero remains ordered while final diagnostic stays zero");
         Assert(mixed.AcceptedBatches == 2 && mixed.Samples == 5 && mixed.PositiveSamples == 1 && mixed.MixedBatches == 1,
-            "positive sample discarded by final-value output is counted");
+            "positive sample preceding a zero final value is counted");
         Assert(mixed.LastBatchSamples == 2 && mixed.LastBatchMaximum == 25 && mixed.LastBatchFinal == 0, "mixed last batch retains numeric peak and final");
         Assert(zeros.AcceptedBatches == 1 && zeros.LastBatchSamples == 3, "previous diagnostic snapshot remains immutable");
 
         Accept(protocol, "[0,100,0]", 300);
         Assert(protocol.V2Diagnostics.MixedBatches == 2 && protocol.V2Diagnostics.LastBatchMaximum == 100 && protocol.Percent == 0,
-            "zero-positive-zero peak is visible without synthesizing a pulse");
+            "zero-positive-zero peak is visible in numeric diagnostics");
         output = Accept(protocol, "[25,\"50\",50.5]", 400);
         var positive = protocol.V2Diagnostics;
         Assert(output.Percent == 50.5 && !output.IsStop, "valid decimal and numeric-string sample handling stays unchanged");

@@ -8,7 +8,7 @@ The client pairs with a FeelConnect QR token or connection code, receives the pl
 | --- | --- |
 | `website:device_speed` | Immediate strength from 0 to 100 percent |
 | `device:position` with `device_percent` | Current SDK strength from 0 to 100 percent, checked against the paired target user when specified |
-| Version 2 percent updates | Latest percent value; the array does not identify separate hardware motors |
+| Version 2 percent updates | Ordered percentage samples, sent to each selected motor |
 | Version 3 play subtitles | Timed cue levels 0–4, converted to 0–100 percent |
 | Version 3 stop or replacement playback | Stops or replaces the current timeline, including seeking |
 | `room:play` / `room:stop` | Current SDK envelopes for version 3 playback and stopping |
@@ -24,6 +24,10 @@ The client exchanges a pairing value with `api.feel-app.com`, obtains authorized
 
 After an authorized video-room join or peer join, the client sends session metadata through a separate bounded worker. A slow metadata request cannot block cue decoding or output stops.
 
+If initial pairing finds no video room, the client checks again after its subscriptions are ready. This recovers a room created during pairing even if its change notification was missed. It does not discover channels outside the authenticated session.
+
+Guest tokens with valid issue and expiry times renew around the midpoint of their lifetime. Renewal replaces the FEC connection while preserving website presence and the legacy subscription. Output clears during the swap and waits for fresh cues. The previous expiry remains binding until the new connection authenticates and its room joins succeed. Failed exchanges have at most three attempts, at least 30 seconds apart; rejection or expiry disconnects and pauses output.
+
 Pairing accepts the recognized `feelapp` and `feelvr` authorization/connect schemes or a raw pairing value. These links do not select arbitrary network destinations. HTTP redirects are disabled, responses are bounded, and session credentials are kept in memory. PubNub subscriptions are restricted to channels supplied by the QR-authenticated API session and their presence channels. The client uses the public subscribe routing identifier only; it has no publish, partner or secret key and performs no channel discovery or history lookup.
 
 The client reports online/offline presence and refreshes device display names when Bluetooth connections change. It shows the paired website's name from the service. It does not store the pairing token, website name, media, a browser history or video screenshots. See **Privacy** for local diagnostic files and source-specific data flows.
@@ -34,9 +38,11 @@ The client reports online/offline presence and refreshes device display names wh
 
 Live levels still requires the website to send playback updates. It does not fix a stalled video clock. Network delay affects each update, and a gap longer than five seconds stops output, including a long hold in a sparse track. Timed cues is preferable when the player supports it. Neither mode changes the authorized channel scope or the available motor intensity range.
 
-Version 2 batches have no per-sample timestamps. This implementation currently uses their final percent, so intermediate peaks in a multi-value batch may be lost. Exact batch timing and automatic guest-token renewal remain compatibility limitations.
+Version 2 batches have no per-sample timestamps. Each fully validated batch is submitted in order as the device acknowledges writes; no timing is invented between samples. These batches bypass smoothing so intermediate peaks are not collapsed into their final value. Bluetooth timing determines whether a very short peak is perceptible.
 
-Connection details count fully validated live batches, their positive samples and mixed zero/nonzero batches, with the last batch's size, maximum and final value. These aggregate numbers distinguish quiet traffic from a discarded intermediate peak without recording message contents or session identifiers.
+Each device has a maximum of 1,000 pending samples. Overload discards the oldest pending batch remainders; samples waiting more than one second expire. Expired remainders trigger a zero before newer work continues, and an otherwise idle output expires after five seconds. Stop, disarm, disconnect and control takeover cancel pending output. Batches received while output is off or pairing is still completing are not replayed when output becomes ready.
+
+Connection details count fully validated live batches, their positive samples and mixed zero/nonzero batches, with the last batch's size, maximum and final value. These aggregate numbers describe incoming traffic without recording message contents or session identifiers.
 
 Player versions and services can change their messages. **Paired** confirms the service connection. The intensity status distinguishes an active vibration cue, zero intensity and expired updates. If output stays at zero, expand **Connection details** to check for a video channel and incoming cues, then check that the selected motors are connected. A session that disconnects or expires requires deliberate reconnecting; output does not automatically resume.
 

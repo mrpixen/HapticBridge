@@ -14,6 +14,7 @@
     <Compile Include="*.cs" />
     <Compile Include="../source/ApiServer.cs;../source/AudioMeter.cs;../source/Playback.cs;../source/Protocol.cs;../source/Catalog.cs;../source/JsonCompatibility.cs" />
     <Compile Include="../source/CurveDocument.cs" />
+    <Compile Include="../source/Playback.Ordered.cs;../source/FeelOrderedRouter.cs" />
     <Compile Include="../source/FeelConnectClient.cs;../source/FeelConnectProtocol.cs;../source/FeelConnectLegacy.cs" Condition="Exists('../source/FeelConnectClient.cs')" />
     <None Include="../source/models.json" Link="models.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

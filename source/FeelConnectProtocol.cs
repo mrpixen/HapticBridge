@@ -8,7 +8,17 @@ using System.Text.Json.Serialization;
 namespace LovenseConnector
 {
     public enum FeelConnectPlaybackMode { Timed, Live }
-    public sealed record FeelConnectOutput(double Percent, string Kind, bool IsStop);
+    public sealed record FeelConnectOutput(double Percent, string Kind, bool IsStop)
+    {
+        // V2 is an ordered, untimed sequence, not one value per motor.
+        public IReadOnlyList<double> Samples { get; private init; } = Array.Empty<double>();
+        internal static FeelConnectOutput Batch(IEnumerable<double> samples)
+        {
+            var copy = samples.ToArray();
+            return new FeelConnectOutput(copy[^1], "Video intensity v2", false)
+                { Samples = Array.AsReadOnly(copy) };
+        }
+    }
     public sealed record FeelConnectStatus(string Phase, string Message, bool Connected, long MessagesReceived);
     public sealed record FeelConnectPresenceRole(
         [property: JsonPropertyName("channels")] int Channels,
@@ -204,11 +214,13 @@ namespace LovenseConnector
                     values.GetArrayLength() == 0 || values.GetArrayLength() > 1000) return null;
                 double last = 0, maximum = 0;
                 int count = values.GetArrayLength(), positive = 0;
+                var samples = new List<double>(count);
                 foreach (var item in values.EnumerateArray())
                 {
                     if (!TryNumber(item, out last) || !ValidPercent(last)) return null;
                     if (last > 0) positive++;
                     maximum = Math.Max(maximum, last);
+                    samples.Add(last);
                 }
                 // Commit only after the entire authorized batch validates. A trailing invalid value
                 // must not change statistics, just as it must not change output or its timeout.
@@ -221,10 +233,12 @@ namespace LovenseConnector
                     MixedBatches = Math.Min(1_000_000_000, priorV2.MixedBatches + (positive > 0 && positive < count ? 1 : 0)),
                     LastBatchSamples = count, LastBatchMaximum = maximum, LastBatchFinal = last
                 };
-                // The reference receiver sends every array value to the same devices; these are not motor channels.
-                // With no timestamps, the most recent value is the meaningful value at BLE dispatch time.
+                // Zeroes inside a batch must not cancel its preceding values.
                 LastInputMs = nowMs;
-                return Immediate(last, nowMs, room, publisher, "Video intensity v2");
+                timeline.Clear(); cursor = 0; activeRoom = room; activePublisher = publisher;
+                activeKind = "Video intensity v2"; percent = last;
+                endAt = nowMs + Math.Clamp(ImmediateTimeoutMs, 500, 60000);
+                return FeelConnectOutput.Batch(samples);
             }
             if (version != 3) return null;
             string type = String(data, "type");

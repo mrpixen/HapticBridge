@@ -17,6 +17,7 @@ namespace LovenseConnector
     internal sealed class FeelRoute
     {
         public Device Device; public int Channel; public CheckBox Enabled; public Slider Gain; public Border Card;
+        public OrderedRouteSettings OutputSettings=new(false,100);
     }
     internal sealed partial class ConnectorApp
     {
@@ -33,9 +34,13 @@ namespace LovenseConnector
         FeelConnectPresenceReport feelPresenceReport;
         FeelConnectRouteOccupancyReport feelReferenceReport;
         FeelConnectOutput feelLatestOutput;
+        FeelOrderedRouter feelOrdered;
+        FeelConnectOutput feelIngressOutput;
+        int feelOrderedInput,feelDisplayQueued,feelInputAvailable;
         TabItem feelTab;
         void InitializeFeelConnect()
         {
+            feelOrdered=new FeelOrderedRouter();
             var body=new StackPanel { Margin=new Thickness(24) };
             body.Children.Add(new TextBlock { Text="Video sync",FontSize=32,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,24) });
             var pairingBody=new StackPanel();
@@ -87,7 +92,7 @@ namespace LovenseConnector
             feelRouteSummary=Text("Play targets · no motors connected",16);
             body.Children.Add(new Expander { Header=feelRouteSummary,Content=routeBody,Margin=new Thickness(0,4,0,12) });
             var playbackSettings=new StackPanel();
-            var timing=new WrapPanel { Margin=new Thickness(0,12,0,0) };feelSmoothing=Input("100",120);Field(timing,"Smoothing (ms)",feelSmoothing);playbackSettings.Children.Add(timing);
+            var timing=new WrapPanel { Margin=new Thickness(0,12,0,0) };feelSmoothing=Input("100",120);feelSmoothing.ToolTip="Applies to timed cues; legacy batches are sent in order.";Field(timing,"Cue smoothing (ms)",feelSmoothing);playbackSettings.Children.Add(timing);
             var delivery=new WrapPanel();feelPlaybackMode=new ComboBox { Width=220,Margin=new Thickness(0,0,8,6) };
             feelPlaybackMode.Items.Add("Timed cues");feelPlaybackMode.Items.Add("Live levels (legacy)");feelPlaybackMode.SelectedIndex=0;
             feelPlaybackMode.ToolTip="Live levels can help with older players. Output stops if updates pause for five seconds.";
@@ -106,7 +111,10 @@ namespace LovenseConnector
                 bool paste=(e.Key==Key.V&&(Keyboard.Modifiers&ModifierKeys.Control)!=0)||(e.Key==Key.Insert&&(Keyboard.Modifiers&ModifierKeys.Shift)!=0);
                 if(paste&&tabs.SelectedItem==feelTab&&!(Keyboard.FocusedElement is TextBox)) { e.Handled=true;PasteFeelPairingSafely(); }
             };
-            feelClient.StatusChanged+=status=>UI(async()=> {
+            feelClient.StatusChanged+=status=> {
+                Volatile.Write(ref feelInputAvailable,status.Connected?1:0);
+                if(!status.Connected)ObserveFeelOrderedStop(feelOrdered.Reset(true));
+                UI(async()=> {
                 string website=feelClient.WebsiteName;
                 feelConnected=status.Connected;feelStatus.Text=status.Connected?(website.Length==0?"Paired":"Paired · "+website):status.Message;
                 if(!status.Connected)feelLatestOutput=null;
@@ -115,16 +123,47 @@ namespace LovenseConnector
                 if(!status.Connected||status.Phase=="Refreshing") { feelPresenceRevision++;feelPresenceReport=null;feelReferenceReport=null;feelPresenceResult.Text="";feelPresenceRetryAt=default; }
                 if(!status.Connected) { feelPercent=0;feelFrame++;await DisarmFeelConnect(); }
                 RefreshFeelSignalDisplay();RefreshFeelPairingActions();
-            });
-            feelClient.OutputChanged+=output=>UI(async()=> {
-                feelLatestOutput=output;
-                feelPercent=output.IsStop?0:output.Percent;feelFrame++;
-                RefreshFeelSignalDisplay();
-                if(feelConnected)feelCount.Text=FeelSignalText();
-                if(output.IsStop)await StopFeelOwned();
-            });
+                });
+            };
+            feelClient.OutputChanged+=ReceiveFeelOutput;
             feelTimer=new DispatcherTimer { Interval=TimeSpan.FromMilliseconds(100) };feelTimer.Tick+=async(s,e)=> { RefreshFeelDetails();await RefreshFeelPresence();await FeelTick(); };feelTimer.Start();
             RefreshFeelPairingActions();
+        }
+        void ObserveFeelOrderedStop(Task task)
+        {
+            _=task.ContinueWith(t=> { if(t.IsFaulted) { _=t.Exception;UI(()=>hint.Text="Video output stopped; a disconnected motor could not confirm Stop."); } },TaskScheduler.Default);
+        }
+        void ReceiveFeelOutput(FeelConnectOutput output)
+        {
+            // This executes on the input thread. Stop invalidation and bounded
+            // batch admission must not wait behind UI rendering or modal dialogs.
+            Volatile.Write(ref feelIngressOutput,output);
+            Volatile.Write(ref feelOrderedInput,output.Samples.Count>0?1:0);
+            if(output.Samples.Count>0)feelOrdered.Submit(output.Samples);
+            else ObserveFeelOrderedStop(feelOrdered.Reset());
+            if(Interlocked.Exchange(ref feelDisplayQueued,1)!=0)return;
+            UI(async()=> {
+                Interlocked.Exchange(ref feelDisplayQueued,0);
+                var latest=Volatile.Read(ref feelIngressOutput);
+                feelLatestOutput=latest;feelPercent=latest.IsStop?0:latest.Percent;feelFrame++;
+                RefreshFeelSignalDisplay();if(feelConnected)feelCount.Text=FeelSignalText();
+                if(latest.IsStop)await StopFeelOwned();
+            });
+        }
+        void PublishFeelRoutes()
+        {
+            if(feelOrdered==null)return;
+            var targets=new List<FeelOrderedTarget>();
+            foreach(var route in feelRoutes.Values)
+            {
+                var previous=Volatile.Read(ref route.OutputSettings);
+                var settings=new OrderedRouteSettings(route.Device.Connected&&route.Device.Player!=null&&route.Enabled.IsChecked==true,route.Gain.Value);
+                Volatile.Write(ref route.OutputSettings,settings);
+                if(previous.Enabled&&!settings.Enabled&&route.Device.Player!=null)ObserveFeelOrderedStop(feelOrdered.Suppress(route.Device.Player,route.Channel));
+                if(route.Device.Connected&&route.Device.Player!=null)
+                    targets.Add(new(route.Device.Player,new OrderedMotorRoute(route.Channel,()=>Volatile.Read(ref route.OutputSettings))));
+            }
+            feelOrdered.Publish(targets);
         }
         Border FeelSurface(UIElement content)
         {
@@ -207,6 +246,7 @@ namespace LovenseConnector
             var status=feelClient.Diagnostics;
             var transport=status.Transport;
             var v2=status.V2;
+            var writes=feelRoutes.Values.Select(r=>r.Device.Player).Where(p=>p!=null).Distinct().Select(p=>p.OrderedStatistics).ToArray();
             feelDetails.Text="Playback: "+(status.PlaybackMode=="live"?"Live levels (legacy)":"Timed cues")+
                 "\nVideo channels: "+status.VideoRooms+"\nControl messages: "+status.CandidateCues+" · Accepted: "+status.AcceptedCues+
                 "\nService messages: "+status.FecMessages+" live · "+status.LegacyMessages+" legacy"+
@@ -217,7 +257,8 @@ namespace LovenseConnector
                 "\nOther messages: status "+transport.SessionMetadataMessages+" · object "+transport.UnknownObjectDataMessages+
                 " · value "+transport.UnknownNonObjectDataMessages+" · cue format "+transport.UnknownCueShapeMessages+
                 "\nLive batches: "+v2.AcceptedBatches+" · samples "+v2.Samples+" · positive "+v2.PositiveSamples+" · mixed "+v2.MixedBatches+
-                "\nLast live batch: "+v2.LastBatchSamples+" samples · peak "+v2.LastBatchMaximum.ToString("0.##")+"% · final "+v2.LastBatchFinal.ToString("0.##")+"%";
+                "\nLast live batch: "+v2.LastBatchSamples+" samples · peak "+v2.LastBatchMaximum.ToString("0.##")+"% · final "+v2.LastBatchFinal.ToString("0.##")+"%"+
+                "\nOrdered output: "+writes.Sum(w=>w.Submitted)+" writes · "+writes.Sum(w=>w.Pending)+" pending · "+writes.Sum(w=>w.Expired)+" expired · "+writes.Sum(w=>w.Overloaded)+" replaced";
         }
         void PasteFeelPairingSafely()
         {
@@ -325,24 +366,27 @@ namespace LovenseConnector
             var sources=PauseExternalSources();var stops=StopPlayers();await Task.WhenAll(sources,stops);
             if(closing||operation!=operatorGeneration||!feelConnected)return;
             if(!await stops)throw new InvalidOperationException("Output could not be stopped before switching sources.");
-            feelPercent=feelClient.CurrentPercent;RefreshFeelSignalDisplay();
+            // Untimed batches received while disarmed are never replayed on Enable.
+            feelPercent=Volatile.Read(ref feelOrderedInput)==1?0:feelClient.CurrentPercent;RefreshFeelSignalDisplay();
             feelFrame++;feelArmed=true;feelOutputPaused=false;feelGeneration++;feelOutputButton.Content="Pause output";hint.Text="Video output enabled";
+            PublishFeelRoutes();feelOrdered.Enable();
             RefreshFeelSignalDisplay();
         }
         async Task DisarmFeelConnect()
         {
+            var orderedStop=feelOrdered?.Reset(true)??Task.CompletedTask;
             feelGeneration++;if(feelArmed)feelOutputPaused=true;feelArmed=false;if(!feelConnected)feelOutputPaused=false;
             RefreshFeelSignalDisplay();
             if(feelOutputButton!=null)feelOutputButton.Content="Enable output";
             if(hint.Text=="Video output enabled")hint.Text="Video output paused";
-            await StopFeelOwned();
+            await Task.WhenAll(orderedStop,StopFeelOwned());
         }
         async Task StopFeelOwned()
         {
             await feelWriteGate.WaitAsync();
             try {
                 var owned=feelOwned.Values.ToArray();feelOwned.Clear();
-                await Task.WhenAll(owned.Select(async item=> { try { await item.Item1.Stop(item.Item2); }catch { hint.Text="Video output stopped; a disconnected motor could not confirm Stop."; } }));
+                await Task.WhenAll(owned.Select(async item=> { try { await item.Item1.CancelSampled(item.Item2); }catch { hint.Text="Video output stopped; a disconnected motor could not confirm Stop."; } }));
             }finally { feelWriteGate.Release(); }
         }
         void RefreshFeelRoutes()
@@ -357,16 +401,17 @@ namespace LovenseConnector
                 heading.Children.Add(new TextBlock { Text=d.Name,TextWrapping=TextWrapping.Wrap,FontSize=16 });
                 heading.Children.Add(new TextBlock { Text=channel==0?"Motor":"Motor "+channel,FontSize=12,Margin=new Thickness(0,4,0,0),Foreground=Color("#C4BAD7") });
                 route.Enabled=new CheckBox { Content=heading,IsChecked=true };panel.Children.Add(route.Enabled);
-                route.Enabled.Checked+=(s,e)=>RefreshFeelRouteSummary();route.Enabled.Unchecked+=(s,e)=>RefreshFeelRouteSummary();
+                route.Enabled.Checked+=(s,e)=> { RefreshFeelRouteSummary();PublishFeelRoutes(); };route.Enabled.Unchecked+=(s,e)=> { RefreshFeelRouteSummary();PublishFeelRoutes(); };
                 System.Windows.Automation.AutomationProperties.SetName(route.Enabled,d.Name+" motor "+channel+" video routing");
                 var value=Text("Strength 100%",13);panel.Children.Add(value);
                 route.Gain=new Slider { Minimum=0,Maximum=200,Value=100,TickFrequency=5,SmallChange=5,IsSnapToTickEnabled=true };
                 System.Windows.Automation.AutomationProperties.SetName(route.Gain,d.Name+" motor "+channel+" video strength");
-                route.Gain.ValueChanged+=(s,e)=>value.Text="Strength "+(int)route.Gain.Value+"%";panel.Children.Add(route.Gain);
+                route.Gain.ValueChanged+=(s,e)=> { value.Text="Strength "+(int)route.Gain.Value+"%";PublishFeelRoutes(); };panel.Children.Add(route.Gain);
                 feelRoutes.Add(key,route);feelRoutePanel.Children.Add(route.Card);added=true;
             }
             foreach(var route in feelRoutes.Values)route.Card.IsEnabled=route.Device.Connected&&!closing;
             RefreshFeelRouteSummary();
+            PublishFeelRoutes();
             RefreshFeelPairingActions();
             if(added)QueueStudioAppearance();
         }
@@ -379,20 +424,22 @@ namespace LovenseConnector
         }
         async Task FeelTick()
         {
-            if(!feelArmed||!feelConnected||feelTickBusy)return;feelTickBusy=true;int generation=feelGeneration,frame=feelFrame;
+            var input=feelLatestOutput;
+            if(!feelArmed||!feelConnected||feelTickBusy||Volatile.Read(ref feelOrderedInput)==1||Volatile.Read(ref feelInputAvailable)==0||!ReferenceEquals(input,Volatile.Read(ref feelIngressOutput)))return;feelTickBusy=true;int generation=feelGeneration,frame=feelFrame;
             try {
                 int smoothing=Number(feelSmoothing);if(smoothing<0||smoothing>2000)throw new ArgumentException("Smoothing must be 0–2000 ms.");
+                Func<bool> isCurrent=()=>Volatile.Read(ref feelOrderedInput)==0&&Volatile.Read(ref feelInputAvailable)==1&&Volatile.Read(ref feelGeneration)==generation&&Volatile.Read(ref feelFrame)==frame&&ReferenceEquals(input,Volatile.Read(ref feelIngressOutput));
                 await feelWriteGate.WaitAsync();
                 try {
                     foreach(var pair in feelRoutes.ToArray()) {
-                        if(!feelArmed||!feelConnected||generation!=feelGeneration||frame!=feelFrame)return;
+                        if(!feelArmed||!feelConnected||generation!=feelGeneration||frame!=feelFrame||Volatile.Read(ref feelOrderedInput)==1)return;
                         var route=pair.Value;var player=route.Device.Player;
                         if(!route.Device.Connected||player==null)continue;
                         int level=route.Enabled.IsChecked==true?Math.Clamp((int)Math.Round(feelPercent*route.Gain.Value/500.0,MidpointRounding.AwayFromZero),0,20):0;
-                        if(level==0) { if(feelOwned.Remove(pair.Key))await player.Stop(route.Channel); }
+                        if(level==0) { if(feelOwned.Remove(pair.Key))await player.CancelSampled(route.Channel); }
                         else {
                             feelOwned[pair.Key]=Tuple.Create(player,route.Channel);
-                            if(!player.UpdateSteady(route.Channel,level,600,smoothing))await player.Start(route.Channel,new PatternSpec { mode="Steady",high=level,durationMs=600,transitionMs=smoothing },20);
+                            if(!player.UpdateSteady(route.Channel,level,600,smoothing,isCurrent))await player.Start(route.Channel,new PatternSpec { mode="Steady",high=level,durationMs=600,transitionMs=smoothing },20,isCurrent:isCurrent);
                         }
                     }
                 }finally { feelWriteGate.Release(); }

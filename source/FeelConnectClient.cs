@@ -30,6 +30,7 @@ namespace LovenseConnector
         readonly bool ownHttp;
         readonly bool enableLegacy;
         readonly Func<CancellationToken, Task<WebSocket>> socketFactory;
+        readonly Func<DateTimeOffset> utcNow = () => DateTimeOffset.UtcNow;
         readonly SemaphoreSlim lifecycle = new(1, 1);
         readonly object sync = new();
         Session current;
@@ -94,7 +95,7 @@ namespace LovenseConnector
                 {
                     Session session = current;
                     if (session == null || !session.Accepting || session.Stop.IsCancellationRequested) return 0;
-                    if (session.ExpiresAt.HasValue && DateTimeOffset.UtcNow >= session.ExpiresAt) return 0;
+                    if (session.ExpiresAt.HasValue && utcNow() >= session.ExpiresAt) return 0;
                     var output = session.Protocol.Tick(session.Clock.ElapsedMilliseconds);
                     if (output != null) EmitOutputLocked(session, output);
                     return session.Protocol.Percent;
@@ -111,11 +112,13 @@ namespace LovenseConnector
         }
 
         // Offline fixtures supply both transports. Production callers cannot redirect credentials to a custom host.
-        internal FeelConnectClient(HttpClient http, Func<CancellationToken, Task<WebSocket>> socketFactory, bool enableLegacy = false)
+        internal FeelConnectClient(HttpClient http, Func<CancellationToken, Task<WebSocket>> socketFactory, bool enableLegacy = false,
+            Func<DateTimeOffset> utcNow = null)
         {
             this.http = http ?? throw new ArgumentNullException(nameof(http));
             this.socketFactory = socketFactory ?? throw new ArgumentNullException(nameof(socketFactory));
             this.enableLegacy = enableLegacy;
+            if (utcNow != null) this.utcNow = utcNow;
             if (enableLegacy) http.Timeout = Timeout.InfiniteTimeSpan;
         }
 
@@ -283,7 +286,7 @@ namespace LovenseConnector
             old.Stop.Cancel(); old.Socket?.Abort();
             if (old.Worker != null) await old.Worker.ConfigureAwait(false);
             lock (sync) { if (ReferenceEquals(current, old)) current = null; }
-            old.Stop.Dispose(); old.SendLock.Dispose();
+            old.FecStop.Dispose(); old.Stop.Dispose(); old.SendLock.Dispose();
         }
 
         async Task RunAsync(Session session)
@@ -298,7 +301,8 @@ namespace LovenseConnector
                     session.FecToken = RequiredString(auth.RootElement, "fec_token", 16384);
                 }
                 session.ExpiresAt = JwtExpiry(session.FecToken);
-                if (session.ExpiresAt.HasValue && session.ExpiresAt <= DateTimeOffset.UtcNow)
+                session.RenewAt = JwtRenewal(session.FecToken)?.RenewAt;
+                if (session.ExpiresAt.HasValue && session.ExpiresAt <= utcNow())
                     throw new ReceiverException("Expired", "This pairing session has expired. Generate a new QR code.");
                 var realtimeTask = RequestAsync("realtime", session.AccessToken, null, session.Stop.Token);
                 var roomsTask = RequestAsync("myrooms", session.AccessToken, null, session.Stop.Token);
@@ -321,9 +325,9 @@ namespace LovenseConnector
                 {
                     connectDeadline.CancelAfter(TimeSpan.FromSeconds(15));
                     session.Socket = await socketFactory(connectDeadline.Token).ConfigureAwait(false);
-                    await HandshakeAsync(session, connectDeadline.Token).ConfigureAwait(false);
+                    await HandshakeAsync(session, session.Socket, session.FecToken, connectDeadline.Token).ConfigureAwait(false);
                 }
-                session.ReceiveTask = ReceiveLoopAsync(session);
+                session.ReceiveTask = ReceiveLoopAsync(session, session.Socket, session.FecGeneration, session.FecStop.Token);
                 await JoinRoomsAsync(session, rooms).ConfigureAwait(false);
                 session.PresenceRegistered = true;
                 await PresenceAsync(session, true, session.Stop.Token).ConfigureAwait(false);
@@ -342,14 +346,17 @@ namespace LovenseConnector
                     EnsureCurrent(session);
                     session.Accepting = true;
                     session.Starting = false;
+                    // Online registration can create the first room without a room-change event.
+                    // One bounded post-ready discovery closes that race; it is not periodic polling.
+                    if (session.VideoRooms == 0) session.RefreshRequested = true;
                     EmitStatusLocked(session, "Connected", "Connected. Waiting for video cues.", true);
                     EmitBufferedLocked(session);
                 }
                 session.Ready.TrySetResult();
                 session.TimerTask = TimerLoopAsync(session);
-                session.MetadataTask = MetadataLoopAsync(session);
-                Task completed = await Task.WhenAny(session.Legacy == null ? new[] { session.ReceiveTask, session.TimerTask, session.MetadataTask } :
-                    new[] { session.ReceiveTask, session.TimerTask, session.MetadataTask, session.Legacy.Worker }).ConfigureAwait(false);
+                session.MetadataTask = MetadataLoopAsync(session, session.Socket, session.FecGeneration, session.FecStop.Token);
+                Task completed = await Task.WhenAny(session.Legacy == null ? new[] { session.TimerTask } :
+                    new[] { session.TimerTask, session.Legacy.Worker }).ConfigureAwait(false);
                 await completed.ConfigureAwait(false);
                 throw new ReceiverException("Disconnected", "The video connection closed. Pair again to reconnect.");
             }
@@ -369,6 +376,9 @@ namespace LovenseConnector
                     }
                 }
                 session.Ready.TrySetException(new InvalidOperationException(message));
+                // A renewal may still own an old transport. Let it finish cancellation before
+                // taking the final worker/socket snapshot for cleanup.
+                if (session.RenewalTask != null) try { await session.RenewalTask.ConfigureAwait(false); } catch { }
                 foreach (var ack in session.Acks.Values) ack.TrySetCanceled();
                 foreach (Task task in new[] { session.ReceiveTask, session.TimerTask, session.RefreshTask, session.MetadataTask })
                     if (task != null) try { await task.ConfigureAwait(false); } catch { }
@@ -383,9 +393,9 @@ namespace LovenseConnector
             }
         }
 
-        async Task HandshakeAsync(Session session, CancellationToken cancellationToken)
+        async Task HandshakeAsync(Session session, WebSocket socket, string fecToken, CancellationToken cancellationToken)
         {
-            string packet = await ReceiveTextAsync(session.Socket, cancellationToken).ConfigureAwait(false);
+            string packet = await ReceiveTextAsync(socket, cancellationToken).ConfigureAwait(false);
             if (packet.Length < 2 || packet[0] != '0') throw new ReceiverException("Unsupported", "The server did not provide a compatible live connection.");
             using (var open = Parse(packet.AsMemory(1)))
             {
@@ -395,11 +405,11 @@ namespace LovenseConnector
                     throw new ReceiverException("Unsupported", "The live server returned an invalid heartbeat.");
                 session.HeartbeatMs = (int)(interval + timeout + 1000);
             }
-            await SendAsync(session, "40/pubnub," + JsonSerializer.Serialize(new { token = session.FecToken }), cancellationToken).ConfigureAwait(false);
+            await SendAsync(session, socket, "40/pubnub," + JsonSerializer.Serialize(new { token = fecToken }), cancellationToken).ConfigureAwait(false);
             while (true)
             {
-                packet = await ReceiveTextAsync(session.Socket, cancellationToken).ConfigureAwait(false);
-                if (packet.StartsWith('2')) { await SendAsync(session, "3" + packet.Substring(1), cancellationToken).ConfigureAwait(false); continue; }
+                packet = await ReceiveTextAsync(socket, cancellationToken).ConfigureAwait(false);
+                if (packet.StartsWith('2')) { await SendAsync(session, socket, "3" + packet.Substring(1), cancellationToken).ConfigureAwait(false); continue; }
                 if (packet.StartsWith("40/pubnub,", StringComparison.Ordinal)) return;
                 if (packet.StartsWith("44/pubnub,", StringComparison.Ordinal))
                     throw new ReceiverException("Rejected", "The live service rejected this pairing. Generate a new QR code.");
@@ -407,14 +417,15 @@ namespace LovenseConnector
             }
         }
 
-        async Task ReceiveLoopAsync(Session session)
+        async Task ReceiveLoopAsync(Session session, WebSocket socket, int generation, CancellationToken cancellationToken)
         {
-            while (!session.Stop.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(session.Stop.Token);
+                using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 heartbeat.CancelAfter(session.HeartbeatMs);
-                string packet = await ReceiveTextAsync(session.Socket, heartbeat.Token).ConfigureAwait(false);
-                if (packet.StartsWith('2')) { await SendAsync(session, "3" + packet.Substring(1), session.Stop.Token).ConfigureAwait(false); continue; }
+                string packet = await ReceiveTextAsync(socket, heartbeat.Token).ConfigureAwait(false);
+                lock (sync) EnsureFecCurrent(session, generation);
+                if (packet.StartsWith('2')) { await SendAsync(session, socket, "3" + packet.Substring(1), cancellationToken).ConfigureAwait(false); continue; }
                 if (packet == "1" || packet.StartsWith("41/pubnub", StringComparison.Ordinal))
                     throw new ReceiverException("Disconnected", "The video connection closed. Pair again to reconnect.");
                 if (packet.StartsWith("44/pubnub", StringComparison.Ordinal))
@@ -422,7 +433,12 @@ namespace LovenseConnector
                 if (!TrySocketPacket(packet, out int type, out int? ackId, out string json)) continue;
                 if (type == 3 && ackId.HasValue)
                 {
-                    if (!session.Acks.TryRemove(ackId.Value, out var ack)) continue;
+                    TaskCompletionSource<bool> ack;
+                    lock (sync)
+                    {
+                        EnsureFecCurrent(session, generation);
+                        if (!session.Acks.TryRemove(ackId.Value, out ack)) continue;
+                    }
                     using var data = Parse(json.AsMemory());
                     bool ok = data.RootElement.ValueKind == JsonValueKind.Array && data.RootElement.GetArrayLength() > 0 &&
                         data.RootElement[0].ValueKind == JsonValueKind.Object && data.RootElement[0].TryGetProperty("ok", out var value) && value.ValueKind == JsonValueKind.True;
@@ -433,17 +449,18 @@ namespace LovenseConnector
                 {
                     var root = data.RootElement;
                     if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 2 || root[0].ValueKind != JsonValueKind.String || root[0].GetString() != "message")
-                    { CountOtherFecEvent(session, root); continue; }
-                    HandleEnvelope(session, root[1], true);
+                    { lock (sync) { EnsureFecCurrent(session, generation); CountOtherFecEvent(session, root); } continue; }
+                    HandleEnvelope(session, root[1], true, fecGeneration: generation);
                 }
             }
         }
 
-        void HandleEnvelope(Session session, JsonElement envelope, bool fromFec, int legacyGeneration = 0)
+        void HandleEnvelope(Session session, JsonElement envelope, bool fromFec, int legacyGeneration = 0, int fecGeneration = 0)
         {
             lock (sync)
             {
                 EnsureCurrent(session);
+                if (fromFec && fecGeneration != session.FecGeneration) return;
                 if (!fromFec && session.Legacy?.Generation != legacyGeneration) return;
                 session.Messages++;
                 if (fromFec) session.FecMessages++; else session.LegacyMessages++;
@@ -644,7 +661,9 @@ namespace LovenseConnector
         void EmitBufferedLocked(Session session)
         {
             if (session.StartupOutput != null)
-                EmitOutputLocked(session, session.Protocol.Tick(session.Clock.ElapsedMilliseconds) ?? session.StartupOutput);
+                EmitOutputLocked(session, session.StartupOutput.Samples.Count > 0
+                    ? session.Protocol.Reset("Waiting for fresh video cues")
+                    : session.Protocol.Tick(session.Clock.ElapsedMilliseconds) ?? session.StartupOutput);
             session.StartupOutput = null;
             session.BufferedRoom = "";
         }
@@ -666,8 +685,20 @@ namespace LovenseConnector
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(40));
             while (await timer.WaitForNextTickAsync(session.Stop.Token).ConfigureAwait(false))
             {
-                if (session.ExpiresAt.HasValue && DateTimeOffset.UtcNow >= session.ExpiresAt)
-                    throw new ReceiverException("Expired", "The pairing session expired. Generate a new QR code.");
+                Task renewal; Task[] fecWorkers;
+                lock (sync)
+                {
+                    EnsureCurrent(session); EnsureUnexpired(session);
+                    renewal = session.RenewalTask;
+                    fecWorkers = session.RotatingFec ? Array.Empty<Task>() : new[] { session.ReceiveTask, session.MetadataTask };
+                }
+                if (renewal?.IsCompleted == true) await renewal.ConfigureAwait(false);
+                foreach (var worker in fecWorkers)
+                    if (worker?.IsCompleted == true)
+                    {
+                        await worker.ConfigureAwait(false);
+                        throw new ReceiverException("Disconnected", "The video connection closed. Pair again to reconnect.");
+                    }
                 lock (sync)
                 {
                     EnsureCurrent(session);
@@ -676,7 +707,14 @@ namespace LovenseConnector
                         var output = session.Protocol.Tick(session.Clock.ElapsedMilliseconds);
                         if (output != null) EmitOutputLocked(session, output);
                     }
-                    if (session.RefreshRequested && (session.RefreshTask == null || session.RefreshTask.IsCompleted) &&
+                    bool renewalRunning = session.RenewalTask != null && !session.RenewalTask.IsCompleted;
+                    bool refreshRunning = session.RefreshTask != null && !session.RefreshTask.IsCompleted;
+                    if (!renewalRunning && !refreshRunning && session.RenewAt.HasValue && utcNow() >= session.RenewAt)
+                    {
+                        session.RenewalTask = RenewFecAsync(session);
+                        renewalRunning = true;
+                    }
+                    if (!renewalRunning && session.RefreshRequested && !refreshRunning &&
                         session.Clock.ElapsedMilliseconds - session.LastRefreshMs >= 1000)
                     {
                         session.RefreshRequested = false; session.LastRefreshMs = session.Clock.ElapsedMilliseconds;
@@ -706,7 +744,109 @@ namespace LovenseConnector
             }
         }
 
-        async Task JoinRoomsAsync(Session session, string[] rooms)
+        async Task RenewFecAsync(Session session)
+        {
+            string replacement;
+            lock (sync) { EnsureCurrent(session); session.RenewalAttempts++; }
+            try
+            {
+                using var auth = await RequestAsync(session.Pairing.IsConnectionCode ? "authconncode" : "auth",
+                    session.Pairing.Value, null, session.Stop.Token).ConfigureAwait(false);
+                // Guest renewal changes only the FEC token. The website access token and legacy
+                // receiver identity remain those of the original acknowledged pairing.
+                replacement = RequiredString(auth.RootElement, "fec_token", 16384);
+            }
+            catch (ReceiverException ex) when (ex.Phase != "Rejected") { ScheduleRenewalRetry(session); return; }
+            catch (HttpRequestException) { ScheduleRenewalRetry(session); return; }
+            catch (OperationCanceledException) when (!session.Stop.IsCancellationRequested) { ScheduleRenewalRetry(session); return; }
+
+            var metadata = JwtRenewal(replacement);
+            lock (sync)
+            {
+                EnsureCurrent(session);
+                if (replacement == session.FecToken || metadata == null || metadata.Value.ExpiresAt <= utcNow() ||
+                    (session.ExpiresAt.HasValue && metadata.Value.ExpiresAt <= session.ExpiresAt.Value))
+                { ScheduleRenewalRetry(session); return; }
+            }
+
+            WebSocket oldSocket; CancellationTokenSource oldLifetime; Task oldReceive, oldMetadata;
+            int generation; string[] rooms;
+            lock (sync)
+            {
+                EnsureCurrent(session); EnsureUnexpired(session);
+                session.RotatingFec = true; session.Accepting = false;
+                session.Buffering = false; session.StartupOutput = null; session.BufferedRoom = "";
+                oldSocket = session.Socket; oldLifetime = session.FecStop;
+                oldReceive = session.ReceiveTask; oldMetadata = session.MetadataTask;
+                generation = ++session.FecGeneration;
+                rooms = session.AllowedRooms.ToArray();
+                oldLifetime.Cancel(); oldSocket?.Abort();
+                foreach (var ack in session.Acks.Values) ack.TrySetCanceled();
+                session.Acks.Clear();
+                EmitOutputLocked(session, session.Protocol.Reset("Renewing video connection"));
+                // Connected remains true only for this internal refresh; the consumer retains its
+                // explicit enablement while the decoder drops, rather than buffers, interim cues.
+                EmitStatusLocked(session, "Refreshing", "Renewing the video connection…", true);
+            }
+            foreach (var worker in new[] { oldReceive, oldMetadata })
+                if (worker != null) try { await worker.ConfigureAwait(false); } catch { }
+            lock (sync)
+            {
+                session.FecStop = CancellationTokenSource.CreateLinkedTokenSource(session.Stop.Token);
+                session.Socket = null; session.ReceiveTask = null; session.MetadataTask = null;
+                session.Joined.Clear(); session.PendingMetadata.Clear(); session.MetadataSentAt.Clear();
+            }
+            oldSocket?.Dispose(); oldLifetime.Dispose();
+            lock (sync) { EnsureCurrent(session); EnsureUnexpired(session); }
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(session.FecStop.Token))
+            {
+                deadline.CancelAfter(TimeSpan.FromSeconds(15));
+                var socket = await socketFactory(deadline.Token).ConfigureAwait(false);
+                try
+                {
+                    lock (sync) { EnsureFecCurrent(session, generation); EnsureUnexpired(session); session.Socket = socket; }
+                    await HandshakeAsync(session, socket, replacement, deadline.Token).ConfigureAwait(false);
+                }
+                catch { socket.Dispose(); throw; }
+            }
+            lock (sync)
+            {
+                EnsureFecCurrent(session, generation); EnsureUnexpired(session);
+                session.ReceiveTask = ReceiveLoopAsync(session, session.Socket, generation, session.FecStop.Token);
+            }
+            await JoinRoomsAsync(session, rooms, updateLegacy: false).ConfigureAwait(false);
+            lock (sync)
+            {
+                EnsureFecCurrent(session, generation); EnsureUnexpired(session);
+                // Local JWT metadata never extends authorization before authentication and every
+                // room acknowledgement succeed, and cannot revive an expired previous session.
+                session.FecToken = replacement; session.ExpiresAt = metadata.Value.ExpiresAt;
+                session.RenewAt = metadata.Value.RenewAt > utcNow().AddSeconds(30) ? metadata.Value.RenewAt : utcNow().AddSeconds(30);
+                session.RenewalAttempts = 0;
+                session.MetadataTask = MetadataLoopAsync(session, session.Socket, generation, session.FecStop.Token);
+                session.RotatingFec = false; session.Accepting = true;
+                EmitStatusLocked(session, "Connected", "Video connection renewed. Waiting for fresh cues.", true);
+            }
+        }
+
+        void ScheduleRenewalRetry(Session session)
+        {
+            lock (sync)
+            {
+                EnsureCurrent(session); EnsureUnexpired(session);
+                // A stale/unchanged response must not create a midpoint retry loop. After three
+                // failed exchanges the original token simply reaches its existing hard expiry.
+                session.RenewAt = session.RenewalAttempts < 3 ? utcNow().AddSeconds(30) : null;
+            }
+        }
+
+        void EnsureUnexpired(Session session)
+        {
+            if (session.ExpiresAt.HasValue && utcNow() >= session.ExpiresAt.Value)
+                throw new ReceiverException("Expired", "The pairing session expired. Generate a new QR code.");
+        }
+
+        async Task JoinRoomsAsync(Session session, string[] rooms, bool updateLegacy = true)
         {
             // Authenticated API metadata establishes the allowlist before a newly joined room can send its first cue.
             lock (sync)
@@ -739,32 +879,39 @@ namespace LovenseConnector
                 await RoomActionAsync(session, "room:leave", removed).ConfigureAwait(false);
                 lock (sync) { EnsureCurrent(session); session.Joined.Remove(removed); }
             }
-            session.Legacy?.SetChannels(rooms);
+            if (updateLegacy) session.Legacy?.SetChannels(rooms);
         }
 
-        async Task MetadataLoopAsync(Session session)
+        async Task MetadataLoopAsync(Session session, WebSocket socket, int generation, CancellationToken cancellationToken)
         {
             // A slow metadata send must not stall cue scheduling or its output timeout.
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
-            while (await timer.WaitForNextTickAsync(session.Stop.Token).ConfigureAwait(false))
-                await FlushMetadataAsync(session).ConfigureAwait(false);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                await FlushMetadataAsync(session, socket, generation, cancellationToken).ConfigureAwait(false);
         }
 
-        async Task FlushMetadataAsync(Session session)
+        async Task FlushMetadataAsync(Session session, WebSocket socket, int generation, CancellationToken cancellationToken)
         {
             string[] pending;
             lock (sync)
             {
-                EnsureCurrent(session);
+                EnsureFecCurrent(session, generation);
                 long now = session.Clock.ElapsedMilliseconds;
                 pending = session.PendingMetadata.Where(room => !session.MetadataSentAt.TryGetValue(room, out long sent) || now - sent >= 250).ToArray();
             }
-            foreach (string room in pending) await SendRoomMetadataAsync(session, room).ConfigureAwait(false);
+            foreach (string room in pending) await SendRoomMetadataAsync(session, room, socket, generation, cancellationToken).ConfigureAwait(false);
         }
 
         async Task SendRoomMetadataAsync(Session session, string room)
         {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(session.Stop.Token);
+            WebSocket socket; int generation; CancellationToken lifetime;
+            lock (sync) { EnsureCurrent(session); socket = session.Socket; generation = session.FecGeneration; lifetime = session.FecStop.Token; }
+            await SendRoomMetadataAsync(session, room, socket, generation, lifetime).ConfigureAwait(false);
+        }
+
+        async Task SendRoomMetadataAsync(Session session, string room, WebSocket socket, int generation, CancellationToken cancellationToken)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(8));
             await session.SendLock.WaitAsync(deadline.Token).ConfigureAwait(false);
             try
@@ -772,7 +919,7 @@ namespace LovenseConnector
                 string[] names;
                 lock (sync)
                 {
-                    EnsureCurrent(session);
+                    EnsureFecCurrent(session, generation);
                     session.PendingMetadata.Remove(room);
                     if (room == session.WebsiteRoom || !session.AllowedRooms.Contains(room) || !session.Joined.Contains(room)) return;
                     names = session.DeviceNames.ToArray();
@@ -781,22 +928,25 @@ namespace LovenseConnector
                 string packet = "42/pubnub," + JsonSerializer.Serialize(new object[] { "message", new {
                     room, message_type = "webshare:session_metadata", data = new { room, devices = names }
                 } });
-                await session.Socket.SendAsync(Utf8.GetBytes(packet).AsMemory(), WebSocketMessageType.Text, true, deadline.Token).ConfigureAwait(false);
+                await socket.SendAsync(Utf8.GetBytes(packet).AsMemory(), WebSocketMessageType.Text, true, deadline.Token).ConfigureAwait(false);
             }
             finally { session.SendLock.Release(); }
         }
 
         async Task RoomActionAsync(Session session, string action, string room)
         {
+            WebSocket socket; int generation; CancellationToken lifetime;
+            lock (sync) { EnsureCurrent(session); socket = session.Socket; generation = session.FecGeneration; lifetime = session.FecStop.Token; }
             int id = Interlocked.Increment(ref session.NextAck);
             var ack = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             session.Acks[id] = ack;
             try
             {
-                await SendAsync(session, "42/pubnub," + id.ToString(CultureInfo.InvariantCulture) +
-                    JsonSerializer.Serialize(new object[] { action, new { room_name = room } }), session.Stop.Token).ConfigureAwait(false);
-                if (!await ack.Task.WaitAsync(TimeSpan.FromSeconds(8), session.Stop.Token).ConfigureAwait(false))
+                await SendAsync(session, socket, "42/pubnub," + id.ToString(CultureInfo.InvariantCulture) +
+                    JsonSerializer.Serialize(new object[] { action, new { room_name = room } }), lifetime).ConfigureAwait(false);
+                if (!await ack.Task.WaitAsync(TimeSpan.FromSeconds(8), lifetime).ConfigureAwait(false))
                     throw new ReceiverException("Rejected", "The website did not authorize its video room. Generate a fresh QR code.");
+                lock (sync) EnsureFecCurrent(session, generation);
             }
             catch (TimeoutException) { throw new ReceiverException("Timeout", "The website did not confirm its video room. Pair again to retry."); }
             finally { session.Acks.TryRemove(id, out _); }
@@ -891,6 +1041,24 @@ namespace LovenseConnector
             return null;
         }
 
+        internal static (DateTimeOffset ExpiresAt, DateTimeOffset RenewAt)? JwtRenewal(string token)
+        {
+            try
+            {
+                string[] pieces = token.Split('.'); if (pieces.Length != 3) return null;
+                string payload = pieces[1].Replace('-', '+').Replace('_', '/');
+                payload += new string('=', (4 - payload.Length % 4) % 4);
+                using var data = JsonDocument.Parse(Convert.FromBase64String(payload), new JsonDocumentOptions { MaxDepth = 8 });
+                if (!FeelConnectProtocol.TryNumber(data.RootElement, "iat", out double issued) ||
+                    !FeelConnectProtocol.TryNumber(data.RootElement, "exp", out double expiry) || issued >= expiry ||
+                    issued != Math.Truncate(issued) || expiry != Math.Truncate(expiry)) return null;
+                var start = DateTimeOffset.FromUnixTimeSeconds(checked((long)issued));
+                var end = DateTimeOffset.FromUnixTimeSeconds(checked((long)expiry));
+                return (end, start.AddTicks((end - start).Ticks / 2));
+            }
+            catch { return null; }
+        }
+
         static async Task<WebSocket> ConnectSocketAsync(CancellationToken cancellationToken)
         {
             var socket = new ClientWebSocket();
@@ -898,11 +1066,11 @@ namespace LovenseConnector
             catch { socket.Dispose(); throw; }
         }
 
-        async Task SendAsync(Session session, string packet, CancellationToken cancellationToken)
+        async Task SendAsync(Session session, WebSocket socket, string packet, CancellationToken cancellationToken)
         {
             byte[] bytes = Utf8.GetBytes(packet);
             await session.SendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try { await session.Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false); }
+            try { await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false); }
             finally { session.SendLock.Release(); }
         }
 
@@ -946,6 +1114,11 @@ namespace LovenseConnector
         {
             if (!ReferenceEquals(current, session) || session.Stop.IsCancellationRequested) throw new OperationCanceledException();
         }
+        void EnsureFecCurrent(Session session, int generation)
+        {
+            EnsureCurrent(session);
+            if (session.FecGeneration != generation || session.FecStop.IsCancellationRequested) throw new OperationCanceledException();
+        }
         void PublishStatus(Session session, string phase, string message, bool connected)
         {
             lock (sync) { EnsureCurrent(session); EmitStatusLocked(session, phase, message, connected); }
@@ -978,6 +1151,7 @@ namespace LovenseConnector
             public string[] DeviceNames;
             public readonly SemaphoreSlim PresenceLock = new(1, 1);
             public readonly CancellationTokenSource Stop;
+            public CancellationTokenSource FecStop;
             public readonly Stopwatch Clock = Stopwatch.StartNew();
             public readonly FeelConnectProtocol Protocol = new();
             public readonly SemaphoreSlim SendLock = new(1, 1);
@@ -992,8 +1166,10 @@ namespace LovenseConnector
             public string AccessToken = "", FecToken = "", WebsiteRoom = "";
             public WebSocket Socket;
             public FeelConnectLegacy Legacy;
-            public Task Worker, ReceiveTask, TimerTask, RefreshTask, MetadataTask;
-            public DateTimeOffset? ExpiresAt;
+            public Task Worker, ReceiveTask, TimerTask, RefreshTask, MetadataTask, RenewalTask;
+            public DateTimeOffset? ExpiresAt, RenewAt;
+            public int FecGeneration, RenewalAttempts;
+            public bool RotatingFec;
             public bool Accepting, PresenceRegistered, RefreshRequested;
             public bool UseFecWebsite = true;
             public bool Starting = true, Buffering;
@@ -1011,7 +1187,11 @@ namespace LovenseConnector
             public long Messages, LastRefreshMs;
             public int NextAck, HeartbeatMs = 45000;
             public Session(FeelConnectPairing pairing, string[] names, FeelConnectPlaybackMode playbackMode, CancellationToken cancellationToken)
-            { Pairing = pairing; DeviceNames = names; PlaybackMode = playbackMode; Stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); }
+            {
+                Pairing = pairing; DeviceNames = names; PlaybackMode = playbackMode;
+                Stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                FecStop = CancellationTokenSource.CreateLinkedTokenSource(Stop.Token);
+            }
         }
 
         sealed class ReceiverException : Exception

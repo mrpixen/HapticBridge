@@ -92,7 +92,7 @@ namespace LovenseConnector
         public int Ceiling=20;
     }
 
-    internal sealed class Playback
+    internal sealed partial class Playback
     {
         readonly ICommandLink link;
         readonly int[] channels;
@@ -106,7 +106,7 @@ namespace LovenseConnector
         public event Action<int,int,string> Changed;
         public event Action<string> Error;
         public Playback(ICommandLink link,int[] channels) { this.link=link; this.channels=channels; foreach(int c in channels) { sent[c]=0; revisions[c]=0; } }
-        public bool Running { get { lock(sync) return jobs.Count>0 || preset!=null; } }
+        public bool Running { get { lock(sync) return jobs.Count>0 || orderedMotors.Count>0 || preset!=null; } }
         public string MotorCommand(int channel,int level)
         {
             if(!channels.Contains(channel)) throw new ArgumentException("This motor is not supported by the selected toy.");
@@ -115,30 +115,30 @@ namespace LovenseConnector
         }
         void Emit(int channel,int level,string state) { if(Changed!=null) Changed(channel,level,state); }
         public int Level(int channel) { lock(sync) return sent.ContainsKey(channel)?sent[channel]:0; }
-        public bool Active(int channel) { lock(sync) return jobs.ContainsKey(channel); }
-        public bool UpdateSteady(int channel,int level,int durationMs,int transitionMs=0)
+        public bool Active(int channel) { lock(sync) return jobs.ContainsKey(channel)||orderedMotors.ContainsKey(channel); }
+        public bool UpdateSteady(int channel,int level,int durationMs,int transitionMs=0,Func<bool> isCurrent=null)
         {
             MotorCommand(channel,level); if(durationMs<0||durationMs>3600000) throw new ArgumentOutOfRangeException("durationMs");
             if(transitionMs<0||transitionMs>10000) throw new ArgumentOutOfRangeException("transitionMs");
-            lock(sync) { MotorJob job; if(jobs.TryGetValue(channel,out job)&&job.Spec.mode=="Steady") { job.Spec.high=level; job.Spec.durationMs=durationMs; job.Spec.transitionMs=transitionMs; job.Renewed.Restart(); return true; } return false; }
+            lock(sync) { if(isCurrent!=null&&!isCurrent())return false;MotorJob job; if(jobs.TryGetValue(channel,out job)&&job.Spec.mode=="Steady") { job.Spec.high=level; job.Spec.durationMs=durationMs; job.Spec.transitionMs=transitionMs; job.Renewed.Restart(); return true; } return false; }
         }
         public void LiveLevel(int channel,int level) { MotorCommand(channel,level); lock(sync) { MotorJob job; if(jobs.TryGetValue(channel,out job) && job.Spec.mode=="Steady") job.Spec.high=level; } }
         public void Ceiling(int channel,int level) { MotorCommand(channel,level); lock(sync) { MotorJob job; if(jobs.TryGetValue(channel,out job)) job.Ceiling=level; } }
-        public async Task Start(int channel,PatternSpec spec,int ceiling,Stopwatch sharedClock=null)
+        public async Task Start(int channel,PatternSpec spec,int ceiling,Stopwatch sharedClock=null,Func<bool> isCurrent=null)
         {
             spec.Validate(); MotorCommand(channel,0);
             if(ceiling<0||ceiling>20) throw new ArgumentOutOfRangeException("ceiling");
             int generation,revision;
-            lock(sync) { if(stopping>0) return; generation=epoch; revision=++revisions[channel]; }
+            lock(sync) { if(stopping>0||(isCurrent!=null&&!isCurrent())) return; InvalidateOrdered(channel); generation=epoch; revision=++revisions[channel]; }
             await controls.WaitAsync();
             try
             {
-                lock(sync) if(generation!=epoch || revision!=revisions[channel]) return;
+                lock(sync) if(generation!=epoch || revision!=revisions[channel] || (isCurrent!=null&&!isCurrent())) return;
                 await StopPreset();
                 MotorJob job;
                 lock(sync)
                 {
-                    if(generation!=epoch || revision!=revisions[channel]) return;
+                    if(generation!=epoch || revision!=revisions[channel] || (isCurrent!=null&&!isCurrent())) return;
                     MotorJob previous; if(jobs.TryGetValue(channel,out previous)) previous.Cancel.Cancel();
                     job=new MotorJob { Spec=spec, Ceiling=ceiling }; if(sharedClock!=null) job.Clock=sharedClock; jobs[channel]=job;
                 }
@@ -198,7 +198,7 @@ namespace LovenseConnector
         public async Task Stop(int channel)
         {
             MotorCommand(channel,0);
-            lock(sync) { revisions[channel]++; MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
+            lock(sync) { InvalidateOrdered(channel); revisions[channel]++; MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
             await controls.WaitAsync().ConfigureAwait(false);
             try { await StopPreset().ConfigureAwait(false); await link.Command(MotorCommand(channel,0)).ConfigureAwait(false); lock(sync) sent[channel]=0; Emit(channel,0,"Stopped"); }
             catch { lock(sync) sent[channel]=-1; Emit(channel,-1,"Stop unconfirmed"); throw; }
@@ -206,7 +206,7 @@ namespace LovenseConnector
         }
         public void CancelAll()
         {
-            lock(sync) { epoch++; var previous=jobs.Values.ToArray(); jobs.Clear(); var oldPreset=preset; preset=null; foreach(var job in previous) job.Cancel.Cancel(); if(oldPreset!=null) oldPreset.Cancel(); }
+            lock(sync) { epoch++; foreach(var channel in orderedMotors.Keys.ToArray()) InvalidateOrdered(channel); orderedQueue.Clear(); orderedZeros.Clear(); var previous=jobs.Values.ToArray(); jobs.Clear(); var oldPreset=preset; preset=null; foreach(var job in previous) job.Cancel.Cancel(); if(oldPreset!=null) oldPreset.Cancel(); }
         }
         public async Task StopAll()
         {

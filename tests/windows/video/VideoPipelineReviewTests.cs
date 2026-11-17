@@ -175,6 +175,58 @@ internal static class VideoPipelineReviewTests
             using var liveCue = JsonDocument.Parse("{\"ver\":2,\"percents\":[35],\"src\":\"synthetic-browser\"}");
             await Push(liveCue.RootElement);
             await Until(() => Get<TextBlock>(app, "feelValue").Text == "35%", "live packet supplies a known signal without enabling output");
+            int discarded = motors.Snapshot().Length;
+            await Invoke(app, "ToggleFeelOutput");await PumpFor(150);
+            Check(!motors.Snapshot().Skip(discarded).Any(IsNonzero), "enabling after a discarded V2 packet never replays its final percentage");
+            routes[0].Gain.Value=100;routes[1].Gain.Value=200;
+            foreach(string samples in new[]{"[25,0]","[0,100,0]","[25,50,0]"})
+            {
+                int baseline=motors.Snapshot().Length;
+                using var batch=JsonDocument.Parse("{\"ver\":2,\"percents\":"+samples+",\"src\":\"synthetic-browser\"}");
+                await Push(batch.RootElement);
+                double[] values=batch.RootElement.GetProperty("percents").EnumerateArray().Select(v=>v.GetDouble()).ToArray();
+                await Until(()=>motors.Snapshot().Length>=baseline+values.Length*2,"actual input event sends every V2 value through both WPF routes");
+                var writes=motors.Snapshot().Skip(baseline).ToArray();
+                Check(writes.Where(c=>c.StartsWith("Vibrate1:")).SequenceEqual(values.Select(v=>"Vibrate1:"+(int)Math.Round(v/5)+";")),"actual V2 motor one sequence is preserved");
+                Check(writes.Where(c=>c.StartsWith("Vibrate2:")).SequenceEqual(values.Select(v=>"Vibrate2:"+Math.Min(20,(int)Math.Round(v/2.5))+";")),"actual V2 motor two applies independent gain");
+            }
+            {
+                int baseline=motors.Snapshot().Length;
+                var protocol=new FeelConnectProtocol();protocol.SetRooms(new[]{"demo-room"});
+                using var json=JsonDocument.Parse("{\"room\":\"demo-room\",\"data\":{\"ver\":2,\"percents\":[25,50,0]}}");
+                var output=protocol.Accept(json.RootElement,100,1700000000000);
+                // Deliberately hold this dispatcher: output admission and device
+                // writes must not rely on its pending cosmetic update callback.
+                var delivered=Task.Run(()=>Call(app,"ReceiveFeelOutput",output));
+                Check(delivered.Wait(1000),"input callback does not wait for a busy WPF dispatcher");
+                var limit=Stopwatch.StartNew();while(motors.Snapshot().Length<baseline+6&&limit.ElapsedMilliseconds<1000)Thread.Sleep(5);
+                Check(motors.Snapshot().Length==baseline+6,"entire batch reaches writer while the WPF dispatcher is occupied");
+            }
+            {
+                using var positive=JsonDocument.Parse("{\"ver\":2,\"percents\":[25],\"src\":\"synthetic-browser\"}");
+                await Push(positive.RootElement);
+                await Until(()=>Get<double>(app,"feelPercent")==25&&player.Level(1)==5,"positive final batch is displayed before Stop race");
+                int baseline=motors.Snapshot().Length;
+                var stopped=new FeelConnectOutput(0,"Cue timeout",true);
+                Check(Task.Run(()=>Call(app,"ReceiveFeelOutput",stopped)).Wait(1000),"Stop ingress completes while WPF dispatcher is occupied");
+                Check(Invoke(app,"FeelTick").Wait(1000),"stale positive UI state cannot enter scalar playback after Stop ingress");
+                Thread.Sleep(30);
+                Check(!motors.Snapshot().Skip(baseline).Any(IsNonzero),"batch timeout cannot resurrect its final scalar percentage");
+                await Until(()=>Get<FeelConnectOutput>(app,"feelLatestOutput")==stopped,"Stop display catches up after blocked dispatcher");
+
+                var scalar=new FeelConnectOutput(75,"Video cues v3",false);
+                Call(app,"ReceiveFeelOutput",scalar);
+                await Until(()=>Get<FeelConnectOutput>(app,"feelLatestOutput")==scalar,"scalar signal ready for delayed Start race");
+                var controlGate=Get<SemaphoreSlim>(player,"controls");await controlGate.WaitAsync();
+                baseline=motors.Snapshot().Length;
+                var pending=Invoke(app,"FeelTick");
+                Check(!pending.IsCompleted,"sampled Start is held behind control gate");
+                Check(Task.Run(()=>Call(app,"ReceiveFeelOutput",new FeelConnectOutput(0,"Video stopped",true))).Wait(1000),"new stop invalidates input before delayed UI refresh");
+                controlGate.Release();await pending;
+                Check(!motors.Snapshot().Skip(baseline).Any(IsNonzero),"waiting sampled Start never revives scalar input older than Stop");
+            }
+            await Invoke(app,"DisarmFeelConnect");
+            await Push(liveCue.RootElement);
             await Until(() => Get<FeelConnectOutput>(app, "feelLatestOutput")?.Kind == "Cue timeout", "production freshness timeout reaches the UI", 7500);
             Check(Get<TextBlock>(app, "feelValue").Text == "—", "timed-out signal is unknown rather than a fabricated zero cue");
             Check(Get<TextBlock>(app, "feelCount").Text == "Video updates timed out", "timeout has a specific recovery status");
