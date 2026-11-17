@@ -20,6 +20,7 @@ internal static class FeelConnectTests
     {
         PairingAndPackets();
         ImmediateAndRoomIsolation();
+        ModernFormats();
         TimedPlaybackAndSeek();
         TipPatterns();
         InvalidAndBoundedInput();
@@ -28,8 +29,17 @@ internal static class FeelConnectTests
         await CancellationAndStaleSession();
         await ExpiredSession();
         await RoomRefresh();
+        await RoomRefreshFailure();
         await RoomCreatedDuringPresence();
+        await FirstCueDuringRefresh();
+        await RemovedBufferedRoomAndPublisherLeave();
         await InvalidTransportStops();
+        await HybridRouting();
+        await TransportDiagnostics();
+        await PayloadShapeDiagnostics();
+        await DeviceRegistrationUpdates();
+        await PlaybackModesAndReconnect();
+        await PlaybackModeCancellation();
         Console.WriteLine("FeelConnect: " + assertions + " assertions passed (synthetic offline fixtures).");
     }
 
@@ -85,7 +95,9 @@ internal static class FeelConnectTests
         Assert(p.Tick(1099) == null, "cue does not run early");
         Near(50, p.Tick(1100).Percent, "server timestamp delay compensated");
         Near(100, p.Tick(1400).Percent, "subtitle4 reaches100 percent");
-        Assert(p.Tick(2900).IsStop, "final cue bounded watchdog");
+        Assert(p.Tick(2900) == null && p.Percent == 100, "sparse video window holds its final value until the next chunk");
+        Assert(p.Tick(75900).IsStop, "missing next video chunk expires its bounded lease");
+        p = Decoder();
         Near(25, Accept(p, "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":1},{\"time\":1000,\"subtitle\":4}]}", 4000).Percent, "first batch");
         Near(50, Accept(p, "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":10000,\"subtitle\":2},{\"time\":10200,\"subtitle\":0}]}", 4100).Percent, "seek replaces cue queue");
         Assert(p.Tick(4300).IsStop, "seek replacement zero");
@@ -114,6 +126,18 @@ internal static class FeelConnectTests
         Assert(Accept(p, "{\"strength\":100,\"duration\":1,\"pattern\":{\"0\":1,\"0.001\":2}}", 5100, messageType: "website:tip") == null, "unbounded pattern rate rejected");
         Assert(Accept(p, "{\"strength\":100,\"duration\":3600,\"pattern\":{\"0\":0,\"0.1\":100}}", 5100, messageType: "website:tip") == null, "too many repeated cues rejected");
         Assert(Accept(p, "{\"strength\":0,\"duration\":10}", 5200, messageType: "website:tip").IsStop, "zero tip stops");
+    }
+
+    static void ModernFormats()
+    {
+        var p = Decoder(); p.TargetUser = "fixture-user";
+        Near(65, Accept(p, "{\"what\":\"device_percent\",\"payload\":65,\"target\":\"fixture-user\"}", 100, messageType: "device:position").Percent, "modern direct percentage");
+        Assert(Accept(p, "{\"what\":\"device_percent\",\"payload\":100,\"target\":\"different-user\"}", 110, messageType: "device:position") == null, "modern command to another target rejected");
+        Assert(Accept(p, "{\"what\":\"device_percent\",\"payload\":101,\"target\":\"fixture-user\"}", 110, messageType: "device:position") == null, "modern out-of-range payload rejected");
+        Assert(Accept(p, "{\"what\":\"device_percent\",\"payload\":0,\"target\":\"fixture-user\"}", 120, messageType: "device:position").IsStop, "modern explicit zero stops");
+        Near(75, Accept(p, "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":3}]} ", 200, messageType: "room:play").Percent, "modern room play uses verified v3 format");
+        Assert(Accept(p, "{\"ver\":3,\"type\":\"stop\"}", 300, messageType: "room:stop").IsStop, "modern room stop clears timed queue");
+        Assert(p.Tick(10000) == null && p.Percent == 0, "modern stopped queue cannot restart");
     }
 
     static void InvalidAndBoundedInput()
@@ -247,16 +271,37 @@ internal static class FeelConnectTests
         var frames = new ConcurrentQueue<FeelConnectOutput>(); var statuses = new ConcurrentQueue<FeelConnectStatus>();
         client.OutputChanged += frames.Enqueue; client.StatusChanged += statuses.Enqueue;
         await client.PairAsync("synthetic-refresh-code", Array.Empty<string>());
-        fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":2,\"percents\":[60]}"));
-        await Until(() => frames.Any(x => x.Percent == 60));
+        int initialStatuses = statuses.Count;
+        fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":2},{\"time\":2000,\"subtitle\":4}]}"));
+        await Until(() => frames.Any(x => x.Percent == 50));
         fixture.VideoRoom = "replacement-video";
         fixture.Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
         await Until(() => fixture.Joined.Contains("replacement-video") && !fixture.Joined.Contains("test-video") && statuses.Last().Connected);
-        Assert(frames.Last().IsStop && statuses.Any(x => x.Phase == "Connecting" && x.Message.Contains("Updating")), "room changes zero output and revoke output ownership");
+        Assert(frames.Last().IsStop && statuses.Any(x => x.Phase == "Refreshing" && x.Connected), "room changes clear output while remaining paired");
+        Assert(statuses.Skip(initialStatuses).All(x => x.Connected), "valid room refresh preserves the consumer's enabled-output choice");
+        await Task.Delay(2100);
+        Assert(client.CurrentPercent == 0 && !frames.Any(x => x.Percent == 100), "old queued cue cannot resume after room refresh");
         fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":2,\"percents\":[90]}"));
         fixture.Socket.Push(Frame("replacement-video", "room:message", "{\"ver\":2,\"percents\":[30]}"));
         await Until(() => frames.Any(x => x.Percent == 30));
         Assert(!frames.Any(x => x.Percent == 90), "removed room cannot drive output");
+    }
+
+    static async Task RoomRefreshFailure()
+    {
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        var frames = new ConcurrentQueue<FeelConnectOutput>();
+        var statuses = new ConcurrentQueue<FeelConnectStatus>();
+        client.OutputChanged += frames.Enqueue; client.StatusChanged += statuses.Enqueue;
+        await client.PairAsync("synthetic-failed-refresh-code", Array.Empty<string>());
+        fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":2,\"percents\":[65]}"));
+        await Until(() => client.CurrentPercent == 65);
+        fixture.RejectRoom = true; fixture.VideoRoom = "replacement-video";
+        fixture.Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
+        await Until(() => !statuses.Last().Connected);
+        Assert(frames.Last().IsStop && client.CurrentPercent == 0, "failed room refresh disconnects and clears output");
     }
 
     static async Task InvalidTransportStops()
@@ -284,33 +329,342 @@ internal static class FeelConnectTests
         var fixture = new ServiceFixture { ChangeRoomDuringPresence = true };
         using var http = new HttpClient(fixture);
         await using var client = new FeelConnectClient(http, fixture.Connect);
-        var frames = new ConcurrentQueue<FeelConnectOutput>();
-        client.OutputChanged += frames.Enqueue;
+        var frames = new ConcurrentQueue<FeelConnectOutput>(); bool connected = false; int earlyNonzero = 0;
+        client.StatusChanged += status => connected = status.Connected;
+        client.OutputChanged += output => { frames.Enqueue(output); if (!connected && output.Percent > 0) Interlocked.Increment(ref earlyNonzero); };
         await client.PairAsync("synthetic-startup-code", Array.Empty<string>());
         await Until(() => fixture.Joined.Contains("startup-video") && !fixture.Joined.Contains("test-video"));
-        Assert(!frames.Any(x => x.Percent > 0), "early cues ignored during presence registration");
+        Assert(earlyNonzero == 0, "startup cue remains buffered until pairing acknowledges readiness");
+        Assert(frames.Any(x => x.Percent == 100), "fresh startup cue retained for receive-only preview");
         await Task.Delay(50);
         fixture.Socket.Push(Frame("startup-video", "room:message", "{\"ver\":2,\"percents\":[40]}"));
         await Until(() => frames.Any(x => x.Percent == 40));
         Assert(frames.Any(x => x.Percent == 40), "room creation during presence is retained and joined");
     }
 
+    static async Task FirstCueDuringRefresh()
+    {
+        var fixture = new ServiceFixture { FastCueDuringJoin = true };
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        bool connected = false, refreshing = false; int premature = 0;
+        client.StatusChanged += status => { connected = status.Connected; refreshing = status.Phase == "Refreshing"; };
+        client.OutputChanged += output => { if ((!connected || refreshing) && output.Percent > 0) Interlocked.Increment(ref premature); };
+        await client.PairAsync("synthetic-refresh-buffer-code", Array.Empty<string>());
+        fixture.VideoRoom = "replacement-video";
+        fixture.Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
+        await Until(() => client.CurrentPercent == 36);
+        Assert(premature == 0 && client.Diagnostics.AcceptedCues == 1, "first new-room cue before join ACK survives refresh without premature output");
+    }
+
+    static async Task RemovedBufferedRoomAndPublisherLeave()
+    {
+        var fixture = new ServiceFixture { OldCueDuringRoomRefresh = true };
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        var frames = new ConcurrentQueue<FeelConnectOutput>(); client.OutputChanged += frames.Enqueue;
+        await client.PairAsync("synthetic-removed-buffer-code", Array.Empty<string>());
+        fixture.VideoRoom = "replacement-video";
+        fixture.Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
+        await Until(() => fixture.Joined.Contains("replacement-video") && client.Diagnostics.Connected);
+        await Task.Delay(80);
+        Assert(client.CurrentPercent == 0 && !frames.Any(x => x.Percent > 0), "buffered cue from a removed room is never replayed");
+        await client.DisconnectAsync();
+
+        var leaving = new ServiceFixture { LeaveAfterBufferedCue = true };
+        using var leavingHttp = new HttpClient(leaving);
+        await using var leavingClient = new FeelConnectClient(leavingHttp, leaving.Connect);
+        var leavingFrames = new ConcurrentQueue<FeelConnectOutput>(); leavingClient.OutputChanged += leavingFrames.Enqueue;
+        await leavingClient.PairAsync("synthetic-leaving-buffer-code", Array.Empty<string>());
+        Assert(leavingClient.CurrentPercent == 0 && !leavingFrames.Any(x => x.Percent > 0), "publisher leave cancels its buffered play before ready");
+        Assert(leavingClient.Diagnostics.AcceptedCues == 1, "presence stop does not count as a new cue");
+    }
+
     static string Frame(string room, string type, string data) => "42/pubnub,[\"message\",{\"room\":" + JsonSerializer.Serialize(room) + ",\"message_type\":" + JsonSerializer.Serialize(type) + ",\"data\":" + data + "}]";
+    static async Task HybridRouting()
+    {
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect, enableLegacy: true);
+        var frames = new ConcurrentQueue<FeelConnectOutput>(); client.OutputChanged += frames.Enqueue;
+        await client.PairAsync("synthetic-hybrid-code", Array.Empty<string>());
+        Assert(fixture.LegacyHeartbeatCount > 0 && fixture.LegacySubscribeCount > 0, "hybrid waits for legacy presence and subscription");
+        Assert(http.Timeout == Timeout.InfiniteTimeSpan, "longpoll is not interrupted by short HTTP client timeout");
+        fixture.LegacyPush("test-website", "{\"what\":\"device_speed\",\"strength\":42}");
+        fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":2,\"percents\":[81]}"));
+        await Task.Delay(80);
+        Assert(!frames.Any(x => x.Percent == 42) && frames.Any(x => x.Percent == 81), "website migration is scoped separately while authorized video works over FEC");
+        fixture.Socket.Push(Frame("test-website", "website:device_speed", "{\"strength\":75}"));
+        await Until(() => frames.Any(x => x.Percent == 75));
+        fixture.LegacyPush("test-video", "{\"ver\":2,\"percents\":[55]}");
+        await Until(() => frames.Any(x => x.Percent == 55));
+        Assert(frames.Any(x => x.Percent == 75) && frames.Any(x => x.Percent == 55), "FEC website and legacy video both route through decoder");
+        fixture.LegacyPush("test-video", "{\"ver\":3,\"type\":\"stop\"}");
+        await Until(() => frames.Last().IsStop);
+        Assert(client.CurrentPercent == 0, "legacy stop clears the live output snapshot");
+        fixture.Socket.Push(Frame("test-video", "device:position", "{\"what\":\"device_percent\",\"payload\":63}"));
+        await Until(() => client.CurrentPercent == 63);
+        Assert(frames.Any(x => x.Percent == 63), "explicit modern position bypasses the legacy-video migration flag");
+        fixture.Socket.Push(Frame("test-video", "room:play", "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":4}]}"));
+        await Until(() => client.CurrentPercent == 100);
+        Assert(frames.Any(x => x.Percent == 100), "explicit modern timed play bypasses the legacy-video migration flag");
+        fixture.Socket.Push(Frame("test-video", "room:stop", "{\"ver\":3,\"type\":\"stop\"}"));
+        await Until(() => client.CurrentPercent == 0);
+        Assert(frames.Last().IsStop, "explicit modern stop clears the timed cue under legacy-video migration flags");
+        var diagnostics = client.Diagnostics;
+        Assert(diagnostics.VideoRooms == 1 && diagnostics.FecMessages > 0 && diagnostics.LegacyMessages > 0 && diagnostics.AcceptedCues >= 3, "safe diagnostics expose both transports and accepted cues");
+        string diagnosticJson = JsonSerializer.Serialize(diagnostics);
+        Assert(diagnosticJson.Contains("\"videoRooms\"") && !diagnosticJson.Contains("test-video") && !diagnosticJson.Contains("synthetic-") && !diagnosticJson.Contains("fixture-publisher"), "diagnostics serialize aggregate fields without private identifiers");
+        await client.DisconnectAsync();
+        Assert(fixture.LegacyLeaveCount > 0 && fixture.PresenceOnline == 0, "hybrid disconnect withdraws both presence transports");
+    }
     static async Task Until(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
+    static async Task TransportDiagnostics()
+    {
+        long bounded = 999_999_999;
+        FeelConnectCounters.Increment(ref bounded); FeelConnectCounters.Increment(ref bounded);
+        Assert(bounded == 1_000_000_000, "diagnostic counters saturate without overflow");
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect, enableLegacy: true);
+        var frames = new ConcurrentQueue<FeelConnectOutput>(); client.OutputChanged += frames.Enqueue;
+        await client.PairAsync("synthetic-diagnostics-code", Array.Empty<string>());
+        string stamp = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 10000).ToString();
+        string oldStamp = ((DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 10000) * 10000).ToString();
+        string Legacy(string room, object data, string published, int type = 0) => JsonSerializer.Serialize(new { c = room, d = data, p = new { t = published }, e = type });
+        var nonzero = new { ver = 2, percents = new[] { 99 } };
+        fixture.LegacyMessages.Writer.TryWrite(Legacy("test-video", "private-serialized-payload", stamp));
+        fixture.LegacyMessages.Writer.TryWrite(Legacy("private-outside-room", nonzero, stamp));
+        fixture.LegacyMessages.Writer.TryWrite(Legacy("test-video", nonzero, stamp, 2));
+        fixture.LegacyMessages.Writer.TryWrite("{\"c\":\"test-video\",\"d\":{\"ver\":2,\"percents\":[99]}}");
+        fixture.LegacyMessages.Writer.TryWrite(Legacy("test-video", nonzero, oldStamp));
+        string valid = Legacy("test-video", new { ver = 2, percents = new[] { 27 } }, stamp);
+        fixture.LegacyMessages.Writer.TryWrite(valid);
+        fixture.LegacyMessages.Writer.TryWrite(valid);
+        await Until(() => client.Diagnostics.Transport.LegacyDroppedReplay == 1);
+        var legacy = client.Diagnostics.Transport;
+        Assert(legacy.LegacyRawFrames == 7 && legacy.LegacyDroppedShape == 1 && legacy.LegacyDroppedScope == 1 &&
+            legacy.LegacyDroppedType == 1 && legacy.LegacyDroppedTime == 1 && legacy.LegacyDroppedStale == 1 && legacy.LegacyDroppedReplay == 1,
+            "raw legacy traffic reports each rejection category before decoder filtering");
+        Assert(client.Diagnostics.AcceptedCues == 1 && client.CurrentPercent == 27 && !frames.Any(x => x.Percent == 99),
+            "diagnostics preserve all rejection and replay filters");
+        fixture.Socket.Push("42/pubnub,[\"device:position\",{\"payload\":99}]");
+        fixture.Socket.Push("42/pubnub,[\"system:presence\",{\"action\":\"join\"}]");
+        fixture.Socket.Push("42/pubnub,[\"private-unknown-event\",{\"private-key\":\"private-value\"}]");
+        fixture.Socket.Push("42/pubnub,[\"message\",{},{}]");
+        fixture.Socket.Push(Frame("test-video", "webshare:session_update", "{\"devices\":[]}"));
+        fixture.Socket.Push(Frame("test-video", "private-unknown-message", "{\"percents\":[99]}"));
+        fixture.Socket.Push(Frame("test-video", "private-unknown-message", "\"private-payload-value\""));
+        await Until(() => client.Diagnostics.Transport.UnknownNonObjectDataMessages == 1);
+        var transport = client.Diagnostics.Transport;
+        Assert(transport.FecOtherEvents == 4 && transport.FecControlEvents == 1 && transport.FecSessionEvents == 1 && transport.FecUnknownEvents == 2,
+            "non-message socket events use only fixed diagnostic categories");
+        Assert(transport.SessionMetadataMessages == 1 && transport.UnknownObjectDataMessages == 2 &&
+            transport.UnknownNonObjectDataMessages == 1 && transport.UnknownCueShapeMessages == 1,
+            "unknown envelope shapes distinguish metadata and control-shaped data without values");
+        Assert(client.Diagnostics.AcceptedCues == 1 && client.CurrentPercent == 27,
+            "diagnostic-only events cannot activate or replace an output");
+        string json = JsonSerializer.Serialize(client.Diagnostics);
+        Assert(json.Contains("\"legacyRawFrames\":7") && json.Contains("\"fecOtherEvents\":4") &&
+            !json.Contains("private-") && !json.Contains("test-video") && !json.Contains("synthetic-") && !json.Contains(stamp),
+            "transport diagnostic serialization contains no private event, payload, scope, token or timestamp values");
+    }
+
+    static async Task PayloadShapeDiagnostics()
+    {
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        var frames = new ConcurrentQueue<FeelConnectOutput>(); client.OutputChanged += frames.Enqueue;
+        await client.PairAsync("synthetic-shape-code", Array.Empty<string>());
+        void Envelope(object envelope) => fixture.Socket.Push("42/pubnub,[\"message\"," + JsonSerializer.Serialize(envelope) + "]");
+        void Data(object data) => Envelope(new { room = "test-video", message_type = "private-kind", data });
+        Envelope(new { room = "test-video", message_type = "private-kind" });
+        Data(null); Data("private-plain-data"); Data(new[] { 99 }); Data(99); Data(true);
+        Envelope(new { room = "test-video", message_type = "private-kind", ver = 2, percents = new[] { 99 } });
+        Data("{\"ver\":2,\"percents\":[99],\"private-value\":\"private-marker\"}");
+        Data("{\"notice\":\"private-marker\"}");
+        Data("{private-malformed-json");
+        Data("{\"percents\":[99],\"private-value\":\"" + new string('x', 17000) + "\"}");
+        Envelope("{\"room\":\"private-room\",\"data\":{\"ver\":2,\"percents\":[99]}}");
+        Envelope(new[] { 99 }); Envelope(null);
+        Data("{\"private-value\":" + new string('[', 17) + "0" + new string(']', 17) + "}");
+        Envelope("private-plain-envelope");
+        await Until(() => client.Diagnostics.Transport.UnknownNonObjectDataMessages == 16);
+        var shape = client.Diagnostics.Transport;
+        Assert(shape.UnknownMissingDataMessages == 6 && shape.UnknownNullDataMessages == 1 &&
+            shape.UnknownStringDataMessages == 6 && shape.UnknownArrayDataMessages == 1 && shape.UnknownScalarDataMessages == 2,
+            "missing, null, string, array and scalar payload shapes are distinguished");
+        Assert(shape.UnknownNonObjectEnvelopeMessages == 4 && shape.UnknownJsonObjectEnvelopeMessages == 1,
+            "non-object outer envelopes distinguish a serialized object without routing it");
+        Assert(shape.UnknownEnvelopeCueShapeMessages == 1 && shape.UnknownJsonObjectDataMessages == 2 && shape.UnknownJsonCueShapeMessages == 2,
+            "control-shaped top-level and bounded serialized objects are counted without values");
+        Assert(client.Diagnostics.AcceptedCues == 0 && client.CurrentPercent == 0 && frames.All(x => x.IsStop),
+            "diagnostic shape inspection never interprets a payload as an active cue");
+        string json = JsonSerializer.Serialize(client.Diagnostics);
+        Assert(!json.Contains("private-") && !json.Contains("test-video") && !json.Contains("synthetic-"),
+            "nested serialized private values cannot enter diagnostics");
+    }
+
+    static async Task DeviceRegistrationUpdates()
+    {
+        var fixture = new ServiceFixture { WebsiteLabel = "\u202E\nFixture\t " + new string('x', 100) };
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        Assert(client.WebsiteName == "", "website label is empty before pairing");
+        await client.PairAsync("synthetic-device-update-code", Array.Empty<string>());
+        Assert(client.WebsiteName.Length == 80 && client.WebsiteName.StartsWith("Fixture ") &&
+            !client.WebsiteName.Any(c => char.IsControl(c) || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format),
+            "local website label is bounded and strips control/format characters");
+        Assert(!JsonSerializer.Serialize(client.Diagnostics).Contains("Fixture"), "website name stays outside numeric diagnostics");
+        await client.UpdateDevicesAsync(new[] { "Later device", "Second device", "Later device", null });
+        Assert(fixture.PresenceOnlineRequests == 2 && fixture.PresenceNames.SequenceEqual(new[] { "Later device", "Second device" }),
+            "devices connected after pairing refresh the existing server registration");
+        await client.UpdateDevicesAsync(new[] { "Second device", "Later device" });
+        Assert(fixture.PresenceOnlineRequests == 2, "unchanged device sets do not create repeated presence requests");
+        await client.UpdateDevicesAsync(Array.Empty<string>());
+        Assert(fixture.PresenceOnlineRequests == 3 && fixture.PresenceNames.Length == 0, "device removal clears advertised device list");
+        fixture.HoldDeviceUpdate = true;
+        Task activeUpdate = client.UpdateDevicesAsync(new[] { "Held device" });
+        await fixture.DeviceUpdateEntered.Task;
+        Task queuedUpdate = client.UpdateDevicesAsync(new[] { "Queued device" });
+        await client.DisconnectAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        foreach (Task task in new[] { activeUpdate, queuedUpdate })
+            try { await task; } catch (OperationCanceledException) { }
+        Assert(fixture.PresenceOnlineRequests == 4 && fixture.PresenceTransitions.Last() == 0 && fixture.PresenceOnline == 0,
+            "disconnect cancels active/queued updates and sends offline after all online requests");
+        await client.UpdateDevicesAsync(new[] { "Disconnected device" });
+        Assert(fixture.PresenceOnlineRequests == 4 && client.WebsiteName == "", "disconnected updates cannot reannounce online or retain website label");
+    }
+
+    static async Task PlaybackModesAndReconnect()
+    {
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect, true);
+        var outputs = new ConcurrentQueue<FeelConnectOutput>();
+        client.OutputChanged += outputs.Enqueue;
+        await client.PairAsync("feelapp://connect?code=synthetic-mode-code", new[] { "Initial device" });
+        Assert(client.Diagnostics.PlaybackMode == "timed", "timed playback remains the default");
+        AssertLegacyMode(fixture.LegacyHeartbeats.Last(), 3, "test-video");
+        AssertLegacyMode(fixture.LegacySubscriptions.First(), 3, "test-video");
+        string oldUuid = fixture.LegacyHeartbeats.Last().Uuid;
+        fixture.LegacyPush("test-video", "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":4},{\"time\":250,\"subtitle\":1}]}");
+        await Until(() => client.CurrentPercent == 100);
+        await client.UpdateDevicesAsync(new[] { "Later device" });
+        int boundary = outputs.Count;
+        fixture.VideoRoom = "replacement-video";
+        await client.ReconnectAsync(FeelConnectPlaybackMode.Live);
+        Assert(client.Diagnostics.Connected && client.Diagnostics.PlaybackMode == "live", "explicit reconnect selects live mode");
+        AssertLegacyMode(fixture.LegacyHeartbeats.Last(), 2, "replacement-video");
+        AssertLegacyMode(fixture.LegacySubscriptions.Last(), 2, "replacement-video");
+        Assert(fixture.LegacyHeartbeats.Last().Uuid != oldUuid && fixture.LegacyLeaves.Contains(oldUuid),
+            "mode reconnect leaves old presence and creates a new mobile UUID");
+        Assert(fixture.AuthKinds.Count == 2 && fixture.AuthKinds.All(kind => kind == "connection-code"),
+            "reconnect preserves connection-code exchange semantics");
+        Assert(fixture.PresenceNames.SequenceEqual(new[] { "Later device" }), "reconnect retains the latest connected device names");
+        await Task.Delay(300);
+        Assert(outputs.Skip(boundary).Any(output => output.IsStop) && outputs.Skip(boundary).All(output => output.Percent == 0),
+            "mode switch resets output and invalidates old queued cues");
+        Assert(!JsonSerializer.Serialize(client.Diagnostics).Contains("synthetic-mode-code"), "mode diagnostics contain no pairing value");
+
+        bool invalid = false;
+        try { await client.ReconnectAsync((FeelConnectPlaybackMode)99); } catch (ArgumentOutOfRangeException) { invalid = true; }
+        Assert(invalid && client.Diagnostics.Connected && client.Diagnostics.PlaybackMode == "live", "invalid reconnect mode preserves active session");
+        invalid = false;
+        try { await client.PairAsync("synthetic-invalid-mode", Array.Empty<string>(), playbackMode: (FeelConnectPlaybackMode)99); }
+        catch (ArgumentOutOfRangeException) { invalid = true; }
+        Assert(invalid && fixture.AuthKinds.Count == 2, "invalid pair mode is rejected before replacing the session");
+        using var canceled = new CancellationTokenSource(); canceled.Cancel();
+        try { await client.ReconnectAsync(FeelConnectPlaybackMode.Timed, canceled.Token); } catch (OperationCanceledException) { }
+        Assert(client.Diagnostics.Connected && client.Diagnostics.PlaybackMode == "live", "pre-canceled reconnect leaves existing mode alone");
+
+        await client.DisconnectAsync();
+        await client.PairAsync("synthetic-live-token", Array.Empty<string>(), playbackMode: FeelConnectPlaybackMode.Live);
+        AssertLegacyMode(fixture.LegacyHeartbeats.Last(), 2, "replacement-video");
+        Assert(fixture.AuthKinds.Last() == "token", "explicit live pairing supports ordinary QR tokens");
+        await client.DisconnectAsync();
+        invalid = false;
+        try { await client.ReconnectAsync(FeelConnectPlaybackMode.Timed); } catch (InvalidOperationException) { invalid = true; }
+        Assert(invalid, "disconnected client cannot reuse erased credentials");
+        invalid = false;
+        try { _ = new FeelConnectLegacy(http, new[] { "test-video" }, (_, _) => { }, CancellationToken.None, messageHandlerVersion: 1); }
+        catch (ArgumentOutOfRangeException) { invalid = true; }
+        Assert(invalid, "unsupported legacy handler version is rejected");
+    }
+
+    static void AssertLegacyMode((string Uuid, string State) request, int expected, string videoRoom)
+    {
+        using var state = JsonDocument.Parse(request.State);
+        Assert(state.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name)
+            .SequenceEqual(new[] { videoRoom, "test-website" }.OrderBy(name => name)), "mode advertises only currently authorized rooms");
+        Assert(state.RootElement.EnumerateObject().All(property => property.Value.GetProperty("messageHandlerVersion").GetInt32() == expected),
+            "chosen handler version is advertised on website and video channels");
+    }
+
+    static async Task PlaybackModeCancellation()
+    {
+        var fixture = new ServiceFixture();
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect, true);
+        await client.PairAsync("synthetic-cancel-mode", Array.Empty<string>());
+        fixture.DelayAuth = true;
+        fixture.AuthEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        Task switching = client.ReconnectAsync(FeelConnectPlaybackMode.Live, cancellation.Token);
+        await fixture.AuthEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        try { await switching; } catch (OperationCanceledException) { } catch (InvalidOperationException) { }
+        await client.DisconnectAsync();
+        Assert(!client.Diagnostics.Connected && client.CurrentPercent == 0 && fixture.ConnectionCount == 1,
+            "cancellation during mode exchange cannot restart old output or finish a new transport");
+
+        fixture.DelayAuth = false;
+        await client.PairAsync("synthetic-superseded-mode", Array.Empty<string>());
+        int authCount = fixture.AuthKinds.Count;
+        fixture.HoldLegacyLeave = true;
+        switching = client.ReconnectAsync(FeelConnectPlaybackMode.Live);
+        await fixture.LegacyLeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Task disconnecting = client.DisconnectAsync();
+        fixture.ReleaseLegacyLeave.TrySetResult();
+        bool superseded = false;
+        try { await switching; } catch (OperationCanceledException) { superseded = true; }
+        await disconnecting;
+        Assert(superseded && fixture.AuthKinds.Count == authCount && !client.Diagnostics.Connected,
+            "disconnect during old-session cleanup supersedes queued mode reconnect without reauthorization");
+    }
+
     sealed class ServiceFixture : HttpMessageHandler
     {
         public MemorySocket Socket;
-        public bool RejectAuth, RejectRoom, DelayAuth, Authenticated, ChangeRoomDuringPresence;
-        public int ConnectionCount, PresenceOnline = -1;
+        public bool RejectAuth, RejectRoom, DelayAuth, Authenticated, ChangeRoomDuringPresence, FastCueDuringJoin, OldCueDuringRoomRefresh, LeaveAfterBufferedCue;
+        public int ConnectionCount, PresenceOnline = -1, PresenceOnlineRequests;
+        public bool HoldDeviceUpdate;
+        public string WebsiteLabel = "Fixture";
+        public readonly ConcurrentQueue<int> PresenceTransitions = new();
+        public readonly TaskCompletionSource DeviceUpdateEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public long? TokenExpiry;
         public string[] PresenceNames = Array.Empty<string>();
         public string VideoRoom = "test-video";
         public HashSet<string> Joined = new(StringComparer.Ordinal);
+        public readonly Channel<string> LegacyMessages = Channel.CreateUnbounded<string>();
+        public int LegacyHeartbeatCount, LegacySubscribeCount, LegacyLeaveCount;
+        public readonly ConcurrentQueue<(string Uuid, string State)> LegacyHeartbeats = new(), LegacySubscriptions = new();
+        public readonly ConcurrentQueue<string> LegacyLeaves = new(), AuthKinds = new();
+        public bool HoldLegacyLeave;
+        public readonly TaskCompletionSource LegacyLeaveEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource ReleaseLegacyLeave = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        long legacySequence;
+        public void LegacyPush(string channel, string payload)
+        {
+            long stamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 10000 + Interlocked.Increment(ref legacySequence);
+            LegacyMessages.Writer.TryWrite("{\"c\":" + JsonSerializer.Serialize(channel) + ",\"i\":\"fixture-publisher\",\"p\":{\"t\":\"" + stamp + "\"},\"d\":" + payload + "}");
+        }
         public TaskCompletionSource AuthEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<WebSocket> Connect(CancellationToken token)
         {
@@ -331,14 +685,41 @@ internal static class FeelConnectTests
             using var data = JsonDocument.Parse(json);
             string action = data.RootElement[0].GetString(), room = data.RootElement[1].GetProperty("room_name").GetString();
             if (action == "room:join") Joined.Add(room); else if (action == "room:leave") Joined.Remove(room);
+            if (action == "room:join" && room == "replacement-video" && FastCueDuringJoin)
+                socket.Push(Frame(room, "room:message", "{\"ver\":2,\"percents\":[36]}"));
             socket.Push("43/pubnub," + id.Value + "[{\"ok\":" + (RejectRoom ? "false" : "true") + "}]");
         }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri.Host == "ps.pndsn.com")
+            {
+                Assert(request.Method == HttpMethod.Get && !request.RequestUri.AbsolutePath.Contains("publish", StringComparison.OrdinalIgnoreCase), "legacy transport never publishes");
+                var query = request.RequestUri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2))
+                    .Where(part => part.Length == 2).ToDictionary(part => part[0], part => Uri.UnescapeDataString(part[1]));
+                if (request.RequestUri.AbsolutePath.EndsWith("/heartbeat", StringComparison.Ordinal))
+                {
+                    LegacyHeartbeats.Enqueue((query["uuid"], query["state"]));
+                    Interlocked.Increment(ref LegacyHeartbeatCount); return Json("{\"status\":200}");
+                }
+                if (request.RequestUri.AbsolutePath.EndsWith("/leave", StringComparison.Ordinal))
+                {
+                    LegacyLeaves.Enqueue(query["uuid"]);
+                    Interlocked.Increment(ref LegacyLeaveCount);
+                    if (HoldLegacyLeave) { LegacyLeaveEntered.TrySetResult(); await ReleaseLegacyLeave.Task.WaitAsync(cancellationToken); }
+                    return Json("{\"status\":200}");
+                }
+                LegacySubscriptions.Enqueue((query["uuid"], query["state"]));
+                Interlocked.Increment(ref LegacySubscribeCount);
+                string message = request.RequestUri.Query.Contains("&tt=0&", StringComparison.Ordinal) ? "" : await LegacyMessages.Reader.ReadAsync(cancellationToken);
+                string cursor = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 10000).ToString();
+                return Json("{\"t\":{\"t\":\"" + cursor + "\",\"r\":1},\"m\":[" + message + "]}");
+            }
             Assert(request.RequestUri.Scheme == "https" && request.RequestUri.Host == "api.feel-app.com", "credentials restricted to API host");
             string path = request.RequestUri.AbsolutePath;
+            if (path.EndsWith("/firmware", StringComparison.Ordinal)) return Json("{\"FC3_APP_SOCKETIO_TIPS_WEBSITES_CHANNELS_code\":1,\"FC3_APP_SOCKETIO_VIDEO_WEBSITES_CHANNELS_code\":0}");
             if (path.Contains("/auth/", StringComparison.Ordinal) || path.Contains("/authconncode/", StringComparison.Ordinal))
             {
+                AuthKinds.Enqueue(path.Contains("/authconncode/", StringComparison.Ordinal) ? "connection-code" : "token");
                 AuthEntered.TrySetResult();
                 if (DelayAuth) await Task.Delay(Timeout.Infinite, cancellationToken);
                 if (RejectAuth) return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("sensitive upstream diagnostics") };
@@ -346,19 +727,43 @@ internal static class FeelConnectTests
                 if (TokenExpiry.HasValue) fec = "fixture." + Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"exp\":" + TokenExpiry.Value + "}")).TrimEnd('=').Replace('+', '-').Replace('/', '_') + ".signature";
                 return Json("{\"access_token\":\"synthetic-access-token\",\"fec_token\":" + JsonSerializer.Serialize(fec) + "}");
             }
-            if (path.Contains("/realtime/", StringComparison.Ordinal)) return Json("{\"pubnub_channel\":\"test-website\",\"partner_website\":\"Fixture\"}");
-            if (path.Contains("/myrooms/", StringComparison.Ordinal)) return Json("{\"rooms\":[{\"pubnub_channel\":" + JsonSerializer.Serialize(VideoRoom) + "}]}");
+            if (path.Contains("/realtime/", StringComparison.Ordinal)) return Json("{\"pubnub_channel\":\"test-website\",\"partner_website\":" + JsonSerializer.Serialize(WebsiteLabel) + "}");
+            if (path.Contains("/myrooms/", StringComparison.Ordinal))
+            {
+                if (OldCueDuringRoomRefresh && Socket != null && VideoRoom == "replacement-video")
+                {
+                    Socket.Push(Frame("test-video", "room:message", "{\"ver\":3,\"type\":\"play\",\"subtitles\":[{\"time\":0,\"subtitle\":4}]}"));
+                    await Task.Delay(50, cancellationToken);
+                }
+                return Json("{\"rooms\":[{\"pubnub_channel\":" + JsonSerializer.Serialize(VideoRoom) + "}]}");
+            }
             if (path.Contains("/presence2/", StringComparison.Ordinal))
             {
                 Assert(request.Method == HttpMethod.Put, "presence uses PUT");
                 using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken));
                 PresenceOnline = body.RootElement.GetProperty("online").GetInt32();
                 PresenceNames = body.RootElement.GetProperty("devices").EnumerateArray().Select(x => x.GetString()).ToArray();
+                PresenceTransitions.Enqueue(PresenceOnline);
+                if (PresenceOnline == 1)
+                {
+                    Interlocked.Increment(ref PresenceOnlineRequests);
+                    if (HoldDeviceUpdate)
+                    {
+                        DeviceUpdateEntered.TrySetResult();
+                        await Task.Delay(Timeout.Infinite, cancellationToken);
+                    }
+                }
                 if (PresenceOnline == 1 && ChangeRoomDuringPresence)
                 {
                     VideoRoom = "startup-video";
                     Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
                     Socket.Push(Frame("test-website", "website:device_speed", "{\"strength\":100}"));
+                    await Task.Delay(50, cancellationToken);
+                }
+                if (PresenceOnline == 1 && LeaveAfterBufferedCue)
+                {
+                    Socket.Push(Frame("test-video", "room:message", "{\"ver\":3,\"type\":\"play\",\"src\":\"fixture-source\",\"subtitles\":[{\"time\":0,\"subtitle\":4}]}"));
+                    Socket.Push(Frame("test-video", "system:presence", "{\"action\":\"leave\",\"uuid\":\"fixture-source\"}"));
                     await Task.Delay(50, cancellationToken);
                 }
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("OK") };
@@ -379,7 +784,12 @@ internal static class FeelConnectTests
         public void Push(string text, bool fragment = false)
         {
             byte[] data = Encoding.UTF8.GetBytes(text);
-            if (fragment)
+            if (data.Length > 8192)
+            {
+                for (int offset = 0; offset < data.Length; offset += 8192)
+                    incoming.Writer.TryWrite((data.Skip(offset).Take(8192).ToArray(), offset + 8192 >= data.Length, WebSocketMessageType.Text));
+            }
+            else if (fragment)
             {
                 incoming.Writer.TryWrite((data.Take(data.Length / 2).ToArray(), false, WebSocketMessageType.Text));
                 incoming.Writer.TryWrite((data.Skip(data.Length / 2).ToArray(), true, WebSocketMessageType.Text));

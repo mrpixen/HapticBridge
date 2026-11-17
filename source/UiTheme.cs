@@ -17,7 +17,7 @@ namespace LovenseConnector
             window.FontFamily=UiFonts.Body;
             window.SourceInitialized+=(sender,e)=> { int dark=1;DwmSetWindowAttribute(new WindowInteropHelper(window).Handle,20,ref dark,sizeof(int)); };
             window.AddHandler(Button.ClickEvent,new RoutedEventHandler((sender,e)=> {
-                if(!SystemParameters.ClientAreaAnimation)return;
+                if(!StudioMotionEnabled)return;
                 var button=e.OriginalSource as Button;if(button==null)return;
                 var layer=button.Template.FindName("Glimmer",button) as Border;if(layer==null)return;
                 Point point=button.IsMouseOver?Mouse.GetPosition(button):new Point(button.ActualWidth/2,button.ActualHeight/2);

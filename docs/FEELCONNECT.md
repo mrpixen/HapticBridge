@@ -7,23 +7,45 @@ The client pairs with a FeelConnect QR token or connection code, receives the pl
 | Message | Interpretation |
 | --- | --- |
 | `website:device_speed` | Immediate strength from 0 to 100 percent |
+| `device:position` with `device_percent` | Current SDK strength from 0 to 100 percent, checked against the paired target user when specified |
 | Version 2 percent updates | Latest percent value; the array does not identify separate hardware motors |
 | Version 3 play subtitles | Timed cue levels 0–4, converted to 0–100 percent |
 | Version 3 stop or replacement playback | Stops or replaces the current timeline, including seeking |
+| `room:play` / `room:stop` | Current SDK envelopes for version 3 playback and stopping |
 | `website:tip` | Finite constant or pattern output, with bounded duration and optional message-ID deduplication |
 | Publisher leave or timeout | Stops the publisher's active output |
 | `rooms_changed` | Refreshes authorized subscriptions |
 
-The decoder bounds message sizes and cue counts and ignores messages from unauthorized rooms. A new timeline replaces the preceding timeline; it does not append a stale seek position. Immediate outputs expire if the source disappears without sending a stop. Local motor control remains limited to the hardware's actual integer levels, so a percentage is mapped to a device level rather than creating additional physical resolution.
+The decoder bounds message sizes and cue counts and ignores messages from unauthorized rooms. A new timeline replaces the preceding timeline; it does not append a stale seek position. Sparse timed batches retain their last level while awaiting the next batch. Outputs expire if the source disappears without sending a stop. Local motor control remains limited to the hardware's actual integer levels, so a percentage is mapped to a device level rather than creating additional physical resolution.
 
 ## Pairing and transport
 
-The client exchanges a pairing value with `api.feel-app.com`, obtains authorized rooms and uses a WebSocket connection to `fec.feelme.com`. Pairing accepts the recognized `feelapp` and `feelvr` authorization/connect schemes or a raw pairing value. These links do not select arbitrary network destinations. HTTP redirects are disabled, responses are bounded, and session credentials are kept in memory.
+The client exchanges a pairing value with `api.feel-app.com`, obtains authorized rooms and connects to `fec.feelme.com` over WebSocket and `ps.pndsn.com` over HTTPS. Authorized video rooms accept cues on either transport. Matching version 3 batches are deduplicated when their producer, room, timestamp and cue data match; stop commands always pass. Website tip routing follows its separate service migration flag. Legacy presence uses a random `mobile-client` session identifier and advertises the selected playback mode. Subscription changes preserve the exact message cursor, and stale legacy messages are rejected.
 
-The client reports online/offline presence and device display names to the service. It does not store the pairing token, media, a browser history or video screenshots. See **Privacy** for local diagnostic files and source-specific data flows.
+After an authorized video-room join or peer join, the client sends session metadata through a separate bounded worker. A slow metadata request cannot block cue decoding or output stops.
+
+Pairing accepts the recognized `feelapp` and `feelvr` authorization/connect schemes or a raw pairing value. These links do not select arbitrary network destinations. HTTP redirects are disabled, responses are bounded, and session credentials are kept in memory. PubNub subscriptions are restricted to channels supplied by the QR-authenticated API session and their presence channels. The client uses the public subscribe routing identifier only; it has no publish, partner or secret key and performs no channel discovery or history lookup.
+
+The client reports online/offline presence and refreshes device display names when Bluetooth connections change. It shows the paired website's name from the service. It does not store the pairing token, website name, media, a browser history or video screenshots. See **Privacy** for local diagnostic files and source-specific data flows.
 
 ## Compatibility limits
 
-Player versions and services can change their messages. A successful connection proves that pairing and transport work, not that the current video provides any interactive cues. Watch the connection and received-message indicators, then check that selected motors are connected. A session that disconnects or expires requires deliberate reconnecting; output does not automatically resume.
+**Playback settings → Playback mode** offers **Timed cues** (default, version 3) and **Live levels (legacy)** (version 2). Live levels avoids the legacy sender's clock lookup and timed batching. **Apply mode** stops output and reconnects with a fresh receiver identity using the current pairing held in memory. Select **Enable output** afterward. A rejected or expired pairing needs a fresh QR code.
+
+Live levels still requires the website to send playback updates. It does not fix a stalled video clock. Network delay affects each update, and a gap longer than five seconds stops output, including a long hold in a sparse track. Timed cues is preferable when the player supports it. Neither mode changes the authorized channel scope or the available motor intensity range.
+
+Version 2 batches have no per-sample timestamps. This implementation currently uses their final percent, so intermediate peaks in a multi-value batch may be lost. Exact batch timing and automatic guest-token renewal remain compatibility limitations.
+
+Connection details count fully validated live batches, their positive samples and mixed zero/nonzero batches, with the last batch's size, maximum and final value. These aggregate numbers distinguish quiet traffic from a discarded intermediate peak without recording message contents or session identifiers.
+
+Player versions and services can change their messages. **Paired** confirms the service connection. The intensity status distinguishes an active vibration cue, zero intensity and expired updates. If output stays at zero, expand **Connection details** to check for a video channel and incoming cues, then check that the selected motors are connected. A session that disconnects or expires requires deliberate reconnecting; output does not automatically resume.
+
+**Check website** reads presence on this session's authorized legacy channels and reports receiver/browser counts. It does not subscribe to other channels or expose peer identifiers. Modern FEC-only clients do not appear in this legacy check.
+
+**Check old SDK route** checks occupancy for the same channels on the routing namespace exported by the published legacy SDK. This is a manual diagnostic; it does not change the receiver's route or start playback.
 
 The source is an independent protocol implementation. It contains no redistributed mobile application or decompiled application code. Offline tests cover message decoding and stopping behavior; live service and device compatibility need separate verification.
+
+## Technical references
+
+Protocol behavior is checked against FeelTechnology's [integration and migration guide](https://developer.feeltechnology.com/docs/feeljs/feel_apps_api_docs.html), its [public legacy SDK](https://api.feel-app.com/static/feeljs/1.2.1/feel.min.js), the [current SDK source](https://github.com/FeelRobotics/feel-apps-api), and PubNub's [presence lifecycle](https://www.pubnub.com/docs/sdks/rest-api/presence-introduction). Legacy PubNub presence and current FEC connectivity are separate compatibility requirements.

@@ -23,11 +23,15 @@ namespace LovenseConnector
         public int high { get; set; }
         public int periodMs { get; set; }
         public int durationMs { get; set; }
+        // Optional deadline on the shared pattern clock. Duration is a lease
+        // from this motor's start; the deadline keeps late joins in sync.
+        public int stopAtMs { get; set; }
         public int dutyPercent { get; set; }
         public int phaseDegrees { get; set; }
         public int transitionMs { get; set; }
         public bool repeat { get; set; }
         public bool interpolate { get; set; }
+        public string curve { get; set; }
         public Frame[] frames { get; set; }
         public PatternSpec() { version=1; name="My pattern"; mode="Pulse"; low=0; high=3; periodMs=2000; durationMs=10000; dutyPercent=50; repeat=true; frames=new Frame[0]; }
         public void Validate()
@@ -37,10 +41,12 @@ namespace LovenseConnector
             if(low<0 || high>20 || low>high) throw new ArgumentException("Levels must be from 0 to 20, with minimum no higher than maximum.");
             if(periodMs<200 || periodMs>600000) throw new ArgumentException("Cycle length must be between 200 and 600000 milliseconds.");
             if(durationMs<0 || durationMs>3600000) throw new ArgumentException("Duration must be 0 (until stopped) through 3600000 ms.");
+            if(stopAtMs<0 || stopAtMs>3600000) throw new ArgumentException("Shared-clock deadline must be 0 (none) through 3600000 ms.");
             if(transitionMs<0||transitionMs>10000) throw new ArgumentException("Transition must be 0–10000 milliseconds.");
             if(dutyPercent<1 || dutyPercent>99 || phaseDegrees<0 || phaseDegrees>359) throw new ArgumentException("Duty must be 1–99%; phase must be 0–359 degrees.");
             if(mode=="Custom")
             {
+                if(curve!=null&&curve!="linear"&&curve!="smooth"&&curve!="step") throw new ArgumentException("Unknown curve interpolation.");
                 if(frames==null || frames.Length<2 || frames.Length>512 || frames.Any(f=>f==null) || frames[0].ms!=0) throw new ArgumentException("Custom patterns need 2–512 points, starting at 0 ms.");
                 for(int i=0;i<frames.Length;i++)
                 {
@@ -65,7 +71,10 @@ namespace LovenseConnector
                     else {
                         for(int i=1;i<frames.Length;i++) if(time<frames[i].ms) {
                             var a=frames[i-1]; var b=frames[i];
-                            value=interpolate ? a.level+(b.level-a.level)*(time-a.ms)/(b.ms-a.ms) : a.level; break;
+                            double blend=(time-a.ms)/(b.ms-a.ms);
+                            if(curve=="smooth") blend=blend*blend*(3-2*blend);
+                            bool continuous=curve=="smooth"||curve=="linear"||(curve==null&&interpolate);
+                            value=continuous ? a.level+(b.level-a.level)*blend : a.level; break;
                         }
                     }
                     break;
@@ -147,11 +156,11 @@ namespace LovenseConnector
                 while(!job.Cancel.IsCancellationRequested)
                 {
                     double elapsed=job.Clock.Elapsed.TotalMilliseconds;
-                    if(job.Spec.durationMs>0 && job.Renewed.Elapsed.TotalMilliseconds>=job.Spec.durationMs) break;
+                    if((job.Spec.durationMs>0 && job.Renewed.Elapsed.TotalMilliseconds>=job.Spec.durationMs)||(job.Spec.stopAtMs>0&&elapsed>=job.Spec.stopAtMs)) break;
                     int level=-1;
                     Func<string> sample=()=> {
                         lock(sync) {
-                            bool expired=job.Spec.durationMs>0&&job.Renewed.Elapsed.TotalMilliseconds>=job.Spec.durationMs;
+                            bool expired=(job.Spec.durationMs>0&&job.Renewed.Elapsed.TotalMilliseconds>=job.Spec.durationMs)||(job.Spec.stopAtMs>0&&job.Clock.Elapsed.TotalMilliseconds>=job.Spec.stopAtMs);
                             int target=expired?0:Math.Min(job.Ceiling,job.Spec.At(job.Clock.Elapsed.TotalMilliseconds));
                             level=smoother.Sample(target,target==0?0:job.Spec.transitionMs,animation.Elapsed.TotalMilliseconds);
                         }

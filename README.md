@@ -4,9 +4,9 @@ A Windows app for controlling compatible Lovense devices, making vibration patte
 
 ## Run
 
-1. Download the executable for your Windows architecture from Releases and open it.
+1. Download the executable for your Windows architecture from [Releases](https://github.com/mrpixen/HapticBridge/releases) and open it.
 2. Enable Bluetooth, turn on a compatible device, and disconnect it from other control apps.
-3. Scan, connect, then choose the motors you want to control.
+3. Select **Find & connect**, then choose the motors you want to control. The Devices page also lets you scan and connect individually.
 
 Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **Video sync** for FeelConnect sessions. **Stop all** stops connected devices; Escape does the same while the window has focus.
 

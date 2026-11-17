@@ -56,8 +56,17 @@ namespace LovenseConnector
             spec=new PatternSpec { mode="Custom",periodMs=1000,repeat=false,frames=new[]{new Frame { ms=0,level=0 },new Frame { ms=1000,level=20 }} };
             spec.Validate(); Check(spec.At(500)==0,"custom stepped envelope"); spec.interpolate=true; Check(spec.At(500)==10&&spec.At(1200)==20,"custom interpolation and endpoint");
             var copy=new JavaScriptSerializer().Deserialize<PatternSpec>(new JavaScriptSerializer().Serialize(spec)); copy.Validate(); Check(copy.At(500)==10,"saved profile round trip");
+            spec.curve="smooth";spec.Validate();
+            Check(spec.At(0)==0&&spec.At(250)==3&&spec.At(750)==17&&spec.At(1000)==20,"smooth curve eases both endpoints at native levels");
+            Check(Enumerable.Range(0,1201).All(t=>spec.At(t)>=0&&spec.At(t)<=20),"smooth curve never overshoots motor bounds");
+            copy=new JavaScriptSerializer().Deserialize<PatternSpec>(new JavaScriptSerializer().Serialize(spec));copy.Validate();
+            Check(copy.At(250)==3&&copy.curve=="smooth","smooth interpolation survives serialization");
+            spec.curve="linear";Check(spec.At(250)==5,"explicit linear curve preserves straight interpolation");
+            spec.curve="step";Check(spec.At(999)==0&&spec.At(1000)==20,"explicit step overrides legacy interpolation flag");
+            Reject(()=>new PatternSpec { mode="Custom",curve="invalid",frames=spec.frames }.Validate(),"unknown custom interpolation rejected");
             Reject(()=>new PatternSpec { high=21 }.Validate(),"reject level outside hardware range");
             Reject(()=>new PatternSpec { durationMs=-1 }.Validate(),"reject invalid duration");
+            Reject(()=>new PatternSpec { stopAtMs=-1 }.Validate(),"reject invalid shared deadline");
             Reject(()=>new PatternSpec { mode="Custom",frames=new Frame[]{null,null} }.Validate(),"reject null keyframes");
             Reject(()=>new PatternSpec { mode="Custom",frames=new[]{new Frame(),new Frame { ms=50 }} }.Validate(),"reject points too close");
             var link=new FakeLink(); var player=new Playback(link,new[]{1,2});
@@ -87,6 +96,19 @@ namespace LovenseConnector
             link.Release.TrySetResult(true);await Wait(()=>player.Level(2)==17);
             Check(!link.Snapshot().Contains("Vibrate2:3;"),"queued second motor samples latest target after delayed BLE gate opens");
             await player.StopAll();Check(player.Level(1)==0&&player.Level(2)==0,"both delayed channels stop with acknowledgements");
+            link=new FakeLink { Block="Vibrate1:4;" };player=new Playback(link,new[]{1,2});
+            await player.Start(1,new PatternSpec {mode="Steady",high=4,durationMs=0},20);await link.Entered.Task;
+            var clock=System.Diagnostics.Stopwatch.StartNew();
+            await player.Start(2,new PatternSpec {mode="Steady",high=18,durationMs=2000,stopAtMs=120},20,clock);
+            await Task.Delay(180);link.Release.TrySetResult(true);
+            await Wait(()=>!player.Active(2));
+            Check(!link.Snapshot().Contains("Vibrate2:18;")&&player.Level(2)==0,"shared deadline prevents stale positive output after a blocked transport");
+            await player.StopAll();
+            link=new FakeLink();player=new Playback(link,new[]{1,2});
+            clock=System.Diagnostics.Stopwatch.StartNew();await Task.Delay(200);
+            await player.Start(2,new PatternSpec {mode="Steady",high=11,durationMs=2000,stopAtMs=400},20,clock);
+            await Wait(()=>player.Level(2)==11);await Wait(()=>!player.Active(2)&&player.Level(2)==0);
+            Check(clock.ElapsedMilliseconds<1200,"late motor joins end on shared deadline instead of restarting duration");
         }
         public static int Main()
         {

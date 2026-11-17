@@ -8,9 +8,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
-using ZXing;
 
 namespace LovenseConnector
 {
@@ -24,85 +24,295 @@ namespace LovenseConnector
         readonly Dictionary<string,FeelRoute> feelRoutes=new Dictionary<string,FeelRoute>();
         readonly Dictionary<string,Tuple<Playback,int>> feelOwned=new Dictionary<string,Tuple<Playback,int>>();
         readonly SemaphoreSlim feelWriteGate=new SemaphoreSlim(1,1);
-        PasswordBox feelPairing; TextBlock feelStatus,feelValue,feelCount; ProgressBar feelMeter;
-        Button feelOutputButton; WrapPanel feelRoutePanel; TextBox feelSmoothing;
+        PasswordBox feelPairing; TextBlock feelStatus,feelValue,feelCount,feelDetails,feelPresenceResult; ProgressBar feelMeter;
+        TextBlock feelPairHint,feelOutputState,feelRouteSummary,feelRouteEmpty;
+        Button feelOutputButton,feelConnectButton,feelDisconnectButton; WrapPanel feelRoutePanel; TextBox feelSmoothing; ComboBox feelPlaybackMode;
         DispatcherTimer feelTimer; CancellationTokenSource feelPairCancel;
-        bool feelArmed,feelConnected,feelTickBusy; double feelPercent; int feelGeneration,feelFrame;
+        bool feelArmed,feelConnected,feelTickBusy,feelPresenceBusy,feelModeBusy,feelOutputPaused; double feelPercent; int feelGeneration,feelFrame,feelPresenceRevision;
+        DateTimeOffset feelPresenceRetryAt;
+        FeelConnectPresenceReport feelPresenceReport;
+        FeelConnectRouteOccupancyReport feelReferenceReport;
+        FeelConnectOutput feelLatestOutput;
         TabItem feelTab;
         void InitializeFeelConnect()
         {
             var body=new StackPanel { Margin=new Thickness(24) };
-            body.Children.Add(Text("Video sync",32));
-            feelStatus=Text("Disconnected",14);feelStatus.Foreground=Color("#C4BAD7");body.Children.Add(feelStatus);
-            body.Children.Add(Text("FeelConnect pairing",16));
-            feelPairing=new PasswordBox { MaxLength=8192,Margin=new Thickness(0,4,0,14) };
-            System.Windows.Automation.AutomationProperties.SetName(feelPairing,"FeelConnect pairing value");body.Children.Add(feelPairing);
+            body.Children.Add(new TextBlock { Text="Video sync",FontSize=32,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,24) });
+            var pairingBody=new StackPanel();
+            feelStatus=Text("Not paired",19);feelStatus.Margin=new Thickness(0,0,0,10);pairingBody.Children.Add(feelStatus);
+            var pairingLabel=Text("Pairing code",13);pairingLabel.Margin=new Thickness(0,0,0,5);pairingBody.Children.Add(pairingLabel);
+            feelPairing=new PasswordBox { MaxLength=8192,Margin=new Thickness(0,0,0,10) };
+            feelPairing.PasswordChanged+=(s,e)=>RefreshFeelPairingActions();
+            System.Windows.Automation.AutomationProperties.SetName(feelPairing,"FeelConnect pairing value");pairingBody.Children.Add(feelPairing);
+            feelPairing.ToolTip="Paste a QR image or pairing code (Ctrl+V)";
+            feelPairing.CommandBindings.Add(new CommandBinding(ApplicationCommands.Paste,(s,e)=> { PasteFeelPairingSafely();e.Handled=true; },(s,e)=> { e.CanExecute=true;e.Handled=true; }));
+            var pairingMenu=new ContextMenu();var pasteItem=new MenuItem { Header="Paste QR or code",Command=ApplicationCommands.Paste,CommandTarget=feelPairing };pairingMenu.Items.Add(pasteItem);feelPairing.ContextMenu=pairingMenu;
             var pairingActions=new WrapPanel();
             pairingActions.Children.Add(Action("Paste QR or code",()=> { PasteFeelPairing(); return Task.CompletedTask; }));
-            pairingActions.Children.Add(Action("Open QR image…",()=> { OpenFeelImage(); return Task.CompletedTask; }));
-            pairingActions.Children.Add(Action("Connect",PairFeelConnect));
-            pairingActions.Children.Add(Action("Disconnect",DisconnectFeelConnect));body.Children.Add(pairingActions);
-            var monitor=new StackPanel { Margin=new Thickness(0,26,0,20) };
-            var line=new DockPanel();feelValue=Text("0%",28);DockPanel.SetDock(feelValue,Dock.Right);line.Children.Add(feelValue);line.Children.Add(Text("Video intensity",18));monitor.Children.Add(line);
-            feelMeter=new ProgressBar { Minimum=0,Maximum=100,Height=8,Foreground=Color("#CCB8FF"),Background=Color("#44364F"),BorderThickness=new Thickness(0),Margin=new Thickness(0,8,0,12) };monitor.Children.Add(feelMeter);
-            feelCount=Text("Waiting for cues",12);feelCount.Foreground=Color("#C4BAD7");monitor.Children.Add(feelCount);
-            feelOutputButton=Action("Enable output",ToggleFeelOutput);feelOutputButton.HorizontalAlignment=HorizontalAlignment.Left;feelOutputButton.IsEnabled=false;monitor.Children.Add(feelOutputButton);body.Children.Add(monitor);
-            body.Children.Add(Text("Motors",19));feelRoutePanel=new WrapPanel();body.Children.Add(feelRoutePanel);
-            var timing=new WrapPanel { Margin=new Thickness(0,12,0,0) };feelSmoothing=Input("100",120);Field(timing,"Smoothing (ms)",feelSmoothing);
-            body.Children.Add(new Expander { Header="Timing",Content=timing,Margin=new Thickness(0,14,0,0) });
+            pairingActions.Children.Add(Action("Open image…",async()=> {
+                if(!await StopAll())throw new InvalidOperationException("Could not confirm Stop before opening the image picker.");
+                OpenFeelImage();
+            }));
+            feelConnectButton=Action("Connect",PairFeelConnect);feelConnectButton.Background=Color("#806C5095");pairingActions.Children.Add(feelConnectButton);
+            feelDisconnectButton=Action("Disconnect",DisconnectFeelConnect);pairingActions.Children.Add(feelDisconnectButton);pairingBody.Children.Add(pairingActions);
+            foreach(FrameworkElement action in pairingActions.Children)action.Margin=new Thickness(0,0,8,0);
+            feelPairHint=Text("Ctrl+V · or drop a QR image here",13);feelPairHint.Margin=new Thickness(0,8,0,0);feelPairHint.Foreground=Color("#C4BAD7");pairingBody.Children.Add(feelPairHint);
+            var pairingCard=FeelSurface(pairingBody);pairingCard.AllowDrop=true;
+            pairingCard.PreviewDragOver+=(s,e)=> { e.Effects=e.Data.GetDataPresent(DataFormats.FileDrop,false)?DragDropEffects.Copy:DragDropEffects.None;e.Handled=true; };
+            pairingCard.Drop+=(s,e)=> {
+                e.Handled=true;
+                try {
+                    var files=e.Data.GetData(DataFormats.FileDrop,false) as string[];
+                    if(files==null||files.Length!=1)throw new ArgumentException("Drop one local QR image.");
+                    LoadFeelImage(files[0]);
+                }catch(Exception ex) { feelPairHint.Text=ex.Message; }
+            };body.Children.Add(pairingCard);
+
+            var monitor=new StackPanel();
+            var line=new DockPanel();feelValue=Text("—",32);feelValue.Margin=new Thickness(12,0,0,0);DockPanel.SetDock(feelValue,Dock.Right);line.Children.Add(feelValue);
+            var signalHeading=new StackPanel();var signalTitle=Text("Video signal",20);signalTitle.Margin=new Thickness(0,0,0,4);signalHeading.Children.Add(signalTitle);
+            feelCount=Text("Waiting for cues",14);feelCount.Margin=new Thickness(0);feelCount.Foreground=Color("#C4BAD7");signalHeading.Children.Add(feelCount);line.Children.Add(signalHeading);monitor.Children.Add(line);
+            feelMeter=new ProgressBar { Minimum=0,Maximum=100,Height=7,Foreground=Color("#CCB8FF"),Background=Color("#44364F"),BorderThickness=new Thickness(0),Margin=new Thickness(0,12,0,0) };monitor.Children.Add(feelMeter);
+            System.Windows.Automation.AutomationProperties.SetName(feelMeter,"Incoming video intensity");
+            var outputRow=new DockPanel { Margin=new Thickness(0,14,0,0) };
+            feelOutputButton=Action("Enable output",ToggleFeelOutput);feelOutputButton.Margin=new Thickness(12,0,0,0);feelOutputButton.IsEnabled=false;DockPanel.SetDock(feelOutputButton,Dock.Right);outputRow.Children.Add(feelOutputButton);
+            feelOutputState=Text("Output off",15);feelOutputState.VerticalAlignment=VerticalAlignment.Center;outputRow.Children.Add(feelOutputState);monitor.Children.Add(outputRow);body.Children.Add(FeelSurface(monitor));
+
+            var routeBody=new StackPanel();
+            var routeActions=new WrapPanel { Margin=new Thickness(0,12,0,0) };
+            routeActions.Children.Add(Action("Select all",()=> { foreach(var r in feelRoutes.Values.Where(r=>r.Device.Connected))r.Enabled.IsChecked=true;RefreshFeelRouteSummary();return Task.CompletedTask; }));
+            routeActions.Children.Add(Action("Clear",()=> { foreach(var r in feelRoutes.Values)r.Enabled.IsChecked=false;RefreshFeelRouteSummary();return Task.CompletedTask; }));routeBody.Children.Add(routeActions);
+            feelRouteEmpty=Text("Connect a device to choose motors.",14);feelRouteEmpty.Foreground=Color("#C4BAD7");routeBody.Children.Add(feelRouteEmpty);
+            feelRoutePanel=new WrapPanel();routeBody.Children.Add(feelRoutePanel);
+            feelRouteSummary=Text("Play targets · no motors connected",16);
+            body.Children.Add(new Expander { Header=feelRouteSummary,Content=routeBody,Margin=new Thickness(0,4,0,12) });
+            var playbackSettings=new StackPanel();
+            var timing=new WrapPanel { Margin=new Thickness(0,12,0,0) };feelSmoothing=Input("100",120);Field(timing,"Smoothing (ms)",feelSmoothing);playbackSettings.Children.Add(timing);
+            var delivery=new WrapPanel();feelPlaybackMode=new ComboBox { Width=220,Margin=new Thickness(0,0,8,6) };
+            feelPlaybackMode.Items.Add("Timed cues");feelPlaybackMode.Items.Add("Live levels (legacy)");feelPlaybackMode.SelectedIndex=0;
+            feelPlaybackMode.ToolTip="Live levels can help with older players. Output stops if updates pause for five seconds.";
+            System.Windows.Automation.AutomationProperties.SetName(feelPlaybackMode,"Video playback mode");
+            Field(delivery,"Playback mode",feelPlaybackMode);
+            var applyMode=Action("Apply mode",ApplyFeelPlaybackMode);applyMode.VerticalAlignment=VerticalAlignment.Bottom;delivery.Children.Add(applyMode);playbackSettings.Children.Add(delivery);
+            body.Children.Add(new Expander { Header="Playback settings",Content=playbackSettings,Margin=new Thickness(0,14,0,0) });
+            feelDetails=Text("No session",12);feelDetails.TextWrapping=TextWrapping.Wrap;
+            var connectionDetails=new StackPanel();connectionDetails.Children.Add(feelDetails);
+            var checkWebsite=Action("Check website",CheckFeelWebsite);checkWebsite.HorizontalAlignment=HorizontalAlignment.Left;connectionDetails.Children.Add(checkWebsite);
+            var checkOldRoute=Action("Check old SDK route",CheckFeelReferenceRoute);checkOldRoute.HorizontalAlignment=HorizontalAlignment.Left;connectionDetails.Children.Add(checkOldRoute);
+            feelPresenceResult=Text("",12);feelPresenceResult.TextWrapping=TextWrapping.Wrap;connectionDetails.Children.Add(feelPresenceResult);
+            body.Children.Add(new Expander { Header="Connection details",Content=connectionDetails,Margin=new Thickness(0,6,0,0) });
             feelTab=new TabItem { Header="Video sync",Content=new ScrollViewer { Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled } };tabs.Items.Insert(2,feelTab);
+            window.PreviewKeyDown+=(s,e)=> {
+                bool paste=(e.Key==Key.V&&(Keyboard.Modifiers&ModifierKeys.Control)!=0)||(e.Key==Key.Insert&&(Keyboard.Modifiers&ModifierKeys.Shift)!=0);
+                if(paste&&tabs.SelectedItem==feelTab&&!(Keyboard.FocusedElement is TextBox)) { e.Handled=true;PasteFeelPairingSafely(); }
+            };
             feelClient.StatusChanged+=status=>UI(async()=> {
-                feelConnected=status.Connected;feelStatus.Text=status.Message;feelCount.Text=status.MessagesReceived+" messages received";
+                string website=feelClient.WebsiteName;
+                feelConnected=status.Connected;feelStatus.Text=status.Connected?(website.Length==0?"Paired":"Paired · "+website):status.Message;
+                if(!status.Connected)feelLatestOutput=null;
+                feelCount.Text=status.Connected?FeelSignalText():status.Phase;
                 feelOutputButton.IsEnabled=feelConnected&&!closing;
-                if(!status.Connected) { feelPercent=0;feelFrame++;feelValue.Text="0%";feelMeter.Value=0;await DisarmFeelConnect(); }
+                if(!status.Connected||status.Phase=="Refreshing") { feelPresenceRevision++;feelPresenceReport=null;feelReferenceReport=null;feelPresenceResult.Text="";feelPresenceRetryAt=default; }
+                if(!status.Connected) { feelPercent=0;feelFrame++;await DisarmFeelConnect(); }
+                RefreshFeelSignalDisplay();RefreshFeelPairingActions();
             });
             feelClient.OutputChanged+=output=>UI(async()=> {
+                feelLatestOutput=output;
                 feelPercent=output.IsStop?0:output.Percent;feelFrame++;
-                feelValue.Text=Math.Round(feelPercent)+"%";feelMeter.Value=feelPercent;
+                RefreshFeelSignalDisplay();
+                if(feelConnected)feelCount.Text=FeelSignalText();
                 if(output.IsStop)await StopFeelOwned();
             });
-            feelTimer=new DispatcherTimer { Interval=TimeSpan.FromMilliseconds(100) };feelTimer.Tick+=async(s,e)=>await FeelTick();feelTimer.Start();
+            feelTimer=new DispatcherTimer { Interval=TimeSpan.FromMilliseconds(100) };feelTimer.Tick+=async(s,e)=> { RefreshFeelDetails();await RefreshFeelPresence();await FeelTick(); };feelTimer.Start();
+            RefreshFeelPairingActions();
+        }
+        Border FeelSurface(UIElement content)
+        {
+            var surface=new Border { CornerRadius=new CornerRadius(24),Padding=new Thickness(20),Margin=new Thickness(0,0,0,18),BorderBrush=Color("#30E4D3FF"),BorderThickness=new Thickness(0,1,0,0),Child=content };
+            surface.SetResourceReference(Border.BackgroundProperty,"Glass");return surface;
+        }
+        void RefreshFeelPairingActions()
+        {
+            if(feelConnectButton!=null)feelConnectButton.IsEnabled=!closing&&!feelModeBusy&&feelPairCancel==null&&!String.IsNullOrWhiteSpace(feelPairing?.Password);
+            if(feelDisconnectButton!=null)feelDisconnectButton.IsEnabled=!closing&&(feelConnected||feelPairCancel!=null);
+        }
+        bool FeelHasSignal()
+        {
+            if(!feelConnected||feelLatestOutput==null)return false;
+            string kind=feelLatestOutput.Kind??"";
+            return !feelLatestOutput.IsStop||kind.StartsWith("Video intensity",StringComparison.Ordinal)||kind=="Video cues v3"||
+                kind.StartsWith("Website intensity",StringComparison.Ordinal)||kind=="Video stopped"||kind=="Timed tip"||kind=="Tip stopped";
+        }
+        void RefreshFeelSignalDisplay()
+        {
+            bool known=FeelHasSignal();
+            if(feelValue!=null)feelValue.Text=known?Math.Round(feelPercent)+"%":"—";
+            if(feelMeter!=null)feelMeter.Value=known?feelPercent:0;
+            if(feelOutputState!=null)feelOutputState.Text=!feelArmed?(feelConnected&&feelOutputPaused?"Output paused":"Output off"):known?"Output enabled":"Output enabled · waiting for cues";
+        }
+        string FeelSignalText()
+        {
+            if(!feelClient.LastFrameAt.HasValue)return "No video cues received";
+            if(feelLatestOutput==null)return "Control received · no vibration cue";
+            if(feelLatestOutput.Kind=="Cue timeout")return "Video updates timed out";
+            if(feelLatestOutput.Kind=="Publisher disconnected")return "Video sender disconnected";
+            if(!FeelHasSignal())return "Waiting for video cues";
+            return !feelLatestOutput.IsStop&&feelLatestOutput.Percent>0?"Receiving vibration cues":"Incoming level is zero";
+        }
+        async Task RefreshFeelPresence()
+        {
+            if(!feelConnected||closing||feelPresenceBusy||DateTimeOffset.UtcNow<feelPresenceRetryAt)return;
+            feelPresenceBusy=true;
+            try {
+                await feelClient.UpdateDevicesAsync(devices.Values.Where(d=>d.Connected).Select(d=>d.Name).Distinct());
+                if(hint.Text=="Video device status update failed; retrying…")hint.Text="";
+            }
+            catch(OperationCanceledException) { }
+            catch { feelPresenceRetryAt=DateTimeOffset.UtcNow.AddSeconds(10);if(feelConnected&&!closing)hint.Text="Video device status update failed; retrying…"; }
+            finally { feelPresenceBusy=false; }
+        }
+        async Task CheckFeelWebsite()
+        {
+            if(!feelConnected) { feelPresenceResult.Text="Pair a video session first.";return; }
+            int revision=feelPresenceRevision;feelPresenceReport=null;feelPresenceResult.Text="Checking legacy connection…";
+            try {
+                var report=await feelClient.CheckPresenceAsync();
+                if(closing||!feelConnected||revision!=feelPresenceRevision)return;
+                feelPresenceReport=report;
+                feelPresenceResult.Text=(report.Complete?"Last legacy connection check":"Partial legacy connection check")+
+                    "\nWebsite channel: receiver "+report.Website.SelfPresentChannels+"/"+report.Website.Channels+
+                    " · browser watchers "+report.Website.WatchPeers+" · players "+report.Website.PlayerPeers+
+                    "\nVideo channels: receiver "+report.Video.SelfPresentChannels+"/"+report.Video.Channels+
+                    " · browser watchers "+report.Video.WatchPeers+" · players "+report.Video.PlayerPeers;
+            }
+            catch { if(!closing&&revision==feelPresenceRevision)feelPresenceResult.Text="Website presence check unavailable. Try again."; }
+        }
+        async Task CheckFeelReferenceRoute()
+        {
+            if(!feelConnected) { feelPresenceResult.Text="Pair a video session first.";return; }
+            int revision=feelPresenceRevision;feelReferenceReport=null;feelPresenceResult.Text="Checking old SDK route…";
+            try {
+                var report=await feelClient.CheckReferenceRouteAsync();
+                if(closing||!feelConnected||revision!=feelPresenceRevision)return;
+                feelReferenceReport=report;
+                feelPresenceResult.Text=(report.Complete?"Last old SDK route check":"Partial old SDK route check")+
+                    "\nWebsite: "+report.WebsiteOccupancy+" connections across "+report.WebsiteChannels+" channel(s)"+
+                    "\nVideo: "+report.VideoOccupancy+" connections across "+report.VideoChannels+" channel(s)";
+            }
+            catch { if(!closing&&revision==feelPresenceRevision)feelPresenceResult.Text="Old SDK route check unavailable."; }
+        }
+        void RefreshFeelDetails()
+        {
+            RefreshFeelSignalDisplay();
+            var status=feelClient.Diagnostics;
+            var transport=status.Transport;
+            var v2=status.V2;
+            feelDetails.Text="Playback: "+(status.PlaybackMode=="live"?"Live levels (legacy)":"Timed cues")+
+                "\nVideo channels: "+status.VideoRooms+"\nControl messages: "+status.CandidateCues+" · Accepted: "+status.AcceptedCues+
+                "\nService messages: "+status.FecMessages+" live · "+status.LegacyMessages+" legacy"+
+                "\nLegacy received: "+transport.LegacyRawFrames+
+                "\nLegacy filtered: format "+transport.LegacyDroppedShape+" · channel "+transport.LegacyDroppedScope+" · type "+transport.LegacyDroppedType+
+                " · time "+transport.LegacyDroppedTime+" · stale "+transport.LegacyDroppedStale+" · replay "+transport.LegacyDroppedReplay+
+                "\nOther live events: "+transport.FecOtherEvents+" · control "+transport.FecControlEvents+" · session "+transport.FecSessionEvents+" · unknown "+transport.FecUnknownEvents+
+                "\nOther messages: status "+transport.SessionMetadataMessages+" · object "+transport.UnknownObjectDataMessages+
+                " · value "+transport.UnknownNonObjectDataMessages+" · cue format "+transport.UnknownCueShapeMessages+
+                "\nLive batches: "+v2.AcceptedBatches+" · samples "+v2.Samples+" · positive "+v2.PositiveSamples+" · mixed "+v2.MixedBatches+
+                "\nLast live batch: "+v2.LastBatchSamples+" samples · peak "+v2.LastBatchMaximum.ToString("0.##")+"% · final "+v2.LastBatchFinal.ToString("0.##")+"%";
+        }
+        void PasteFeelPairingSafely()
+        {
+            try { PasteFeelPairing(); }
+            catch(Exception ex) { if(feelPairHint!=null)feelPairHint.Text=ex.Message;else feelStatus.Text=ex.Message; }
         }
         void PasteFeelPairing()
         {
-            if(Clipboard.ContainsImage()) { feelPairing.Password=DecodeFeelQr(Clipboard.GetImage());feelStatus.Text="QR code ready"; }
-            else if(Clipboard.ContainsText()) { string value=Clipboard.GetText();FeelConnectPairing.Parse(value);feelPairing.Password=value;feelStatus.Text="Pairing code ready"; }
-            else throw new InvalidOperationException("Copy a QR image or pairing code first.");
+            feelPairing.Password=QrInput.ReadClipboardPairing();if(feelPairHint!=null)feelPairHint.Text="Code ready · choose Connect";hint.Text="";
         }
         void OpenFeelImage()
         {
             var dialog=new OpenFileDialog { Filter="QR images|*.png;*.jpg;*.jpeg;*.bmp",Title="Open FeelConnect QR" };
             if(dialog.ShowDialog(window)!=true)return;
-            if(new FileInfo(dialog.FileName).Length>32*1024*1024)throw new ArgumentException("Choose an image smaller than 32 MB.");
-            using(var stream=File.OpenRead(dialog.FileName)) {
-                var bitmap=new BitmapImage();bitmap.BeginInit();bitmap.CacheOption=BitmapCacheOption.OnLoad;bitmap.StreamSource=stream;bitmap.EndInit();bitmap.Freeze();
-                feelPairing.Password=DecodeFeelQr(bitmap);feelStatus.Text="QR code ready";
-            }
+            LoadFeelImage(dialog.FileName);
         }
-        internal static string DecodeFeelQr(BitmapSource bitmap)
+        void LoadFeelImage(string filename)
         {
-            if(bitmap==null||bitmap.PixelWidth<1||bitmap.PixelHeight<1||(long)bitmap.PixelWidth*bitmap.PixelHeight>16000000)throw new ArgumentException("Choose a QR image smaller than 16 megapixels.");
-            var converted=new FormatConvertedBitmap(bitmap,PixelFormats.Bgra32,null,0);int stride=checked(converted.PixelWidth*4);var pixels=new byte[checked(stride*converted.PixelHeight)];converted.CopyPixels(pixels,stride,0);
-            var reader=new BarcodeReaderGeneric { AutoRotate=true,Options=new ZXing.Common.DecodingOptions { TryHarder=true,TryInverted=true,PossibleFormats=new[]{BarcodeFormat.QR_CODE} } };
-            var result=reader.Decode(pixels,converted.PixelWidth,converted.PixelHeight,RGBLuminanceSource.BitmapFormat.BGRA32);
-            if(result==null)throw new ArgumentException("No QR code found. Use a clear image with the complete code.");
-            FeelConnectPairing.Parse(result.Text);return result.Text;
+            if(String.IsNullOrWhiteSpace(filename)||!Path.IsPathFullyQualified(filename)||filename.StartsWith(@"\\",StringComparison.Ordinal))
+                throw new ArgumentException("Choose a local QR image.");
+            string path=Path.GetFullPath(filename),extension=Path.GetExtension(path).ToLowerInvariant();
+            if(!new[]{".png",".jpg",".jpeg",".bmp"}.Contains(extension))throw new ArgumentException("Choose a PNG, JPEG or BMP QR image.");
+            if(new DriveInfo(Path.GetPathRoot(path)).DriveType==DriveType.Network)throw new ArgumentException("Choose an image saved on this computer.");
+            var info=new FileInfo(path);
+            if(!info.Exists)throw new ArgumentException("The QR image could not be found.");
+            if(info.Length>QrInput.MaxImageBytes)throw new ArgumentException("Choose an image smaller than 32 MB.");
+            if((info.Attributes&FileAttributes.ReparsePoint)!=0)throw new ArgumentException("Choose the QR image file directly.");
+            string pairing;
+            using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read))
+            using(var bytes=new MemoryStream())
+            {
+                var buffer=new byte[81920];int read;
+                while((read=file.Read(buffer,0,buffer.Length))>0)
+                {
+                    if(bytes.Length+read>QrInput.MaxImageBytes)throw new ArgumentException("Choose an image smaller than 32 MB.");
+                    bytes.Write(buffer,0,read);
+                }
+                bytes.Position=0;
+                if(extension==".png")
+                {
+                    var data=new DataObject();data.SetData("PNG",bytes.ToArray(),false);pairing=QrInput.FromDataObject(data);
+                }
+                else
+                {
+                    var decoder=BitmapDecoder.Create(bytes,BitmapCreateOptions.DelayCreation,BitmapCacheOption.OnDemand);
+                    if(decoder.Frames.Count==0)throw new ArgumentException("No image found in this file.");
+                    pairing=DecodeFeelQr(decoder.Frames[0]);
+                }
+            }
+            feelPairing.Password=pairing;if(feelPairHint!=null)feelPairHint.Text="QR ready · choose Connect";hint.Text="";
         }
+        internal static string DecodeFeelQr(BitmapSource bitmap) => QrInput.DecodeBitmap(bitmap);
         async Task PairFeelConnect()
         {
             string pairing=feelPairing.Password;FeelConnectPairing.Parse(pairing);feelPairing.Clear();
+            if(feelPairHint!=null)feelPairHint.Text="Pairing…";
             await DisconnectFeelConnect();
             var cancel=new CancellationTokenSource();feelPairCancel=cancel;
-            try { await feelClient.PairAsync(pairing,devices.Values.Where(d=>d.Connected).Select(d=>d.Name).Distinct(),cancel.Token); }
+            RefreshFeelPairingActions();
+            try { await feelClient.PairAsync(pairing,devices.Values.Where(d=>d.Connected).Select(d=>d.Name).Distinct(),cancel.Token,SelectedFeelPlaybackMode());hint.Text="";if(feelPairHint!=null)feelPairHint.Text="Ctrl+V · or drop a new QR image here"; }
+            catch(OperationCanceledException) { if(feelPairHint!=null)feelPairHint.Text="Pairing canceled"; }
+            catch { if(!cancel.IsCancellationRequested) { feelStatus.Text="Pairing failed. Generate a fresh QR code and try again.";if(feelPairHint!=null)feelPairHint.Text="Paste a fresh QR code to try again."; } }
+            finally { if(ReferenceEquals(feelPairCancel,cancel))feelPairCancel=null;cancel.Dispose();RefreshFeelPairingActions(); }
+        }
+        FeelConnectPlaybackMode SelectedFeelPlaybackMode() => feelPlaybackMode?.SelectedIndex==1?FeelConnectPlaybackMode.Live:FeelConnectPlaybackMode.Timed;
+        async Task ApplyFeelPlaybackMode()
+        {
+            if(feelModeBusy||closing)return;
+            var mode=SelectedFeelPlaybackMode();
+            if(!feelConnected) { hint.Text="Playback mode selected for the next connection";return; }
+            if(feelClient.Diagnostics.PlaybackMode==(mode==FeelConnectPlaybackMode.Live?"live":"timed")) { hint.Text="This playback mode is already active";return; }
+            feelModeBusy=true;feelPlaybackMode.IsEnabled=false;
+            CancellationTokenSource cancel=null;int operation=0;
+            try {
+                operation=++operatorGeneration;
+                await DisarmFeelConnect();
+                if(closing||operation!=operatorGeneration)return;
+                feelConnected=false;feelPercent=0;feelFrame++;feelLatestOutput=null;RefreshFeelSignalDisplay();
+                feelOutputButton.IsEnabled=false;feelStatus.Text="Changing playback mode…";
+                feelPairCancel?.Cancel();cancel=new CancellationTokenSource();feelPairCancel=cancel;
+                await feelClient.ReconnectAsync(mode,cancel.Token);
+                if(!closing&&operation==operatorGeneration&&!cancel.IsCancellationRequested)hint.Text="Playback mode applied · enable output to resume";
+            }
             catch(OperationCanceledException) { }
-            catch { if(!cancel.IsCancellationRequested)feelStatus.Text="Pairing failed. Generate a fresh QR code and try again."; }
-            finally { if(ReferenceEquals(feelPairCancel,cancel))feelPairCancel=null;cancel.Dispose(); }
+            catch { if(!closing&&operation==operatorGeneration&&(cancel==null||!cancel.IsCancellationRequested))feelStatus.Text="Reconnect failed. Paste a fresh QR code and connect again."; }
+            finally {
+                if(cancel!=null) { if(ReferenceEquals(feelPairCancel,cancel))feelPairCancel=null;cancel.Dispose(); }
+                feelModeBusy=false;if(!closing)feelPlaybackMode.IsEnabled=true;
+            }
         }
         async Task DisconnectFeelConnect()
         {
             operatorGeneration++;feelConnected=false;feelPercent=0;feelFrame++;feelPairCancel?.Cancel();
-            feelMeter.Value=0;feelValue.Text="0%";feelStatus.Text="Disconnected";feelOutputButton.IsEnabled=false;
-            await DisarmFeelConnect();await feelClient.DisconnectAsync();
+            feelLatestOutput=null;RefreshFeelSignalDisplay();feelStatus.Text="Not paired";feelOutputButton.IsEnabled=false;
+            await DisarmFeelConnect();await feelClient.DisconnectAsync();RefreshFeelPairingActions();
         }
         async Task ToggleFeelOutput()
         {
@@ -115,13 +325,16 @@ namespace LovenseConnector
             var sources=PauseExternalSources();var stops=StopPlayers();await Task.WhenAll(sources,stops);
             if(closing||operation!=operatorGeneration||!feelConnected)return;
             if(!await stops)throw new InvalidOperationException("Output could not be stopped before switching sources.");
-            feelPercent=feelClient.CurrentPercent;feelValue.Text=Math.Round(feelPercent)+"%";feelMeter.Value=feelPercent;
-            feelFrame++;feelArmed=true;feelGeneration++;feelOutputButton.Content="Pause output";hint.Text="Video output enabled";
+            feelPercent=feelClient.CurrentPercent;RefreshFeelSignalDisplay();
+            feelFrame++;feelArmed=true;feelOutputPaused=false;feelGeneration++;feelOutputButton.Content="Pause output";hint.Text="Video output enabled";
+            RefreshFeelSignalDisplay();
         }
         async Task DisarmFeelConnect()
         {
-            feelGeneration++;feelArmed=false;
+            feelGeneration++;if(feelArmed)feelOutputPaused=true;feelArmed=false;if(!feelConnected)feelOutputPaused=false;
+            RefreshFeelSignalDisplay();
             if(feelOutputButton!=null)feelOutputButton.Content="Enable output";
+            if(hint.Text=="Video output enabled")hint.Text="Video output paused";
             await StopFeelOwned();
         }
         async Task StopFeelOwned()
@@ -135,22 +348,34 @@ namespace LovenseConnector
         void RefreshFeelRoutes()
         {
             if(feelRoutePanel==null)return;
+            bool added=false;
             foreach(var d in devices.Values)foreach(var channel in d.Motors.Keys) {
                 string key=MixerKey(d,channel);if(feelRoutes.ContainsKey(key))continue;
                 var route=new FeelRoute { Device=d,Channel=channel };var panel=new StackPanel();
-                route.Card=new Border { Width=226,Padding=new Thickness(18),CornerRadius=new CornerRadius(20),Background=Color("#A0241935"),Margin=new Thickness(0,8,12,8),Child=panel };
+                route.Card=new Border { Width=214,Padding=new Thickness(16),CornerRadius=new CornerRadius(20),Background=Color("#A0241935"),Margin=new Thickness(0,8,12,8),Child=panel };
                 var heading=new StackPanel { MaxWidth=152 };
                 heading.Children.Add(new TextBlock { Text=d.Name,TextWrapping=TextWrapping.Wrap,FontSize=16 });
                 heading.Children.Add(new TextBlock { Text=channel==0?"Motor":"Motor "+channel,FontSize=12,Margin=new Thickness(0,4,0,0),Foreground=Color("#C4BAD7") });
                 route.Enabled=new CheckBox { Content=heading,IsChecked=true };panel.Children.Add(route.Enabled);
+                route.Enabled.Checked+=(s,e)=>RefreshFeelRouteSummary();route.Enabled.Unchecked+=(s,e)=>RefreshFeelRouteSummary();
                 System.Windows.Automation.AutomationProperties.SetName(route.Enabled,d.Name+" motor "+channel+" video routing");
                 var value=Text("Strength 100%",13);panel.Children.Add(value);
                 route.Gain=new Slider { Minimum=0,Maximum=200,Value=100,TickFrequency=5,SmallChange=5,IsSnapToTickEnabled=true };
                 System.Windows.Automation.AutomationProperties.SetName(route.Gain,d.Name+" motor "+channel+" video strength");
                 route.Gain.ValueChanged+=(s,e)=>value.Text="Strength "+(int)route.Gain.Value+"%";panel.Children.Add(route.Gain);
-                feelRoutes.Add(key,route);feelRoutePanel.Children.Add(route.Card);
+                feelRoutes.Add(key,route);feelRoutePanel.Children.Add(route.Card);added=true;
             }
             foreach(var route in feelRoutes.Values)route.Card.IsEnabled=route.Device.Connected&&!closing;
+            RefreshFeelRouteSummary();
+            RefreshFeelPairingActions();
+            if(added)QueueStudioAppearance();
+        }
+        void RefreshFeelRouteSummary()
+        {
+            if(feelRouteSummary==null)return;
+            int available=feelRoutes.Values.Count(r=>r.Device.Connected),selected=feelRoutes.Values.Count(r=>r.Device.Connected&&r.Enabled.IsChecked==true);
+            feelRouteSummary.Text=available==0?"Play targets · no motors connected":"Play targets · "+selected+" of "+available+" motors";
+            if(feelRouteEmpty!=null)feelRouteEmpty.Visibility=available==0?Visibility.Visible:Visibility.Collapsed;
         }
         async Task FeelTick()
         {

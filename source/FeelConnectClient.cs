@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -27,15 +28,63 @@ namespace LovenseConnector
         static readonly UTF8Encoding Utf8 = new(false, true);
         readonly HttpClient http;
         readonly bool ownHttp;
+        readonly bool enableLegacy;
         readonly Func<CancellationToken, Task<WebSocket>> socketFactory;
         readonly SemaphoreSlim lifecycle = new(1, 1);
         readonly object sync = new();
         Session current;
+        long lifecycleGeneration;
         bool disposed;
         DateTimeOffset? lastFrameAt;
+        FeelConnectStatus lastStatus = new("Disconnected", "Disconnected", false, 0);
         public event Action<FeelConnectStatus> StatusChanged;
         public event Action<FeelConnectOutput> OutputChanged;
         public DateTimeOffset? LastFrameAt { get { lock (sync) return lastFrameAt; } }
+        /// <summary>Server-provided website label for the local UI only; not included in numeric diagnostics.</summary>
+        public string WebsiteName
+        {
+            get { lock (sync) return current != null && lastStatus.Connected && !current.Stop.IsCancellationRequested ? current.WebsiteName : ""; }
+        }
+        public FeelConnectDiagnostics Diagnostics
+        {
+            get
+            {
+                lock (sync)
+                {
+                    var session = current;
+                    var legacy = session?.Legacy?.Diagnostics ?? new FeelConnectLegacy.DiagnosticSnapshot();
+                    return new FeelConnectDiagnostics(lastStatus.Phase, lastStatus.Connected, session?.VideoRooms ?? 0,
+                        session?.FecMessages ?? 0, session?.LegacyMessages ?? 0, session?.CandidateCues ?? 0,
+                        session?.AcceptedCues ?? 0, session?.UnrecognizedMessages ?? 0, session?.LastCueKind ?? "", lastFrameAt)
+                    {
+                        PlaybackMode = session?.PlaybackMode == FeelConnectPlaybackMode.Live ? "live" : "timed",
+                        V2 = session?.Protocol.V2Diagnostics ?? new FeelConnectV2Diagnostics(),
+                        Transport = new FeelConnectTransportDiagnostics
+                        {
+                            LegacyRawFrames = legacy.RawFrames, LegacyDroppedShape = legacy.DroppedShape,
+                            LegacyDroppedScope = legacy.DroppedScope, LegacyDroppedType = legacy.DroppedType,
+                            LegacyDroppedTime = legacy.DroppedTime, LegacyDroppedStale = legacy.DroppedStale,
+                            LegacyDroppedReplay = legacy.DroppedReplay, FecOtherEvents = session?.FecOtherEvents ?? 0,
+                            FecControlEvents = session?.FecControlEvents ?? 0, FecSessionEvents = session?.FecSessionEvents ?? 0,
+                            FecUnknownEvents = session?.FecUnknownEvents ?? 0, SessionMetadataMessages = session?.SessionMetadataMessages ?? 0,
+                            UnknownObjectDataMessages = session?.UnknownObjectDataMessages ?? 0,
+                            UnknownNonObjectDataMessages = session?.UnknownNonObjectDataMessages ?? 0,
+                            UnknownCueShapeMessages = session?.UnknownCueShapeMessages ?? 0,
+                            UnknownMissingDataMessages = session?.UnknownMissingDataMessages ?? 0,
+                            UnknownNullDataMessages = session?.UnknownNullDataMessages ?? 0,
+                            UnknownStringDataMessages = session?.UnknownStringDataMessages ?? 0,
+                            UnknownArrayDataMessages = session?.UnknownArrayDataMessages ?? 0,
+                            UnknownScalarDataMessages = session?.UnknownScalarDataMessages ?? 0,
+                            UnknownEnvelopeCueShapeMessages = session?.UnknownEnvelopeCueShapeMessages ?? 0,
+                            UnknownJsonObjectDataMessages = session?.UnknownJsonObjectDataMessages ?? 0,
+                            UnknownJsonCueShapeMessages = session?.UnknownJsonCueShapeMessages ?? 0,
+                            UnknownNonObjectEnvelopeMessages = session?.UnknownNonObjectEnvelopeMessages ?? 0,
+                            UnknownJsonObjectEnvelopeMessages = session?.UnknownJsonObjectEnvelopeMessages ?? 0
+                        }
+                    };
+                }
+            }
+        }
         /// <summary>A fresh transport snapshot for explicit output arming; never restarts or extends a cue.</summary>
         public double CurrentPercent
         {
@@ -55,45 +104,161 @@ namespace LovenseConnector
 
         public FeelConnectClient()
         {
-            http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
+            http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
             ownHttp = true;
+            enableLegacy = true;
             socketFactory = ConnectSocketAsync;
         }
 
         // Offline fixtures supply both transports. Production callers cannot redirect credentials to a custom host.
-        internal FeelConnectClient(HttpClient http, Func<CancellationToken, Task<WebSocket>> socketFactory)
+        internal FeelConnectClient(HttpClient http, Func<CancellationToken, Task<WebSocket>> socketFactory, bool enableLegacy = false)
         {
             this.http = http ?? throw new ArgumentNullException(nameof(http));
             this.socketFactory = socketFactory ?? throw new ArgumentNullException(nameof(socketFactory));
+            this.enableLegacy = enableLegacy;
+            if (enableLegacy) http.Timeout = Timeout.InfiniteTimeSpan;
         }
 
-        public async Task PairAsync(string pairingValue, IEnumerable<string> deviceNames, CancellationToken cancellationToken = default)
+        public Task PairAsync(string pairingValue, IEnumerable<string> deviceNames, CancellationToken cancellationToken = default,
+            FeelConnectPlaybackMode playbackMode = FeelConnectPlaybackMode.Timed)
         {
+            ValidatePlaybackMode(playbackMode);
             var pairing = FeelConnectPairing.Parse(pairingValue);
-            string[] names = (deviceNames ?? Array.Empty<string>()).Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => new string(n.Trim().Where(c => !char.IsControl(c)).Take(80).ToArray()))
-                .Where(n => n.Length != 0).Distinct(StringComparer.Ordinal).Take(32).ToArray();
-            CancelCurrent("Pairing replaced");
+            string[] names = CleanDeviceNames(deviceNames);
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (sync)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                long request = ++lifecycleGeneration;
+                CancelCurrent("Pairing replaced");
+                return PairCoreAsync(pairing, names, playbackMode, cancellationToken, request);
+            }
+        }
+
+        /// <summary>Reuses only this active session's in-memory pairing value. A fresh receiver announces the selected format.</summary>
+        public Task ReconnectAsync(FeelConnectPlaybackMode mode, CancellationToken cancellationToken = default)
+        {
+            ValidatePlaybackMode(mode);
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (sync)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                if (current == null || !lastStatus.Connected || current.Stop.IsCancellationRequested || current.Pairing == null)
+                    throw new InvalidOperationException("Pair a video session before changing its playback mode.");
+                var pairing = current.Pairing;
+                string[] names = current.DeviceNames.ToArray();
+                long request = ++lifecycleGeneration;
+                CancelCurrent("Playback mode changed");
+                return PairCoreAsync(pairing, names, mode, cancellationToken, request);
+            }
+        }
+
+        static void ValidatePlaybackMode(FeelConnectPlaybackMode mode)
+        {
+            if (mode != FeelConnectPlaybackMode.Timed && mode != FeelConnectPlaybackMode.Live)
+                throw new ArgumentOutOfRangeException(nameof(mode), "Choose timed cues or live levels.");
+        }
+
+        async Task PairCoreAsync(FeelConnectPairing pairing, string[] names, FeelConnectPlaybackMode mode,
+            CancellationToken cancellationToken, long request)
+        {
             await lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
             Session session;
             try
             {
-                ObjectDisposedException.ThrowIf(disposed, this);
+                lock (sync) EnsureLifecycleRequest(request);
                 await RemoveCurrentAsync().ConfigureAwait(false);
-                session = new Session(pairing, names, cancellationToken);
-                lock (sync) { current = session; lastFrameAt = null; }
-                session.Worker = Task.Run(() => RunAsync(session));
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (sync)
+                {
+                    EnsureLifecycleRequest(request);
+                    session = new Session(pairing, names, mode, cancellationToken);
+                    current = session; lastFrameAt = null;
+                    session.Worker = Task.Run(() => RunAsync(session));
+                }
             }
             finally { lifecycle.Release(); }
             // The caller sees successful pairing only after namespace authentication, every room ACK and presence registration.
             await session.Ready.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        void EnsureLifecycleRequest(long request)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (request != lifecycleGeneration) throw new OperationCanceledException("A newer connection action replaced this request.");
+        }
+
+        static string[] CleanDeviceNames(IEnumerable<string> names) => (names ?? Array.Empty<string>())
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => new string(n.Trim().Where(c => !char.IsControl(c)).Take(80).ToArray()))
+            .Where(n => n.Length != 0).Distinct(StringComparer.Ordinal).Take(32).ToArray();
+
+        /// <summary>Updates existing device registration without changing output ownership.</summary>
+        public async Task UpdateDevicesAsync(IEnumerable<string> deviceNames, CancellationToken cancellationToken = default)
+        {
+            string[] names = CleanDeviceNames(deviceNames);
+            Session session;
+            CancellationToken lifetime;
+            lock (sync)
+            {
+                session = current;
+                if (session == null || !lastStatus.Connected || session.Stop.IsCancellationRequested) return;
+                if (SameDeviceNames(names, session.DeviceNames)) return;
+                lifetime = session.Stop.Token;
+            }
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime);
+            await PresenceAsync(session, true, cancellation.Token, names).ConfigureAwait(false);
+        }
+
+        static bool SameDeviceNames(string[] left, string[] right) => left.Length == right.Length &&
+            new HashSet<string>(left, StringComparer.Ordinal).SetEquals(right);
+
+        /// <summary>Read-only occupancy counts for the current QR-authorized channels.</summary>
+        public async Task<FeelConnectPresenceReport> CheckPresenceAsync(CancellationToken cancellationToken = default)
+        {
+            Session session;
+            CancellationToken lifetime;
+            lock (sync)
+            {
+                session = current;
+                if (session == null || !lastStatus.Connected || session.Stop.IsCancellationRequested || session.Legacy == null)
+                    throw new InvalidOperationException("Pair a video session before checking its website connection.");
+                lifetime = session.Stop.Token;
+            }
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime);
+            var report = await session.Legacy.InspectPresenceAsync(session.WebsiteRoom, cancellation.Token).ConfigureAwait(false);
+            lock (sync) EnsureCurrent(session);
+            return report;
+        }
+
+        /// <summary>One read-only check of the legacy SDK's fixed published route; never changes the active transport.</summary>
+        public async Task<FeelConnectRouteOccupancyReport> CheckReferenceRouteAsync(CancellationToken cancellationToken = default)
+        {
+            Session session;
+            CancellationToken lifetime;
+            lock (sync)
+            {
+                session = current;
+                if (session == null || !lastStatus.Connected || session.Stop.IsCancellationRequested || session.Legacy == null)
+                    throw new InvalidOperationException("Pair a video session before checking the old SDK route.");
+                lifetime = session.Stop.Token;
+            }
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime);
+            var report = await session.Legacy.InspectReferenceOccupancyAsync(session.WebsiteRoom, cancellation.Token).ConfigureAwait(false);
+            lock (sync) EnsureCurrent(session);
+            return report;
+        }
+
         public async Task DisconnectAsync()
         {
-            CancelCurrent("Disconnected");
+            long request;
+            lock (sync) { request = ++lifecycleGeneration; CancelCurrent("Disconnected"); }
             await lifecycle.WaitAsync().ConfigureAwait(false);
-            try { await RemoveCurrentAsync().ConfigureAwait(false); }
+            try
+            {
+                lock (sync) if (request != lifecycleGeneration) return;
+                await RemoveCurrentAsync().ConfigureAwait(false);
+            }
             finally { lifecycle.Release(); }
         }
 
@@ -139,9 +304,18 @@ namespace LovenseConnector
                 var roomsTask = RequestAsync("myrooms", session.AccessToken, null, session.Stop.Token);
                 await Task.WhenAll(realtimeTask, roomsTask).ConfigureAwait(false);
                 using (var realtime = await realtimeTask.ConfigureAwait(false))
+                {
                     session.WebsiteRoom = RequiredString(realtime.RootElement, "pubnub_channel", 512);
+                    session.WebsiteName = CleanWebsiteName(FeelConnectProtocol.String(realtime.RootElement, "partner_website"));
+                    session.Protocol.TargetUser = FeelConnectProtocol.String(realtime.RootElement, "external_user_id");
+                }
                 string[] rooms;
                 using (var roomData = await roomsTask.ConfigureAwait(false)) rooms = ReadRooms(roomData.RootElement, session.WebsiteRoom);
+                if (enableLegacy)
+                {
+                    using var configuration = await RequestAsync("firmware", "", null, session.Stop.Token).ConfigureAwait(false);
+                    session.UseFecWebsite = ReadTransportFlag(configuration.RootElement, "FC3_APP_SOCKETIO_TIPS_WEBSITES_CHANNELS_code");
+                }
                 PublishStatus(session, "Connecting", "Connecting to the live cue service…", false);
                 using (var connectDeadline = CancellationTokenSource.CreateLinkedTokenSource(session.Stop.Token))
                 {
@@ -153,15 +327,29 @@ namespace LovenseConnector
                 await JoinRoomsAsync(session, rooms).ConfigureAwait(false);
                 session.PresenceRegistered = true;
                 await PresenceAsync(session, true, session.Stop.Token).ConfigureAwait(false);
+                if (enableLegacy)
+                {
+                    PublishStatus(session, "Connecting", "Enabling the website’s legacy video connection…", false);
+                    session.Legacy = new FeelConnectLegacy(http, rooms,
+                        (envelope, generation) => HandleEnvelope(session, envelope, false, generation), session.Stop.Token,
+                        disconnected: reason => LegacyFailed(session, reason),
+                        messageHandlerVersion: session.PlaybackMode == FeelConnectPlaybackMode.Live ? 2 : 3);
+                    session.Legacy.Start();
+                    await session.Legacy.Ready.WaitAsync(TimeSpan.FromSeconds(20), session.Stop.Token).ConfigureAwait(false);
+                }
                 lock (sync)
                 {
                     EnsureCurrent(session);
                     session.Accepting = true;
+                    session.Starting = false;
                     EmitStatusLocked(session, "Connected", "Connected. Waiting for video cues.", true);
+                    EmitBufferedLocked(session);
                 }
                 session.Ready.TrySetResult();
                 session.TimerTask = TimerLoopAsync(session);
-                Task completed = await Task.WhenAny(session.ReceiveTask, session.TimerTask).ConfigureAwait(false);
+                session.MetadataTask = MetadataLoopAsync(session);
+                Task completed = await Task.WhenAny(session.Legacy == null ? new[] { session.ReceiveTask, session.TimerTask, session.MetadataTask } :
+                    new[] { session.ReceiveTask, session.TimerTask, session.MetadataTask, session.Legacy.Worker }).ConfigureAwait(false);
                 await completed.ConfigureAwait(false);
                 throw new ReceiverException("Disconnected", "The video connection closed. Pair again to reconnect.");
             }
@@ -182,8 +370,9 @@ namespace LovenseConnector
                 }
                 session.Ready.TrySetException(new InvalidOperationException(message));
                 foreach (var ack in session.Acks.Values) ack.TrySetCanceled();
-                foreach (Task task in new[] { session.ReceiveTask, session.TimerTask, session.RefreshTask })
+                foreach (Task task in new[] { session.ReceiveTask, session.TimerTask, session.RefreshTask, session.MetadataTask })
                     if (task != null) try { await task.ConfigureAwait(false); } catch { }
+                if (session.Legacy != null) await session.Legacy.DisposeAsync().ConfigureAwait(false);
                 if (session.PresenceRegistered && session.AccessToken.Length != 0)
                 {
                     using var offlineDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -243,28 +432,232 @@ namespace LovenseConnector
                 using (var data = Parse(json.AsMemory()))
                 {
                     var root = data.RootElement;
-                    if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 2 || root[0].ValueKind != JsonValueKind.String || root[0].GetString() != "message") continue;
-                    lock (sync)
-                    {
-                        EnsureCurrent(session);
-                        session.Messages++;
-                        if (!session.Accepting)
-                        {
-                            // A website can create its video room as soon as it sees online presence, before the
-                            // HTTP acknowledgement returns. Retain that notification while discarding early cues.
-                            var envelope = root[1];
-                            if (FeelConnectProtocol.String(envelope, "room") == session.WebsiteRoom &&
-                                (FeelConnectProtocol.String(envelope, "message_type") == "website:rooms_changed" ||
-                                (envelope.TryGetProperty("data", out var earlyData) && FeelConnectProtocol.String(earlyData, "what") == "rooms_changed")))
-                                session.RefreshRequested = true;
-                            continue;
-                        }
-                        FeelConnectOutput output = session.Protocol.Accept(root[1], session.Clock.ElapsedMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                        if (output != null) { lastFrameAt = DateTimeOffset.UtcNow; EmitOutputLocked(session, output); }
-                        if (session.Protocol.RoomsChanged) session.RefreshRequested = true;
-                        EmitStatusLocked(session, "Connected", output?.Kind ?? "Listening for video cues.", true);
-                    }
+                    if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 2 || root[0].ValueKind != JsonValueKind.String || root[0].GetString() != "message")
+                    { CountOtherFecEvent(session, root); continue; }
+                    HandleEnvelope(session, root[1], true);
                 }
+            }
+        }
+
+        void HandleEnvelope(Session session, JsonElement envelope, bool fromFec, int legacyGeneration = 0)
+        {
+            lock (sync)
+            {
+                EnsureCurrent(session);
+                if (!fromFec && session.Legacy?.Generation != legacyGeneration) return;
+                session.Messages++;
+                if (fromFec) session.FecMessages++; else session.LegacyMessages++;
+                string room = FeelConnectProtocol.String(envelope, "room");
+                string kind = FeelConnectProtocol.String(envelope, "message_type");
+                bool website = room == session.WebsiteRoom;
+                bool roomChange = website && (kind == "website:rooms_changed" ||
+                    (envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("data", out var data) && FeelConnectProtocol.String(data, "what") == "rooms_changed"));
+                // Online presence can cause the website to create a video room before its HTTP acknowledgement.
+                if (roomChange) session.RefreshRequested = true;
+                bool presence = kind == "system:presence";
+                if (fromFec && presence && !website && session.AllowedRooms.Contains(room) && session.Joined.Contains(room) &&
+                    envelope.TryGetProperty("data", out var presenceData) && FeelConnectProtocol.String(presenceData, "action") == "join")
+                    session.PendingMetadata.Add(room);
+                bool candidate = IsCueCandidate(envelope, kind);
+                if (candidate) session.CandidateCues++;
+                else if (!presence && !roomChange)
+                {
+                    session.UnrecognizedMessages++;
+                    CountUnknownMessage(session, envelope, kind);
+                }
+                if (!session.AllowedRooms.Contains(room)) return;
+                // Website controls migrate independently. Authorized video rooms can deliver their
+                // versioned cues over either transport, including while website controls use FEC.
+                bool modern = kind == "device:position" || kind == "room:play" || kind == "room:stop";
+                if (!presence && !roomChange && website && ((modern && !fromFec) || (!modern && fromFec != session.UseFecWebsite))) return;
+                if (!session.Accepting)
+                {
+                    // The first legacy subscribe response can already contain fresh cues. Decode them on their
+                    // original monotonic clock, but do not emit until all pairing acknowledgements have succeeded.
+                    if ((session.Starting || session.Buffering) && !roomChange)
+                    {
+                        var startup = session.Protocol.Accept(envelope, session.Clock.ElapsedMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                        if (startup != null)
+                        {
+                            session.StartupOutput = startup; session.BufferedRoom = room;
+                            if (candidate) RecordCueLocked(session, startup);
+                        }
+                    }
+                    return;
+                }
+                long now = session.Clock.ElapsedMilliseconds;
+                string fingerprint = website ? null : VideoPlayFingerprint(envelope);
+                PruneVideoReceipts(session, now);
+                if (fingerprint != null && session.VideoReceipts.TryGetValue(fingerprint, out var prior) && prior.FromFec != fromFec) return;
+                FeelConnectOutput output = session.Protocol.Accept(envelope, now, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                if (output != null)
+                {
+                    // Rejected and startup-buffered messages never enter the replay cache. Stops are
+                    // always decoded, while accepted play receipts survive a stop to reject a late mirror.
+                    if (fingerprint != null && !session.VideoReceipts.ContainsKey(fingerprint))
+                    {
+                        session.VideoReceipts.Add(fingerprint, new VideoReceipt(now, fromFec));
+                        session.VideoReceiptOrder.Enqueue(fingerprint);
+                        PruneVideoReceipts(session, now);
+                    }
+                    if (candidate) RecordCueLocked(session, output);
+                    EmitOutputLocked(session, output);
+                }
+                EmitStatusLocked(session, "Connected", output?.Kind ?? "Listening for video cues.", true);
+            }
+        }
+
+        static string VideoPlayFingerprint(JsonElement envelope)
+        {
+            if (!envelope.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object ||
+                !FeelConnectProtocol.TryNumber(data, "ver", out double version) || version != 3 ||
+                FeelConnectProtocol.String(data, "type") != "play" ||
+                !FeelConnectProtocol.TryNumber(data, "serverTime", out double stamp) ||
+                !data.TryGetProperty("subtitles", out var subtitles) || subtitles.ValueKind != JsonValueKind.Array ||
+                subtitles.GetArrayLength() == 0 || subtitles.GetArrayLength() > 10000) return null;
+            // A producer identity and timestamp distinguish a mirrored batch from an intentional replay.
+            // Prefer its in-payload identity, which remains stable when transport publisher IDs differ.
+            string publisher = FeelConnectProtocol.String(data, "src");
+            if (publisher.Length == 0) publisher = FeelConnectProtocol.String(envelope, "publisher");
+            if (publisher.Length == 0) return null;
+            using var bytes = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(bytes))
+            {
+                writer.WriteStartArray();
+                writer.WriteStringValue(FeelConnectProtocol.String(envelope, "room"));
+                writer.WriteStringValue(publisher);
+                writer.WriteNumberValue(stamp);
+                foreach (var cue in subtitles.EnumerateArray())
+                {
+                    if (!FeelConnectProtocol.TryNumber(cue, "time", out double time) ||
+                        !FeelConnectProtocol.TryNumber(cue, "subtitle", out double value)) return null;
+                    writer.WriteStartArray(); writer.WriteNumberValue(time); writer.WriteNumberValue(value); writer.WriteEndArray();
+                }
+                writer.WriteEndArray();
+            }
+            return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0, (int)bytes.Length)));
+        }
+
+        static void PruneVideoReceipts(Session session, long now)
+        {
+            while (session.VideoReceiptOrder.TryPeek(out string key) &&
+                (session.VideoReceipts.Count > 512 || now - session.VideoReceipts[key].At > 60000))
+            {
+                session.VideoReceiptOrder.Dequeue(); session.VideoReceipts.Remove(key);
+            }
+        }
+
+        static bool IsCueCandidate(JsonElement envelope, string kind)
+        {
+            if (kind == "website:device_speed" || kind == "website:tip" || kind == "device:position" || kind == "room:play" || kind == "room:stop") return true;
+            if (envelope.ValueKind != JsonValueKind.Object || !envelope.TryGetProperty("data", out var data)) return false;
+            string what = FeelConnectProtocol.String(data, "what");
+            return what == "device_speed" || what == "tip" || what == "device_percent" || FeelConnectProtocol.TryNumber(data, "ver", out _);
+        }
+
+        static string CleanWebsiteName(string value)
+        {
+            var text = new StringBuilder();
+            foreach (var rune in (value ?? "").EnumerateRunes())
+            {
+                var category = Rune.GetUnicodeCategory(rune);
+                if (category == UnicodeCategory.Control || category == UnicodeCategory.Format) continue;
+                if (text.Length + rune.Utf16SequenceLength > 80) break;
+                text.Append(rune.ToString());
+            }
+            return text.ToString().Trim();
+        }
+
+        void CountOtherFecEvent(Session session, JsonElement packet)
+        {
+            lock (sync)
+            {
+                EnsureCurrent(session);
+                FeelConnectCounters.Increment(ref session.FecOtherEvents);
+                string name = packet.ValueKind == JsonValueKind.Array && packet.GetArrayLength() > 0 && packet[0].ValueKind == JsonValueKind.String
+                    ? packet[0].GetString() : "";
+                if (name == "device:position" || name == "room:play" || name == "room:stop" || name == "room:message" || name == "website:device_speed" || name == "website:tip")
+                    FeelConnectCounters.Increment(ref session.FecControlEvents);
+                else if (name == "system:presence" || name == "website:rooms_changed" || IsSessionMetadata(name))
+                    FeelConnectCounters.Increment(ref session.FecSessionEvents);
+                else FeelConnectCounters.Increment(ref session.FecUnknownEvents);
+            }
+        }
+        static bool IsSessionMetadata(string name) => name == "user-authentication" || name == "user-devices-changed" ||
+            name == "webshare:session_metadata" || name == "webshare:session_update" || name == "webshare:presence" || name == "website:devices_changed";
+
+        static void CountUnknownMessage(Session session, JsonElement envelope, string kind)
+        {
+            // Fixed structural counts only. Never retain or expose arbitrary event names, keys or data values.
+            if (envelope.ValueKind != JsonValueKind.Object)
+            {
+                FeelConnectCounters.Increment(ref session.UnknownNonObjectEnvelopeMessages);
+                CountJsonStringShape(session, envelope, true);
+            }
+            if (HasCueShape(envelope)) FeelConnectCounters.Increment(ref session.UnknownEnvelopeCueShapeMessages);
+            bool hasData = envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("data", out _);
+            JsonElement data = hasData ? envelope.GetProperty("data") : default;
+            if (IsSessionMetadata(kind) || IsSessionMetadata(FeelConnectProtocol.String(data, "what")))
+                FeelConnectCounters.Increment(ref session.SessionMetadataMessages);
+            if (data.ValueKind != JsonValueKind.Object)
+            {
+                FeelConnectCounters.Increment(ref session.UnknownNonObjectDataMessages);
+                if (!hasData) FeelConnectCounters.Increment(ref session.UnknownMissingDataMessages);
+                else if (data.ValueKind == JsonValueKind.Null) FeelConnectCounters.Increment(ref session.UnknownNullDataMessages);
+                else if (data.ValueKind == JsonValueKind.String)
+                {
+                    FeelConnectCounters.Increment(ref session.UnknownStringDataMessages);
+                    CountJsonStringShape(session, data, false);
+                }
+                else if (data.ValueKind == JsonValueKind.Array) FeelConnectCounters.Increment(ref session.UnknownArrayDataMessages);
+                else FeelConnectCounters.Increment(ref session.UnknownScalarDataMessages);
+                return;
+            }
+            FeelConnectCounters.Increment(ref session.UnknownObjectDataMessages);
+            if (HasCueShape(data)) FeelConnectCounters.Increment(ref session.UnknownCueShapeMessages);
+        }
+        static bool HasCueShape(JsonElement data) => data.ValueKind == JsonValueKind.Object &&
+            (data.TryGetProperty("ver", out _) || data.TryGetProperty("percents", out _) || data.TryGetProperty("values", out _) ||
+                data.TryGetProperty("subtitles", out _) || data.TryGetProperty("strength", out _) || data.TryGetProperty("payload", out _));
+
+        static void CountJsonStringShape(Session session, JsonElement value, bool envelope)
+        {
+            if (value.ValueKind != JsonValueKind.String) return;
+            string text = value.GetString();
+            if (text.Length > 16384 || !text.AsSpan().TrimStart().StartsWith("{")) return;
+            try
+            {
+                using var parsed = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 16 });
+                if (parsed.RootElement.ValueKind != JsonValueKind.Object) return;
+                if (envelope) FeelConnectCounters.Increment(ref session.UnknownJsonObjectEnvelopeMessages);
+                else FeelConnectCounters.Increment(ref session.UnknownJsonObjectDataMessages);
+                if (HasCueShape(parsed.RootElement) || (parsed.RootElement.TryGetProperty("data", out var nested) && HasCueShape(nested)))
+                    FeelConnectCounters.Increment(ref session.UnknownJsonCueShapeMessages);
+            }
+            catch (JsonException) { }
+        }
+
+        void RecordCueLocked(Session session, FeelConnectOutput output)
+        {
+            session.AcceptedCues++; session.LastCueKind = output.Kind; lastFrameAt = DateTimeOffset.UtcNow;
+        }
+        void EmitBufferedLocked(Session session)
+        {
+            if (session.StartupOutput != null)
+                EmitOutputLocked(session, session.Protocol.Tick(session.Clock.ElapsedMilliseconds) ?? session.StartupOutput);
+            session.StartupOutput = null;
+            session.BufferedRoom = "";
+        }
+
+        void LegacyFailed(Session session, string reason)
+        {
+            lock (sync)
+            {
+                if (!ReferenceEquals(current, session) || session.Stop.IsCancellationRequested) return;
+                session.Accepting = false;
+                EmitOutputLocked(session, session.Protocol.Reset(reason));
+                EmitStatusLocked(session, "Disconnected", reason, false);
+                session.Stop.Cancel(); session.Socket?.Abort();
             }
         }
 
@@ -288,8 +681,11 @@ namespace LovenseConnector
                     {
                         session.RefreshRequested = false; session.LastRefreshMs = session.Clock.ElapsedMilliseconds;
                         session.Accepting = false;
+                        session.Buffering = true; session.StartupOutput = null; session.BufferedRoom = "";
                         EmitOutputLocked(session, session.Protocol.Reset("Refreshing video rooms"));
-                        EmitStatusLocked(session, "Connecting", "Updating the website connection…", false);
+                        // A room update keeps the same authenticated connection. Clear old cues while
+                        // preserving the consumer's explicit enabled-output choice; failures still disconnect.
+                        EmitStatusLocked(session, "Refreshing", "Updating the video rooms…", true);
                         session.RefreshTask = RefreshRoomsAsync(session);
                     }
                 }
@@ -304,25 +700,90 @@ namespace LovenseConnector
             await JoinRoomsAsync(session, rooms).ConfigureAwait(false);
             lock (sync)
             {
-                EnsureCurrent(session); session.Accepting = true;
+                EnsureCurrent(session); session.Accepting = true; session.Buffering = false;
                 EmitStatusLocked(session, "Connected", "Video connection updated. Waiting for fresh cues.", true);
+                EmitBufferedLocked(session);
             }
         }
 
         async Task JoinRoomsAsync(Session session, string[] rooms)
         {
+            // Authenticated API metadata establishes the allowlist before a newly joined room can send its first cue.
+            lock (sync)
+            {
+                EnsureCurrent(session);
+                session.AllowedRooms.Clear(); session.AllowedRooms.UnionWith(rooms);
+                session.PendingMetadata.IntersectWith(session.AllowedRooms);
+                foreach (string removed in session.MetadataSentAt.Keys.Except(rooms, StringComparer.Ordinal).ToArray())
+                    session.MetadataSentAt.Remove(removed);
+                session.Protocol.SetRooms(rooms);
+                if (session.StartupOutput != null && !rooms.Contains(session.BufferedRoom, StringComparer.Ordinal))
+                { session.StartupOutput = null; session.BufferedRoom = ""; }
+                session.VideoRooms = rooms.Count(x => x != session.WebsiteRoom);
+            }
             // Acknowledgements are required: receiving a WebSocket upgrade alone is not a paired website.
-            foreach (string room in rooms.Except(session.Joined, StringComparer.Ordinal))
+            string[] additions, removals;
+            lock (sync)
+            {
+                additions = rooms.Except(session.Joined, StringComparer.Ordinal).ToArray();
+                removals = session.Joined.Except(rooms, StringComparer.Ordinal).ToArray();
+            }
+            foreach (string room in additions)
             {
                 await RoomActionAsync(session, "room:join", room).ConfigureAwait(false);
-                session.Joined.Add(room);
+                lock (sync) { EnsureCurrent(session); session.Joined.Add(room); }
+                if (room != session.WebsiteRoom) await SendRoomMetadataAsync(session, room).ConfigureAwait(false);
             }
-            foreach (string removed in session.Joined.Except(rooms, StringComparer.Ordinal).ToArray())
+            foreach (string removed in removals)
             {
                 await RoomActionAsync(session, "room:leave", removed).ConfigureAwait(false);
-                session.Joined.Remove(removed);
+                lock (sync) { EnsureCurrent(session); session.Joined.Remove(removed); }
             }
-            lock (sync) { EnsureCurrent(session); session.Protocol.SetRooms(rooms); }
+            session.Legacy?.SetChannels(rooms);
+        }
+
+        async Task MetadataLoopAsync(Session session)
+        {
+            // A slow metadata send must not stall cue scheduling or its output timeout.
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+            while (await timer.WaitForNextTickAsync(session.Stop.Token).ConfigureAwait(false))
+                await FlushMetadataAsync(session).ConfigureAwait(false);
+        }
+
+        async Task FlushMetadataAsync(Session session)
+        {
+            string[] pending;
+            lock (sync)
+            {
+                EnsureCurrent(session);
+                long now = session.Clock.ElapsedMilliseconds;
+                pending = session.PendingMetadata.Where(room => !session.MetadataSentAt.TryGetValue(room, out long sent) || now - sent >= 250).ToArray();
+            }
+            foreach (string room in pending) await SendRoomMetadataAsync(session, room).ConfigureAwait(false);
+        }
+
+        async Task SendRoomMetadataAsync(Session session, string room)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(session.Stop.Token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(8));
+            await session.SendLock.WaitAsync(deadline.Token).ConfigureAwait(false);
+            try
+            {
+                string[] names;
+                lock (sync)
+                {
+                    EnsureCurrent(session);
+                    session.PendingMetadata.Remove(room);
+                    if (room == session.WebsiteRoom || !session.AllowedRooms.Contains(room) || !session.Joined.Contains(room)) return;
+                    names = session.DeviceNames.ToArray();
+                    session.MetadataSentAt[room] = session.Clock.ElapsedMilliseconds;
+                }
+                string packet = "42/pubnub," + JsonSerializer.Serialize(new object[] { "message", new {
+                    room, message_type = "webshare:session_metadata", data = new { room, devices = names }
+                } });
+                await session.Socket.SendAsync(Utf8.GetBytes(packet).AsMemory(), WebSocketMessageType.Text, true, deadline.Token).ConfigureAwait(false);
+            }
+            finally { session.SendLock.Release(); }
         }
 
         async Task RoomActionAsync(Session session, string action, string room)
@@ -341,10 +802,26 @@ namespace LovenseConnector
             finally { session.Acks.TryRemove(id, out _); }
         }
 
-        async Task PresenceAsync(Session session, bool online, CancellationToken cancellationToken)
+        async Task PresenceAsync(Session session, bool online, CancellationToken cancellationToken, string[] updatedNames = null)
         {
-            using var result = await RequestAsync("presence2", session.AccessToken,
-                new { online = online ? 1 : 0, devices = session.DeviceNames }, cancellationToken).ConfigureAwait(false);
+            await session.PresenceLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                string[] names;
+                lock (sync)
+                {
+                    if (online) EnsureCurrent(session);
+                    if (updatedNames != null && SameDeviceNames(updatedNames, session.DeviceNames)) return;
+                    names = updatedNames ?? session.DeviceNames;
+                }
+                using var result = await RequestAsync("presence2", session.AccessToken,
+                    new { online = online ? 1 : 0, devices = names }, cancellationToken).ConfigureAwait(false);
+                if (online && updatedNames != null)
+                {
+                    lock (sync) { EnsureCurrent(session); session.DeviceNames = updatedNames; }
+                }
+            }
+            finally { session.PresenceLock.Release(); }
         }
 
         async Task<JsonDocument> RequestAsync(string operation, string credential, object body, CancellationToken cancellationToken)
@@ -354,7 +831,7 @@ namespace LovenseConnector
             requestDeadline.CancelAfter(TimeSpan.FromSeconds(15));
             cancellationToken = requestDeadline.Token;
             using var request = new HttpRequestMessage(body == null ? HttpMethod.Get : HttpMethod.Put,
-                new Uri(ApiRoot, operation + "/" + Uri.EscapeDataString(credential)));
+                new Uri(ApiRoot, operation + (credential.Length == 0 ? "" : "/" + Uri.EscapeDataString(credential))));
             if (body != null) request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
@@ -384,6 +861,12 @@ namespace LovenseConnector
                 throw new ReceiverException("Unsupported", "The website returned an unsupported room list.");
             foreach (var room in rooms.EnumerateArray()) result.Add(RequiredString(room, "pubnub_channel", 512));
             return result.ToArray();
+        }
+
+        static bool ReadTransportFlag(JsonElement configuration, string property)
+        {
+            if (FeelConnectProtocol.TryNumber(configuration, property, out double value) && (value == 0 || value == 1)) return value == 1;
+            throw new ReceiverException("Unsupported", "The service returned an unsupported video transport configuration.");
         }
 
         static string RequiredString(JsonElement data, string property, int maxLength)
@@ -475,7 +958,8 @@ namespace LovenseConnector
         void EmitStatusLocked(Session session, string phase, string message, bool connected)
         {
             if (!ReferenceEquals(current, session)) return;
-            try { StatusChanged?.Invoke(new FeelConnectStatus(phase, message, connected, session.Messages)); } catch { }
+            lastStatus = new FeelConnectStatus(phase, message, connected, session.Messages);
+            try { StatusChanged?.Invoke(lastStatus); } catch { }
         }
 
         public async ValueTask DisposeAsync()
@@ -485,10 +969,14 @@ namespace LovenseConnector
             if (ownHttp) http.Dispose();
         }
 
+        readonly record struct VideoReceipt(long At, bool FromFec);
+
         sealed class Session
         {
             public FeelConnectPairing Pairing;
-            public readonly string[] DeviceNames;
+            public readonly FeelConnectPlaybackMode PlaybackMode;
+            public string[] DeviceNames;
+            public readonly SemaphoreSlim PresenceLock = new(1, 1);
             public readonly CancellationTokenSource Stop;
             public readonly Stopwatch Clock = Stopwatch.StartNew();
             public readonly FeelConnectProtocol Protocol = new();
@@ -496,15 +984,34 @@ namespace LovenseConnector
             public readonly TaskCompletionSource Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly ConcurrentDictionary<int, TaskCompletionSource<bool>> Acks = new();
             public readonly HashSet<string> Joined = new(StringComparer.Ordinal);
+            public readonly HashSet<string> AllowedRooms = new(StringComparer.Ordinal);
+            public readonly HashSet<string> PendingMetadata = new(StringComparer.Ordinal);
+            public readonly Dictionary<string, long> MetadataSentAt = new(StringComparer.Ordinal);
+            public readonly Dictionary<string, VideoReceipt> VideoReceipts = new(StringComparer.Ordinal);
+            public readonly Queue<string> VideoReceiptOrder = new();
             public string AccessToken = "", FecToken = "", WebsiteRoom = "";
             public WebSocket Socket;
-            public Task Worker, ReceiveTask, TimerTask, RefreshTask;
+            public FeelConnectLegacy Legacy;
+            public Task Worker, ReceiveTask, TimerTask, RefreshTask, MetadataTask;
             public DateTimeOffset? ExpiresAt;
             public bool Accepting, PresenceRegistered, RefreshRequested;
+            public bool UseFecWebsite = true;
+            public bool Starting = true, Buffering;
+            public FeelConnectOutput StartupOutput;
+            public string BufferedRoom = "";
+            public string WebsiteName = "";
+            public int VideoRooms;
+            public long FecMessages, LegacyMessages, CandidateCues, AcceptedCues, UnrecognizedMessages;
+            public long FecOtherEvents, FecControlEvents, FecSessionEvents, FecUnknownEvents;
+            public long SessionMetadataMessages, UnknownObjectDataMessages, UnknownNonObjectDataMessages, UnknownCueShapeMessages;
+            public long UnknownMissingDataMessages, UnknownNullDataMessages, UnknownStringDataMessages, UnknownArrayDataMessages, UnknownScalarDataMessages;
+            public long UnknownEnvelopeCueShapeMessages, UnknownJsonObjectDataMessages, UnknownJsonCueShapeMessages;
+            public long UnknownNonObjectEnvelopeMessages, UnknownJsonObjectEnvelopeMessages;
+            public string LastCueKind = "";
             public long Messages, LastRefreshMs;
             public int NextAck, HeartbeatMs = 45000;
-            public Session(FeelConnectPairing pairing, string[] names, CancellationToken cancellationToken)
-            { Pairing = pairing; DeviceNames = names; Stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); }
+            public Session(FeelConnectPairing pairing, string[] names, FeelConnectPlaybackMode playbackMode, CancellationToken cancellationToken)
+            { Pairing = pairing; DeviceNames = names; PlaybackMode = playbackMode; Stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); }
         }
 
         sealed class ReceiverException : Exception

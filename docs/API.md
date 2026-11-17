@@ -18,11 +18,17 @@ POST requests also need `Content-Type: application/json` and a JSON object body.
 
 | Request | Response |
 |---|---|
-| `GET /status` | API/app versions, whether integrations are enabled, test status, current session, and devices |
+| `GET /status` | API/app versions, whether integrations are enabled, test status, current session, devices, and video diagnostics |
 | `GET /devices` | `devices` array |
 | `GET /capabilities` | Native range, pattern names, and API routes |
 
 Device objects include `id`, `name`, `connected`, `firmware`, `battery`, and `motors`. Motor objects include `channel`, `min`, `max`, `step`, `acknowledgedLevel`, and `active`. Discover IDs and channel numbers at runtime; never assume a particular model or connection order. An acknowledged level is the last accepted command, not measured motor speed. A level of `-1` means output is unconfirmed.
+
+The status response's `video` object reports `phase`, `connected`, `playbackMode` (`timed` or `live`), `videoRooms`, `fecMessages`, `legacyMessages`, `candidateCues`, `acceptedCues`, `unrecognizedMessages`, `lastCueKind`, and `lastCueAt`. Its `transport` object contains aggregate received/filtered message counts for troubleshooting. `videoOutputEnabled` separately reports whether the user has enabled video output; `enabled` refers to app/game integrations. These are session counters and decoding status, not proof of physical output. They include no pairing credentials, payloads, or remote channel identifiers.
+
+`videoPresence` is the last explicit **Check website** result, or `null` if no check is available for this session. It contains aggregate receiver and browser-peer counts for authorized legacy website/video channels. Reading status does not contact the remote service. Modern FEC-only clients are not represented by these legacy presence counts.
+
+`videoReferencePresence` similarly caches the manual **Check old SDK route** occupancy result. This diagnostic does not change transport routing.
 
 ## Own a session
 
@@ -118,7 +124,9 @@ Modes are `Steady`, `Pulse`, `Wave`, `Ramp`, and `Custom`. Level range is 0–20
 
 Omitted pattern fields use: `version: 1`, `name: "My pattern"`, `mode: "Pulse"`, `low: 0`, `high: 3`, `periodMs: 2000`, `durationMs: 10000`, `dutyPercent: 50`, `phaseDegrees: 0`, `transitionMs: 0`, `repeat: true`, `interpolate: false`, and an empty `frames` array. Pattern `transitionMs` accepts 0–10000.
 
-For `Custom`, supply 2–512 ordered frames such as `[{"ms":0,"level":0},{"ms":500,"level":12},{"ms":1000,"level":0}]`. The first time must be zero, adjacent times must be at least 100 ms apart, times must fit within `periodMs`, and each level must be 0–20. `interpolate` chooses gradual or stepped transitions.
+For `Custom`, supply 2–512 ordered frames such as `[{"ms":0,"level":0},{"ms":500,"level":12},{"ms":1000,"level":0}]`. The first time must be zero, adjacent times must be at least 100 ms apart, times must fit within `periodMs`, and each level must be 0–20. Set `curve` to `step`, `linear`, or `smooth`. Smooth eases between points without exceeding their levels. When `curve` is omitted, the older `interpolate` flag still chooses linear or stepped transitions.
+
+Optional `stopAtMs` sets a deadline on the shared pattern clock (0–3600000; default 0 means none). This lets motors joining a synchronized pattern stop at the original ending time. `durationMs` remains the duration measured from each motor's start. The earlier limit wins when both are set.
 
 ## Errors and limits
 

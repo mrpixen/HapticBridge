@@ -3,11 +3,92 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace LovenseConnector
 {
+    public enum FeelConnectPlaybackMode { Timed, Live }
     public sealed record FeelConnectOutput(double Percent, string Kind, bool IsStop);
     public sealed record FeelConnectStatus(string Phase, string Message, bool Connected, long MessagesReceived);
+    public sealed record FeelConnectPresenceRole(
+        [property: JsonPropertyName("channels")] int Channels,
+        [property: JsonPropertyName("selfPresentChannels")] int SelfPresentChannels,
+        [property: JsonPropertyName("selfVersion3Channels")] int SelfVersion3Channels,
+        [property: JsonPropertyName("totalOccupancy")] int TotalOccupancy,
+        [property: JsonPropertyName("watchPeers")] int WatchPeers,
+        [property: JsonPropertyName("playerPeers")] int PlayerPeers,
+        [property: JsonPropertyName("otherPeers")] int OtherPeers);
+    public sealed record FeelConnectPresenceReport(
+        [property: JsonPropertyName("website")] FeelConnectPresenceRole Website,
+        [property: JsonPropertyName("video")] FeelConnectPresenceRole Video,
+        [property: JsonPropertyName("complete")] bool Complete);
+    public sealed record FeelConnectDiagnostics(
+        [property: JsonPropertyName("phase")] string Phase,
+        [property: JsonPropertyName("connected")] bool Connected,
+        [property: JsonPropertyName("videoRooms")] int VideoRooms,
+        [property: JsonPropertyName("fecMessages")] long FecMessages,
+        [property: JsonPropertyName("legacyMessages")] long LegacyMessages,
+        [property: JsonPropertyName("candidateCues")] long CandidateCues,
+        [property: JsonPropertyName("acceptedCues")] long AcceptedCues,
+        [property: JsonPropertyName("unrecognizedMessages")] long UnrecognizedMessages,
+        [property: JsonPropertyName("lastCueKind")] string LastCueKind,
+        [property: JsonPropertyName("lastCueAt")] DateTimeOffset? LastCueAt)
+    {
+        [JsonPropertyName("playbackMode")] public string PlaybackMode { get; init; } = "timed";
+        [JsonPropertyName("transport")] public FeelConnectTransportDiagnostics Transport { get; init; } = new();
+        [JsonPropertyName("v2")] public FeelConnectV2Diagnostics V2 { get; init; } = new();
+    }
+    /// <summary>Validated V2 input statistics for one pairing session; no payloads or source identifiers.</summary>
+    public sealed record FeelConnectV2Diagnostics
+    {
+        [JsonPropertyName("acceptedBatches")] public long AcceptedBatches { get; init; }
+        [JsonPropertyName("samples")] public long Samples { get; init; }
+        [JsonPropertyName("positiveSamples")] public long PositiveSamples { get; init; }
+        [JsonPropertyName("mixedBatches")] public long MixedBatches { get; init; }
+        [JsonPropertyName("lastBatchSamples")] public int LastBatchSamples { get; init; }
+        [JsonPropertyName("lastBatchMaximum")] public double LastBatchMaximum { get; init; }
+        [JsonPropertyName("lastBatchFinal")] public double LastBatchFinal { get; init; }
+    }
+    public sealed record FeelConnectTransportDiagnostics
+    {
+        [JsonPropertyName("legacyRawFrames")] public long LegacyRawFrames { get; init; }
+        [JsonPropertyName("legacyDroppedShape")] public long LegacyDroppedShape { get; init; }
+        [JsonPropertyName("legacyDroppedScope")] public long LegacyDroppedScope { get; init; }
+        [JsonPropertyName("legacyDroppedType")] public long LegacyDroppedType { get; init; }
+        [JsonPropertyName("legacyDroppedTime")] public long LegacyDroppedTime { get; init; }
+        [JsonPropertyName("legacyDroppedStale")] public long LegacyDroppedStale { get; init; }
+        [JsonPropertyName("legacyDroppedReplay")] public long LegacyDroppedReplay { get; init; }
+        [JsonPropertyName("fecOtherEvents")] public long FecOtherEvents { get; init; }
+        [JsonPropertyName("fecControlEvents")] public long FecControlEvents { get; init; }
+        [JsonPropertyName("fecSessionEvents")] public long FecSessionEvents { get; init; }
+        [JsonPropertyName("fecUnknownEvents")] public long FecUnknownEvents { get; init; }
+        [JsonPropertyName("sessionMetadataMessages")] public long SessionMetadataMessages { get; init; }
+        [JsonPropertyName("unknownObjectDataMessages")] public long UnknownObjectDataMessages { get; init; }
+        [JsonPropertyName("unknownNonObjectDataMessages")] public long UnknownNonObjectDataMessages { get; init; }
+        [JsonPropertyName("unknownCueShapeMessages")] public long UnknownCueShapeMessages { get; init; }
+        [JsonPropertyName("unknownMissingDataMessages")] public long UnknownMissingDataMessages { get; init; }
+        [JsonPropertyName("unknownNullDataMessages")] public long UnknownNullDataMessages { get; init; }
+        [JsonPropertyName("unknownStringDataMessages")] public long UnknownStringDataMessages { get; init; }
+        [JsonPropertyName("unknownArrayDataMessages")] public long UnknownArrayDataMessages { get; init; }
+        [JsonPropertyName("unknownScalarDataMessages")] public long UnknownScalarDataMessages { get; init; }
+        [JsonPropertyName("unknownEnvelopeCueShapeMessages")] public long UnknownEnvelopeCueShapeMessages { get; init; }
+        [JsonPropertyName("unknownJsonObjectDataMessages")] public long UnknownJsonObjectDataMessages { get; init; }
+        [JsonPropertyName("unknownJsonCueShapeMessages")] public long UnknownJsonCueShapeMessages { get; init; }
+        [JsonPropertyName("unknownNonObjectEnvelopeMessages")] public long UnknownNonObjectEnvelopeMessages { get; init; }
+        [JsonPropertyName("unknownJsonObjectEnvelopeMessages")] public long UnknownJsonObjectEnvelopeMessages { get; init; }
+    }
+    internal static class FeelConnectCounters
+    {
+        internal static void Increment(ref long counter)
+        {
+            long previous;
+            do
+            {
+                previous = System.Threading.Interlocked.Read(ref counter);
+                if (previous >= 1_000_000_000) return;
+            } while (System.Threading.Interlocked.CompareExchange(ref counter, previous + 1, previous) != previous);
+        }
+    }
     public sealed record FeelConnectPairing(string Value, bool IsConnectionCode)
     {
         public static FeelConnectPairing Parse(string input)
@@ -50,9 +131,11 @@ namespace LovenseConnector
         double percent;
         string activePublisher = "", activeRoom = "", activeKind = "Stopped";
         public long LastInputMs { get; private set; }
+        public FeelConnectV2Diagnostics V2Diagnostics { get; private set; } = new();
         public bool RoomsChanged { get; private set; }
         public int PendingCues => timeline.Count - cursor;
         public double Percent => percent;
+        public string TargetUser { get; set; } = "";
         // A missing stop cannot leave an immediate command active indefinitely. This is a timeout, not an intensity cap.
         public int ImmediateTimeoutMs { get; set; } = 5000;
 
@@ -63,6 +146,7 @@ namespace LovenseConnector
             rooms.Clear();
             foreach (string room in allowedRooms ?? Array.Empty<string>())
                 if (!string.IsNullOrWhiteSpace(room) && room.Length <= 512) rooms.Add(room);
+            if (activeRoom.Length != 0 && !rooms.Contains(activeRoom)) Reset("Video room removed");
         }
 
         public FeelConnectOutput Reset(string reason = "Stopped")
@@ -81,6 +165,7 @@ namespace LovenseConnector
             string messageType = String(envelope, "message_type");
             string what = String(data, "what");
             string publisher = String(envelope, "publisher");
+            if (publisher.Length == 0) publisher = String(data, "src");
             if (messageType == "website:rooms_changed" || what == "rooms_changed") { RoomsChanged = true; return null; }
             if (messageType == "system:presence")
             {
@@ -98,6 +183,14 @@ namespace LovenseConnector
                 LastInputMs = nowMs;
                 return Immediate(value, nowMs, room, publisher, "Website intensity");
             }
+            if (messageType == "device:position" && what == "device_percent")
+            {
+                string target = String(data, "target");
+                if (data.TryGetProperty("target", out _) && (target.Length == 0 || TargetUser.Length == 0 || target != TargetUser)) return null;
+                if (!TryNumber(data, "payload", out double value) || !ValidPercent(value)) return null;
+                LastInputMs = nowMs;
+                return Immediate(value, nowMs, room, publisher, "Video intensity");
+            }
             if (messageType == "website:tip" || what == "tip")
             {
                 var result = Tip(data, nowMs, room, publisher);
@@ -109,11 +202,25 @@ namespace LovenseConnector
             {
                 if (!data.TryGetProperty("percents", out var values) || values.ValueKind != JsonValueKind.Array ||
                     values.GetArrayLength() == 0 || values.GetArrayLength() > 1000) return null;
-                double last = 0;
+                double last = 0, maximum = 0;
+                int count = values.GetArrayLength(), positive = 0;
                 foreach (var item in values.EnumerateArray())
                 {
                     if (!TryNumber(item, out last) || !ValidPercent(last)) return null;
+                    if (last > 0) positive++;
+                    maximum = Math.Max(maximum, last);
                 }
+                // Commit only after the entire authorized batch validates. A trailing invalid value
+                // must not change statistics, just as it must not change output or its timeout.
+                var priorV2 = V2Diagnostics;
+                V2Diagnostics = new FeelConnectV2Diagnostics
+                {
+                    AcceptedBatches = Math.Min(1_000_000_000, priorV2.AcceptedBatches + 1),
+                    Samples = Math.Min(1_000_000_000, priorV2.Samples + count),
+                    PositiveSamples = Math.Min(1_000_000_000, priorV2.PositiveSamples + positive),
+                    MixedBatches = Math.Min(1_000_000_000, priorV2.MixedBatches + (positive > 0 && positive < count ? 1 : 0)),
+                    LastBatchSamples = count, LastBatchMaximum = maximum, LastBatchFinal = last
+                };
                 // The reference receiver sends every array value to the same devices; these are not motor channels.
                 // With no timestamps, the most recent value is the meaningful value at BLE dispatch time.
                 LastInputMs = nowMs;
@@ -148,7 +255,9 @@ namespace LovenseConnector
                 previous = time;
             }
             timeline = parsed; cursor = 0; activeRoom = room; activePublisher = publisher; activeKind = "Video cues v3";
-            endAt = parsed[^1].At + 1500;
+            // The published SDK sends 70-second windows every 60 seconds. A sparse window must hold its
+            // final value until the next window, rather than ending as soon as its last change is reached.
+            endAt = Math.Max(parsed[^1].At + 1500, nowMs + 75000 - (long)Math.Round(latency));
             LastInputMs = nowMs;
             // Every new batch replaces pending cues, including a seek to an earlier playback position.
             return Tick(nowMs) ?? new FeelConnectOutput(percent, activeKind, percent == 0);

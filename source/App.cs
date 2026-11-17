@@ -54,7 +54,9 @@ namespace LovenseConnector
         Button scanButton,sweepButton;
         DispatcherTimer scanTimer,heartbeat;
         CancellationTokenSource sweep;
-        bool scanning,closing,closeAllowed,ready;
+        bool scanning,closing,closeAllowed,ready,scanAutoConnect;
+        readonly HashSet<ulong> scanAddresses=new HashSet<ulong>();
+        int scanGeneration;
         DateTime scanStarted;
         string dataDir;
         int operatorGeneration;
@@ -87,14 +89,14 @@ namespace LovenseConnector
         {
             if(sweep!=null) { hint.Text="Stop the speed test before starting a manual output."; return; }
             int generation=++operatorGeneration;
-            await PauseExternalSources();
+            await Task.WhenAll(PauseExternalSources(),studioRunning?StopStudioMotors():Task.CompletedTask);
             if(generation!=operatorGeneration||closing||sweep!=null)return;
             await action();
         }
         async Task OperatorStop(Func<Task> action)
         {
             int generation=++operatorGeneration;CancelSweep();
-            await PauseExternalSources();
+            await Task.WhenAll(PauseExternalSources(),studioRunning?StopStudioMotors():Task.CompletedTask);
             if(generation!=operatorGeneration||closing)return;
             await action();
         }
@@ -115,48 +117,47 @@ namespace LovenseConnector
             File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.5.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
             catalog=Catalog.FromJson(AssetFiles.ReadText("models.json"));
             using(var stream=AssetFiles.Open("MainWindow.xaml")) window=(Window)XamlReader.Load(stream);
+            _=new WindowFrame(window);
             tabs=Find<TabControl>("DeviceTabs"); summary=Find<TextBlock>("Summary"); hint=Find<TextBlock>("Hint"); bluetooth=Find<TextBlock>("BluetoothStatus"); activity=Find<TextBox>("ActivityLog");
             scanButton=Find<Button>("ScanButton"); sweepButton=Find<Button>("SweepButton");
             InitializeMixer();
             InitializeFeelConnect();
             InitializeTheme();
-            scanButton.Click+=async(s,e)=> { try { if(scanning) await EndScan(false); else StartScan(); } catch(Exception ex) { Report(ex); } };
+            InitializeStudioDevices();
+            InitializeStudioSettings();
+            scanButton.Click+=async(s,e)=> { try { if(scanning) await EndScan(false); else StartScan(true); } catch(Exception ex) { Report(ex); } };
             Find<Button>("StopAllButton").Click+=async(s,e)=>await StopAll();
             Find<Button>("DisconnectAllButton").Click+=async(s,e)=> { await StopAll(); foreach(var d in devices.Values.ToArray()) await Disconnect(d); };
             sweepButton.Click+=async(s,e)=>await TestSweep();
-            Find<Button>("HomeButton").Click+=(s,e)=> { tabs.SelectedItem=mixerTab;((ScrollViewer)mixerTab.Content).ScrollToTop(); };
+            Find<Button>("HomeButton").Click+=(s,e)=> { tabs.SelectedItem=mixerTab;if(mixerTab.Content is ScrollViewer scroll)scroll.ScrollToTop(); };
             Find<Button>("DocsButton").Click+=(s,e)=>AssetFiles.ShowHelp(window);
             window.PreviewKeyDown+=async(s,e)=> { if(e.Key==Key.Escape) { e.Handled=true; await StopAll(); } };
             scanTimer=new DispatcherTimer { Interval=TimeSpan.FromSeconds(1) };
-            scanTimer.Tick+=async(s,e)=> { if((DateTime.UtcNow-scanStarted).TotalSeconds>=10) await EndScan(args.Contains("--connect-discovered")); };
+            scanTimer.Tick+=async(s,e)=> { if((DateTime.UtcNow-scanStarted).TotalSeconds>=10) await EndScan(scanAutoConnect); };
             heartbeat=new DispatcherTimer { Interval=TimeSpan.FromSeconds(2) }; heartbeat.Tick+=(s,e)=> { foreach(var d in devices.Values.Where(d=>d.Connected && d.Link!=null && !d.Link.Connected).ToArray()) Lost(d); SaveState(); }; heartbeat.Start();
             window.Loaded+=async(s,e)=> {
-                try { InitializeApi(); scanner=new BleScanner(); scanner.Found+=(address,name,rssi)=>UI(()=>Found(address,name)); ready=await scanner.Available(); bluetooth.Text=ready?"Bluetooth ready":"Bluetooth unavailable"; scanButton.IsEnabled=ready; if(ready&&(args.Contains("--scan")||args.Contains("--connect-discovered"))) StartScan(); }
+                try { InitializeApi(); scanner=new BleScanner(); scanner.Found+=(address,name,rssi)=>UI(()=>Found(address,name)); ready=await scanner.Available(); bluetooth.Text=ready?"Bluetooth ready":"Bluetooth unavailable"; scanButton.IsEnabled=ready; RefreshStudioDevices(); if(ready&&(args.Contains("--scan")||args.Contains("--connect-discovered"))) StartScan(args.Contains("--connect-discovered")); }
                 catch(Exception ex) { Report(ex); }
             };
             window.Closing+=async(s,e)=> {
                 if(closeAllowed) return;
                 e.Cancel=true; if(closing) return; closing=true;StopAudio();if(mixerTimer!=null)mixerTimer.Stop(); scanTimer.Stop(); heartbeat.Stop(); if(scanner!=null) scanner.Stop(); if(api!=null) api.Dispose(); if(apiTimer!=null) apiTimer.Stop();
                 await StopAll(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
-                if(scanner!=null) scanner.Dispose(); SaveState(); closeAllowed=true; window.Close();
+                if(scanner!=null) scanner.Dispose(); SaveState(); closeAllowed=true;
+                _=window.Dispatcher.BeginInvoke(new Action(window.Close));
             };
             var app=new Application(); app.DispatcherUnhandledException+=(s,e)=> { Report(e.Exception); e.Handled=true; }; app.Run(window);
         }
         void Found(ulong address,string name)
         {
+            if(scanning)scanAddresses.Add(address);
             if(closing||devices.ContainsKey(address)) return;
             var model=catalog.Match(name,""); var d=new Device { Address=address,AdvertisedName=name,Name=model.Name };
             devices.Add(address,d); BuildCard(d); Log("Found "+name); Update(d);
         }
         void BuildCard(Device d)
         {
-            d.Content=new StackPanel { Margin=new Thickness(20) };
-            d.Tab=new TabItem { Header=d.Name,Content=new ScrollViewer { Content=d.Content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled } };
-            tabs.Items.Add(d.Tab); if(tabs.SelectedIndex<0) tabs.SelectedIndex=0;
-            var top=new DockPanel(); d.ConnectButton=Action("Connect",async()=> { if(d.Connected) await Disconnect(d); else await Connect(d); }); DockPanel.SetDock(d.ConnectButton,Dock.Right); top.Children.Add(d.ConnectButton);
-            d.State=Text(d.Name+" · Available",23); top.Children.Add(d.State); d.Content.Children.Add(top);
-            d.Details=Text(d.AdvertisedName); d.Details.Foreground=Color("#C4BAD7"); d.Content.Children.Add(d.Details);
-            d.Controls=new StackPanel(); d.Content.Children.Add(d.Controls);
+            BuildStudioDeviceCard(d);
         }
         void BuildControls(Device d)
         {
@@ -171,7 +172,7 @@ namespace LovenseConnector
                 panel.Children.Add(Text(channel==0?"Vibration motor":"Motor "+channel,21)); var display=Text("3 / 20",17); panel.Children.Add(display);
                 v.Level=new Slider { Minimum=0,Maximum=20,Value=3,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,TickPlacement=System.Windows.Controls.Primitives.TickPlacement.BottomRight,Margin=new Thickness(0,4,0,8) };
                 System.Windows.Automation.AutomationProperties.SetName(v.Level,d.Name+" motor "+channel+" speed");
-                v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
+                v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed&&!OwnsStudio) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
                 var nudges=Row(); nudges.Children.Add(Action("−1",()=> { v.Level.Value--; return Task.FromResult(0); })); nudges.Children.Add(Action("+1",()=> { v.Level.Value++; return Task.FromResult(0); })); panel.Children.Add(nudges);
                 var time=Row(); v.Duration=Input("10000"); v.Duration.ToolTip="duration in milliseconds"; Field(time,"Duration (ms)",v.Duration); panel.Children.Add(time);
                 var buttons=new WrapPanel();
@@ -207,15 +208,16 @@ namespace LovenseConnector
                 var spec=read(); var selected=d.Motors.Values.ToArray(); if(target.SelectedIndex<selected.Length) selected=new[]{selected[target.SelectedIndex]};
                 foreach(var motor in selected) await d.Player.Start(motor.Channel,json.Deserialize<PatternSpec>(json.Serialize(spec)),20);
             })));
-            actions.Children.Add(Action("Save JSON…",()=> { var spec=read(); var dialog=new SaveFileDialog { Filter="Pattern JSON|*.json",FileName="pattern.json",InitialDirectory=AssetFiles.PatternDirectory }; Directory.CreateDirectory(dialog.InitialDirectory); if(dialog.ShowDialog(window)==true) File.WriteAllText(dialog.FileName,json.Serialize(spec)); return Task.FromResult(0); }));
-            actions.Children.Add(Action("Load JSON…",()=> {
+            actions.Children.Add(Action("Save JSON…",async()=> { var spec=read(); if(!await StopAll())return; var dialog=new SaveFileDialog { Filter="Pattern JSON|*.json",FileName="pattern.json",InitialDirectory=AssetFiles.PatternDirectory }; Directory.CreateDirectory(dialog.InitialDirectory); if(dialog.ShowDialog(window)==true) File.WriteAllText(dialog.FileName,json.Serialize(spec)); }));
+            actions.Children.Add(Action("Load JSON…",async()=> {
+                if(!await StopAll())return;
                 var dialog=new OpenFileDialog { Filter="Pattern JSON|*.json",InitialDirectory=AssetFiles.PatternDirectory };
                 if(dialog.ShowDialog(window)==true) {
                     if(new FileInfo(dialog.FileName).Length>131072) throw new ArgumentException("Pattern file is too large.");
                     var spec=json.Deserialize<PatternSpec>(File.ReadAllText(dialog.FileName)); if(spec==null) throw new ArgumentException("Pattern is empty."); spec.Validate();
                     name.Text=spec.name; mode.SelectedItem=spec.mode; low.Text=spec.low.ToString(); high.Text=spec.high.ToString(); period.Text=spec.periodMs.ToString(); duration.Text=spec.durationMs.ToString(); duty.Text=spec.dutyPercent.ToString(); phase.Text=spec.phaseDegrees.ToString(); repeat.IsChecked=spec.repeat; interpolate.IsChecked=spec.interpolate;
                     points.Text=String.Join(", ",(spec.frames??new Frame[0]).Select(f=>f.ms+":"+f.level));
-                } return Task.FromResult(0);
+                }
             })); body.Children.Add(actions);
             var presetBody=new StackPanel { Margin=new Thickness(4,10,4,12) };
             var presetRow=new WrapPanel(); var slot=new ComboBox { Width=80 }; for(int i=1;i<=10;i++) slot.Items.Add(i); slot.SelectedIndex=0; var presetTime=Input("2000"); Field(presetRow,"Slot",slot); Field(presetRow,"Duration ms · 500–60000",presetTime);
@@ -237,14 +239,28 @@ namespace LovenseConnector
             row.Children.Add(Action("Power off toy",()=>OperatorStop(async()=> { await d.Player.StopAll(); try { await d.Link.Command("PowerOff;"); } finally { Release(d,"Power off requested · turn on to reconnect"); } }))); panel.Children.Add(row);
             d.Controls.Children.Add(new Expander { Header="Settings",Content=panel,Margin=new Thickness(0,8,0,12) });
         }
-        void StartScan()
+        void StartScan(bool connectDiscovered=false)
         {
-            if(!ready||scanning||closing) return; scanner.Start(); scanning=true; scanStarted=DateTime.UtcNow; scanTimer.Start(); scanButton.Content="Stop scanning"; hint.Text="Searching for nearby toys for 10 seconds…"; Log("Scan started."); UpdateSummary();
+            if(!ready||scanning||closing) return;
+            scanner.Start();scanGeneration++;scanAddresses.Clear();scanAutoConnect=connectDiscovered;
+            scanning=true;scanStarted=DateTime.UtcNow;scanTimer.Start();scanButton.Content="Stop scanning";
+            if(studioDevicesTab!=null)tabs.SelectedItem=studioDevicesTab;
+            hint.Text=connectDiscovered?"Searching for 10 seconds, then connecting…":"Searching for nearby devices for 10 seconds…";
+            Log("Scan started.");UpdateSummary();
         }
         async Task EndScan(bool connect)
         {
-            if(!scanning) return; scanTimer.Stop(); scanner.Stop(); scanning=false; scanButton.Content="Find devices"; hint.Text="Choose a device to connect."; UpdateSummary();
-            if(connect) foreach(var d in devices.Values.ToArray()) if(!d.Connected) await Connect(d);
+            if(!scanning) return;
+            scanTimer.Stop();scanner.Stop();scanning=false;scanAutoConnect=false;scanButton.Content="Find & connect";
+            int generation=scanGeneration;
+            var found=devices.Values.Where(d=>scanAddresses.Contains(d.Address)).ToArray();
+            hint.Text=found.Length==0?"No nearby devices found. Turn one on and try again.":connect?"Connecting discovered devices…":"Choose Connect beside a device.";
+            UpdateSummary();
+            if(connect)foreach(var d in found) {
+                if(closing||generation!=scanGeneration)break;
+                if(!d.Connected)await Connect(d);
+            }
+            if(connect&&!closing&&generation==scanGeneration&&found.Length>0&&found.All(d=>d.Connected))hint.Text="Connected · ready";
         }
         async Task Connect(Device d)
         {
@@ -270,7 +286,7 @@ namespace LovenseConnector
                 await ReadBattery(d); if(d.Supported&&generation==d.Generation) { try { await ReadSettings(d); } catch { Log("Device settings are not supported by this firmware."); } }
                 if(closing||generation!=d.Generation||!Object.ReferenceEquals(d.Link,link)) { link.Dispose(); return; }
                 if(!link.Connected) throw new InvalidOperationException("Toy disconnected during setup.");
-                d.Connected=true; d.Status="Connected · ready"; Log(d.Name+" connected. Firmware "+d.Firmware+".");
+                d.Connected=true; d.Status="Connected · ready"; hint.Text="Connected · ready"; Log(d.Name+" connected. Firmware "+d.Firmware+".");
             }
             catch(Exception ex) { if(link!=null) link.Dispose(); if(generation==d.Generation) { Release(d,"Connection failed · retry"); Report(ex); } }
             finally { if(generation==d.Generation) { d.Busy=false; Update(d); } }
@@ -290,9 +306,13 @@ namespace LovenseConnector
         }
         async Task Disconnect(Device d)
         {
-            int generation=++operatorGeneration;CancelSweep();await PauseExternalSources();
-            if(generation!=operatorGeneration||closing)return;
-            if(d.Player!=null) try { await d.Player.StopAll(); } catch(Exception ex) { Report(ex); } Release(d,"Disconnected");
+            operatorGeneration++;int deviceGeneration=d.Generation;CancelSweep();
+            await Task.WhenAll(PauseExternalSources(),studioRunning?StopStudioMotors():Task.CompletedTask);
+            if(deviceGeneration!=d.Generation||closing)return;
+            if(d.Player!=null) try { await d.Player.StopAll(); } catch(Exception ex) { Report(ex); }
+            // Stop all cancels output, not an already requested disconnect. A new
+            // connection generation, however, must never be released by this request.
+            if(deviceGeneration==d.Generation&&!closing)Release(d,"Disconnected");
         }
         void Lost(Device d)
         {
@@ -307,6 +327,7 @@ namespace LovenseConnector
         async Task<bool> StopAll()
         {
             operatorGeneration++;
+            ClearStudioOwnership();
             CancelSweep();
             var sources=PauseExternalSources();var stops=StopPlayers();
             bool success;
@@ -342,7 +363,7 @@ namespace LovenseConnector
                     await d.Link.Command("AutoSwith:On:Off;"); await ReadSettings(d);
                     foreach(var motor in d.Motors.Values.OrderBy(m=>m.Channel))
                     {
-                        cancel.Token.ThrowIfCancellationRequested(); tabs.SelectedItem=d.Tab;
+                        cancel.Token.ThrowIfCancellationRequested(); SelectStudioDevice(d);
                         hint.Text="Speed test: "+d.Name+" / motor "+motor.Channel+" · levels 1–20 · 1 second each"; Log(hint.Text); var player=d.Player;
                         for(int level=1;level<=20;level++)
                         {
@@ -376,7 +397,7 @@ namespace LovenseConnector
         {
             summary.Text=devices.Values.Count(d=>d.Connected)+" connected · "+devices.Count+" discovered";
             sweepButton.IsEnabled=sweep==null&&!closing&&devices.Values.Any(d=>d.Connected&&d.Supported);
-            Find<TextBlock>("EmptyState").Visibility=Visibility.Collapsed;RefreshMixer(); RefreshFeelRoutes(); SaveState();
+            Find<TextBlock>("EmptyState").Visibility=Visibility.Collapsed;RefreshMixer(); RefreshFeelRoutes(); RefreshStudioDevices(); RefreshStudioDock(); SaveState();
         }
         void Log(string message)
         {
