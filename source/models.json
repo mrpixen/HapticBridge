@@ -1,0 +1,469 @@
+[
+  {
+    "type": "Ambi",
+    "name": "Ambi",
+    "symbols": [
+      "l"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Mission2",
+    "name": "Mission2",
+    "symbols": [
+      "v",
+      "ca"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "c20",
+    "name": "C20",
+    "symbols": [
+      "su"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Calor",
+    "name": "Calor",
+    "symbols": [
+      "t"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Diamo",
+    "name": "Diamo",
+    "symbols": [
+      "r"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Dolce",
+    "name": "Dolce",
+    "symbols": [
+      "j"
+    ],
+    "features": [
+      "Vibration",
+      "Vibration motor 1",
+      "Vibration motor 2"
+    ]
+  },
+  {
+    "type": "Domi",
+    "name": "Domi",
+    "symbols": [
+      "w"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Edge",
+    "name": "Edge",
+    "symbols": [
+      "p"
+    ],
+    "features": [
+      "Vibration",
+      "Vibration motor 1",
+      "Vibration motor 2"
+    ]
+  },
+  {
+    "type": "Exomoon",
+    "name": "Exomoon",
+    "symbols": [
+      "ef"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Ferri",
+    "name": "Ferri",
+    "symbols": [
+      "x"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Flexer",
+    "name": "Flexer",
+    "symbols": [
+      "ei"
+    ],
+    "features": [
+      "Vibration",
+      "Flexing"
+    ]
+  },
+  {
+    "type": "Gemini",
+    "name": "Gemini",
+    "symbols": [
+      "n"
+    ],
+    "features": [
+      "Vibration",
+      "Vibration motor 1",
+      "Vibration motor 2"
+    ]
+  },
+  {
+    "type": "Gravity",
+    "name": "Gravity",
+    "symbols": [
+      "ea"
+    ],
+    "features": [
+      "Vibration",
+      "Thrusting"
+    ]
+  },
+  {
+    "type": "Gush",
+    "name": "Gush",
+    "symbols": [
+      "ed"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "SolacePro",
+    "name": "SolacePro",
+    "symbols": [
+      "ba"
+    ],
+    "features": [
+      "Thrusting",
+      "Position"
+    ]
+  },
+  {
+    "type": "Hush",
+    "name": "Hush",
+    "symbols": [
+      "z"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Hyphy",
+    "name": "Hyphy",
+    "symbols": [
+      "eb"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Lapis",
+    "name": "Lapis",
+    "symbols": [
+      "u"
+    ],
+    "features": [
+      "Vibration",
+      "Vibration motor 1",
+      "Vibration motor 2",
+      "Vibration motor 3"
+    ]
+  },
+  {
+    "type": "Lush",
+    "name": "Lush",
+    "symbols": [
+      "s"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Max",
+    "name": "Max",
+    "symbols": [
+      "toyb",
+      "b"
+    ],
+    "features": [
+      "Vibration",
+      "Air pump"
+    ]
+  },
+  {
+    "type": "Mission",
+    "name": "Mission",
+    "symbols": [
+      "v",
+      "ca"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Nora",
+    "name": "Nora",
+    "symbols": [
+      "toyc",
+      "toya",
+      "c",
+      "a"
+    ],
+    "features": [
+      "Vibration",
+      "Rotation"
+    ]
+  },
+  {
+    "type": "Osci",
+    "name": "Osci",
+    "symbols": [
+      "o",
+      "oc"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "QA01",
+    "name": "QA01",
+    "symbols": [
+      "qa"
+    ],
+    "features": [
+      "Vibration",
+      "Vibration motor 1",
+      "Vibration motor 2"
+    ]
+  },
+  {
+    "type": "Ridge",
+    "name": "Ridge",
+    "symbols": [
+      "el"
+    ],
+    "features": [
+      "Vibration",
+      "Rotation"
+    ]
+  },
+  {
+    "type": "Solace",
+    "name": "Solace",
+    "symbols": [
+      "h"
+    ],
+    "features": [
+      "Thrusting",
+      "Depth"
+    ]
+  },
+  {
+    "type": "Tenera",
+    "name": "Tenera",
+    "symbols": [
+      "q"
+    ],
+    "features": [
+      "Vibration",
+      "Suction"
+    ]
+  },
+  {
+    "type": "Vulse",
+    "name": "Vulse",
+    "symbols": [
+      "sd"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "XMachine",
+    "name": "XMachine",
+    "symbols": [
+      "f"
+    ],
+    "features": [
+      "Vibration",
+      "Thrusting"
+    ]
+  },
+  {
+    "type": "Gush2",
+    "name": "Gush2",
+    "symbols": [
+      "ez"
+    ],
+    "features": [
+      "Oscillation"
+    ]
+  },
+  {
+    "type": "LushAnal",
+    "name": "LushAnal",
+    "symbols": [
+      "an"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Lush2",
+    "name": "Lush2",
+    "symbols": [
+      "s"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Lush3",
+    "name": "Lush3",
+    "symbols": [
+      "s"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Lush4",
+    "name": "Lush4",
+    "symbols": [
+      "s"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "LushMini",
+    "name": "LushMini",
+    "symbols": [
+      "s"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Max2",
+    "name": "Max2",
+    "symbols": [
+      "toyb",
+      "b"
+    ],
+    "features": [
+      "Vibration",
+      "Air pump"
+    ]
+  },
+  {
+    "type": "MiniXmachine",
+    "name": "MiniXMachine",
+    "symbols": [
+      "fs"
+    ],
+    "features": [
+      "Vibration",
+      "Thrusting"
+    ]
+  },
+  {
+    "type": "Osci2",
+    "name": "Osci2",
+    "symbols": [
+      "o",
+      "oc"
+    ],
+    "features": [
+      "Vibration"
+    ]
+  },
+  {
+    "type": "Osci3",
+    "name": "Osci3",
+    "symbols": [
+      "o",
+      "oc"
+    ],
+    "features": [
+      "Vibration",
+      "Oscillation"
+    ]
+  },
+  {
+    "type": "Tenera2",
+    "name": "Tenera2",
+    "symbols": [
+      "q"
+    ],
+    "features": [
+      "Vibration",
+      "Suction"
+    ]
+  },
+  {
+    "type": "Fizz",
+    "name": "Fizz",
+    "symbols": [
+      "qb"
+    ],
+    "features": [
+      "Vibration",
+      "Suction"
+    ]
+  },
+  {
+    "type": "Spinel",
+    "name": "Spinel",
+    "symbols": [
+      "wd"
+    ],
+    "features": [
+      "Vibration",
+      "Thrusting"
+    ]
+  },
+  {
+    "type": "Velvo",
+    "name": "Velvo",
+    "symbols": [
+      "cb"
+    ],
+    "features": [
+      "Vibration",
+      "Rotation"
+    ]
+  }
+]

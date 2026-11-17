@@ -1,0 +1,5 @@
+* text=auto eol=lf
+source/vendor-notices/** -text -whitespace
+*.rtf -diff
+*.ttf binary
+*.otf binary

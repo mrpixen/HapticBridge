@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>TestRunner</StartupObject>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=/_tests</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../source/ApiServer.cs;../source/AudioMeter.cs;../source/Playback.cs;../source/Protocol.cs;../source/Catalog.cs;../source/JsonCompatibility.cs" />
+    <Compile Include="../source/FeelConnectClient.cs;../source/FeelConnectProtocol.cs" Condition="Exists('../source/FeelConnectClient.cs')" />
+    <None Include="../source/models.json" Link="models.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

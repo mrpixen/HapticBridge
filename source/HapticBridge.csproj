@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <StartupObject>LovenseConnector.ConnectorApp</StartupObject>
+    <AssemblyName>HapticBridge</AssemblyName>
+    <RootNamespace>LovenseConnector</RootNamespace>
+    <Version>0.5.0</Version>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=/_src</PathMap>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <EmbeddedResource Include="MainWindow.xaml" LogicalName="HapticBridge.Assets.MainWindow.xaml" />
+    <EmbeddedResource Include="models.json" LogicalName="HapticBridge.Assets.models.json" />
+    <EmbeddedResource Include="../docs/*.md" LogicalName="HapticBridge.Assets.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../LICENSE" LogicalName="HapticBridge.Assets.LICENSE" Condition="Exists('../LICENSE')" />
+    <EmbeddedResource Include="../THIRD-PARTY-NOTICES.md" LogicalName="HapticBridge.Assets.THIRD-PARTY-NOTICES.md" Condition="Exists('../THIRD-PARTY-NOTICES.md')" />
+    <EmbeddedResource Include="vendor-notices/*.txt" LogicalName="HapticBridge.Assets.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="vendor-notices/*.rtf" LogicalName="HapticBridge.Assets.%(Filename)%(Extension)" />
+    <Resource Include="fonts/*.ttf" />
+    <Resource Include="fonts/*.otf" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+  </ItemGroup>
+</Project>
