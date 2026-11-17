@@ -247,8 +247,18 @@ namespace LovenseConnector
                     lock (sync)
                     {
                         EnsureCurrent(session);
-                        if (!session.Accepting) continue;
                         session.Messages++;
+                        if (!session.Accepting)
+                        {
+                            // A website can create its video room as soon as it sees online presence, before the
+                            // HTTP acknowledgement returns. Retain that notification while discarding early cues.
+                            var envelope = root[1];
+                            if (FeelConnectProtocol.String(envelope, "room") == session.WebsiteRoom &&
+                                (FeelConnectProtocol.String(envelope, "message_type") == "website:rooms_changed" ||
+                                (envelope.TryGetProperty("data", out var earlyData) && FeelConnectProtocol.String(earlyData, "what") == "rooms_changed")))
+                                session.RefreshRequested = true;
+                            continue;
+                        }
                         FeelConnectOutput output = session.Protocol.Accept(root[1], session.Clock.ElapsedMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                         if (output != null) { lastFrameAt = DateTimeOffset.UtcNow; EmitOutputLocked(session, output); }
                         if (session.Protocol.RoomsChanged) session.RefreshRequested = true;

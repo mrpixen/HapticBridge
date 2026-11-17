@@ -28,6 +28,7 @@ internal static class FeelConnectTests
         await CancellationAndStaleSession();
         await ExpiredSession();
         await RoomRefresh();
+        await RoomCreatedDuringPresence();
         await InvalidTransportStops();
         Console.WriteLine("FeelConnect: " + assertions + " assertions passed (synthetic offline fixtures).");
     }
@@ -278,6 +279,22 @@ internal static class FeelConnectTests
         }
     }
 
+    static async Task RoomCreatedDuringPresence()
+    {
+        var fixture = new ServiceFixture { ChangeRoomDuringPresence = true };
+        using var http = new HttpClient(fixture);
+        await using var client = new FeelConnectClient(http, fixture.Connect);
+        var frames = new ConcurrentQueue<FeelConnectOutput>();
+        client.OutputChanged += frames.Enqueue;
+        await client.PairAsync("synthetic-startup-code", Array.Empty<string>());
+        await Until(() => fixture.Joined.Contains("startup-video") && !fixture.Joined.Contains("test-video"));
+        Assert(!frames.Any(x => x.Percent > 0), "early cues ignored during presence registration");
+        await Task.Delay(50);
+        fixture.Socket.Push(Frame("startup-video", "room:message", "{\"ver\":2,\"percents\":[40]}"));
+        await Until(() => frames.Any(x => x.Percent == 40));
+        Assert(frames.Any(x => x.Percent == 40), "room creation during presence is retained and joined");
+    }
+
     static string Frame(string room, string type, string data) => "42/pubnub,[\"message\",{\"room\":" + JsonSerializer.Serialize(room) + ",\"message_type\":" + JsonSerializer.Serialize(type) + ",\"data\":" + data + "}]";
     static async Task Until(Func<bool> condition)
     {
@@ -288,7 +305,7 @@ internal static class FeelConnectTests
     sealed class ServiceFixture : HttpMessageHandler
     {
         public MemorySocket Socket;
-        public bool RejectAuth, RejectRoom, DelayAuth, Authenticated;
+        public bool RejectAuth, RejectRoom, DelayAuth, Authenticated, ChangeRoomDuringPresence;
         public int ConnectionCount, PresenceOnline = -1;
         public long? TokenExpiry;
         public string[] PresenceNames = Array.Empty<string>();
@@ -337,6 +354,13 @@ internal static class FeelConnectTests
                 using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken));
                 PresenceOnline = body.RootElement.GetProperty("online").GetInt32();
                 PresenceNames = body.RootElement.GetProperty("devices").EnumerateArray().Select(x => x.GetString()).ToArray();
+                if (PresenceOnline == 1 && ChangeRoomDuringPresence)
+                {
+                    VideoRoom = "startup-video";
+                    Socket.Push(Frame("test-website", "website:rooms_changed", "{}"));
+                    Socket.Push(Frame("test-website", "website:device_speed", "{\"strength\":100}"));
+                    await Task.Delay(50, cancellationToken);
+                }
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("OK") };
             }
             throw new Exception("Unexpected synthetic request operation");
