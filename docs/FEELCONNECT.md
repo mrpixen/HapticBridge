@@ -46,6 +46,8 @@ Connection details count fully validated live batches, their positive samples an
 
 Player versions and services can change their messages. **Paired** confirms the service connection. The intensity status distinguishes an active vibration cue, zero intensity and expired updates. If output stays at zero, expand **Connection details** to check for a video channel and incoming cues, then check that the selected motors are connected. A session that disconnects or expires requires deliberate reconnecting; output does not automatically resume.
 
+Unexpected legacy disconnects retain their cause: timeout, service rejection, unsupported response or connection loss. These messages contain no request URLs, tokens or response contents.
+
 **Check website** reads presence on this session's authorized legacy channels and reports receiver/browser counts. It does not subscribe to other channels or expose peer identifiers. Modern FEC-only clients do not appear in this legacy check.
 
 **Check old SDK route** checks occupancy for the same channels on the routing namespace exported by the published legacy SDK. This is a manual diagnostic; it does not change the receiver's route or start playback.

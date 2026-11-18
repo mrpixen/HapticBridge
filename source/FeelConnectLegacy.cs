@@ -34,7 +34,7 @@ namespace LovenseConnector
         readonly int messageHandlerVersion;
         readonly string uuid = "mobile-client-hapticbridge-" + Guid.NewGuid().ToString("N");
         readonly Action<JsonElement, int> receive;
-        readonly Action<string> disconnected;
+        readonly Action<FailureKind> disconnected;
         readonly object sync = new();
         readonly CancellationTokenSource stop;
         readonly CancellationToken ownerCancellation;
@@ -58,7 +58,7 @@ namespace LovenseConnector
         public int Generation => Volatile.Read(ref version);
 
         internal FeelConnectLegacy(HttpClient http, IEnumerable<string> authorizedChannels, Action<JsonElement, int> receive,
-            CancellationToken cancellationToken, string subscribeKey = ProductionSubscribeKey, Action<string> disconnected = null,
+            CancellationToken cancellationToken, string subscribeKey = ProductionSubscribeKey, Action<FailureKind> disconnected = null,
             int messageHandlerVersion = 3)
         {
             if (messageHandlerVersion != 2 && messageHandlerVersion != 3)
@@ -105,11 +105,14 @@ namespace LovenseConnector
                 ready.TrySetCanceled();
                 throw;
             }
-            catch (Exception)
+            catch (Exception error)
             {
-                try { disconnected?.Invoke("The legacy video connection ended. Pair again to reconnect."); } catch { }
-                ready.TrySetException(new InvalidOperationException("The legacy video connection could not be established."));
-                throw new InvalidOperationException("The legacy video connection ended.");
+                FailureKind kind = error is TransportException known ? known.Kind :
+                    error is OperationCanceledException ? FailureKind.Timeout : FailureKind.ConnectionLost;
+                string message = DescribeFailure(kind).Message;
+                try { disconnected?.Invoke(kind); } catch { }
+                ready.TrySetException(new InvalidOperationException(message));
+                throw new InvalidOperationException(message);
             }
             finally
             {
@@ -150,11 +153,11 @@ namespace LovenseConnector
                         "&heartbeat=90&state=" + Uri.EscapeDataString(State(selected));
                     using var body = await GetAsync(uri, 330, request.Token).ConfigureAwait(false);
                     JsonElement data = body.RootElement;
-                    if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("t", out var position) ||
+                    if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("t", out var position) || position.ValueKind != JsonValueKind.Object ||
                         !position.TryGetProperty("t", out var token) || !DecimalToken(token, out string next) ||
-                        !position.TryGetProperty("r", out var area) || !area.TryGetInt32(out int nextRegion) || nextRegion < 0 ||
+                        !position.TryGetProperty("r", out var area) || area.ValueKind != JsonValueKind.Number || !area.TryGetInt32(out int nextRegion) || nextRegion < 0 ||
                         !data.TryGetProperty("m", out var messages) || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() > 1000)
-                        throw new InvalidOperationException("The legacy service returned an unsupported subscription response.");
+                        throw new TransportException(FailureKind.InvalidResponse);
                     // Prime the new subscription, then retain the prior cursor once so a first play sent while
                     // the website created its room is not lost. Freshness limits and watermarks reject old replay.
                     if (restoreCursor.Length > 0)
@@ -222,10 +225,16 @@ namespace LovenseConnector
                     string.Join(",", selected.Select(Uri.EscapeDataString)) + "/" + action + "?uuid=" + Uri.EscapeDataString(uuid);
                 if (action == "heartbeat") uri += "&heartbeat=90&state=" + Uri.EscapeDataString(State(selected));
                 using var body = await GetAsync(uri, 12, cancellationToken).ConfigureAwait(false);
-                if (body.RootElement.ValueKind != JsonValueKind.Object ||
-                    (body.RootElement.TryGetProperty("status", out var status) && status.TryGetInt32(out int code) && code != 200) ||
-                    (body.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.True))
-                    throw new InvalidOperationException("The legacy presence request was rejected.");
+                if (body.RootElement.ValueKind != JsonValueKind.Object)
+                    throw new TransportException(FailureKind.InvalidResponse);
+                if (body.RootElement.TryGetProperty("status", out var status))
+                {
+                    if (status.ValueKind != JsonValueKind.Number || !status.TryGetInt32(out int code))
+                        throw new TransportException(FailureKind.InvalidResponse);
+                    if (code != 200) throw new TransportException(FailureKind.Rejected);
+                }
+                if (body.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.True)
+                    throw new TransportException(FailureKind.Rejected);
             }
             finally { presenceGate.Release(); }
         }
@@ -365,20 +374,40 @@ namespace LovenseConnector
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("The legacy service rejected or could not complete the connection.");
-            const int limit = 1024 * 1024;
-            if (response.Content.Headers.ContentLength > limit) throw new InvalidOperationException("Legacy response size exceeded its limit.");
-            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
-            using var bytes = new MemoryStream(); byte[] buffer = new byte[8192]; int count;
-            while ((count = await stream.ReadAsync(buffer.AsMemory(), deadline.Token).ConfigureAwait(false)) > 0)
+            try
             {
-                if (bytes.Length + count > limit) throw new InvalidOperationException("Legacy response size exceeded its limit.");
-                bytes.Write(buffer, 0, count);
+                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new TransportException(FailureKind.Rejected);
+                const int limit = 1024 * 1024;
+                if (response.Content.Headers.ContentLength > limit) throw new TransportException(FailureKind.InvalidResponse);
+                using var stream = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
+                using var bytes = new MemoryStream(); byte[] buffer = new byte[8192]; int count;
+                while ((count = await stream.ReadAsync(buffer.AsMemory(), deadline.Token).ConfigureAwait(false)) > 0)
+                {
+                    if (bytes.Length + count > limit) throw new TransportException(FailureKind.InvalidResponse);
+                    bytes.Write(buffer, 0, count);
+                }
+                return JsonDocument.Parse(bytes.ToArray(), new JsonDocumentOptions { MaxDepth = 32 });
             }
-            try { return JsonDocument.Parse(bytes.ToArray(), new JsonDocumentOptions { MaxDepth = 32 }); }
-            catch (JsonException) { throw new InvalidOperationException("The legacy service returned invalid data."); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new TransportException(FailureKind.Timeout); }
+            catch (HttpRequestException) { throw new TransportException(FailureKind.ConnectionLost); }
+            catch (IOException) { throw new TransportException(FailureKind.ConnectionLost); }
+            catch (JsonException) { throw new TransportException(FailureKind.InvalidResponse); }
+        }
+
+        internal enum FailureKind { Timeout, Rejected, InvalidResponse, ConnectionLost }
+        internal static (string Phase, string Message) DescribeFailure(FailureKind kind) => kind switch
+        {
+            FailureKind.Timeout => ("Timeout", "The legacy video request timed out. Pair again to reconnect."),
+            FailureKind.Rejected => ("Rejected", "The legacy video service rejected a request. Pair again to reconnect."),
+            FailureKind.InvalidResponse => ("Unsupported", "The legacy video service returned an unsupported response. Pair again to reconnect."),
+            _ => ("Disconnected", "The legacy video connection was lost. Pair again to reconnect.")
+        };
+        sealed class TransportException : InvalidOperationException
+        {
+            internal FailureKind Kind { get; }
+            internal TransportException(FailureKind kind) : base(DescribeFailure(kind).Message) { Kind = kind; }
         }
 
         internal static bool DecimalToken(JsonElement token, out string value)

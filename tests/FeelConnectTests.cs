@@ -40,6 +40,8 @@ internal static class FeelConnectTests
         await DeviceRegistrationUpdates();
         await PlaybackModesAndReconnect();
         await PlaybackModeCancellation();
+        await LegacyTerminalReasons();
+        await ExplicitActionsSupersedeLegacyFailure();
         Console.WriteLine("FeelConnect: " + assertions + " assertions passed (synthetic offline fixtures).");
     }
 
@@ -642,6 +644,69 @@ internal static class FeelConnectTests
             "disconnect during old-session cleanup supersedes queued mode reconnect without reauthorization");
     }
 
+    static async Task LegacyTerminalReasons()
+    {
+        foreach (var failure in new[] {
+            (Kind: "timeout", Phase: "Timeout", Message: "The legacy video request timed out. Pair again to reconnect."),
+            (Kind: "http", Phase: "Rejected", Message: "The legacy video service rejected a request. Pair again to reconnect."),
+            (Kind: "json", Phase: "Unsupported", Message: "The legacy video service returned an unsupported response. Pair again to reconnect."),
+            (Kind: "shape", Phase: "Unsupported", Message: "The legacy video service returned an unsupported response. Pair again to reconnect."),
+            (Kind: "connection", Phase: "Disconnected", Message: "The legacy video connection was lost. Pair again to reconnect.") })
+        {
+            using var fixture = new ServiceFixture { LegacyFault = failure.Kind, HoldLegacyLeave = true };
+            using var http = new HttpClient(fixture);
+            await using var client = new FeelConnectClient(http, fixture.Connect, enableLegacy: true);
+            var statuses = new ConcurrentQueue<FeelConnectStatus>(); var frames = new ConcurrentQueue<FeelConnectOutput>();
+            client.StatusChanged += statuses.Enqueue; client.OutputChanged += frames.Enqueue;
+            // Consumer exceptions must not prevent the terminal cause being stored or cancellation running.
+            client.StatusChanged += _ => throw new Exception("private-consumer-marker");
+            client.OutputChanged += _ => throw new Exception("private-consumer-marker");
+            await client.PairAsync("synthetic-terminal-code", Array.Empty<string>());
+            fixture.Socket.Push(Frame("test-video", "room:message", "{\"ver\":2,\"percents\":[60]}"));
+            await Until(() => client.CurrentPercent == 60);
+            fixture.LegacyMessages.Writer.TryWrite("synthetic-failure-trigger");
+            await fixture.LegacyLeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert(!client.Diagnostics.Connected && client.CurrentPercent == 0 && frames.Last().IsStop,
+                failure.Kind + " stops output before held leave cleanup finishes");
+            fixture.ReleaseLegacyLeave.TrySetResult();
+            await Until(() => fixture.PresenceOnline == 0); await Task.Delay(30);
+            Assert(statuses.Last().Phase == failure.Phase && statuses.Last().Message == failure.Message,
+                failure.Kind + " retains authoritative terminal reason after sibling cancellation and cleanup");
+            Assert(!JsonSerializer.Serialize(statuses.ToArray()).Contains("private-", StringComparison.Ordinal),
+                failure.Kind + " never exposes upstream body, URI, exception or observer details");
+        }
+        using var startup = new ServiceFixture { LegacyFault = "json", FailLegacyPrime = true }; using var startupHttp = new HttpClient(startup);
+        await using var startingClient = new FeelConnectClient(startupHttp, startup.Connect, enableLegacy: true);
+        string rejected = "";
+        try { await startingClient.PairAsync("synthetic-startup-failure", Array.Empty<string>()); }
+        catch (InvalidOperationException error) { rejected = error.Message; }
+        Assert(startingClient.Diagnostics.Phase == "Unsupported" && rejected == "The legacy video service returned an unsupported response. Pair again to reconnect.",
+            "startup failure is preserved in the pairing result and final status");
+    }
+
+    static async Task ExplicitActionsSupersedeLegacyFailure()
+    {
+        foreach (bool replace in new[] { false, true })
+        {
+            using var fixture = new ServiceFixture { LegacyFault = "http", HoldLegacyLeave = true }; using var http = new HttpClient(fixture);
+            await using var client = new FeelConnectClient(http, fixture.Connect, enableLegacy: true);
+            var statuses = new ConcurrentQueue<FeelConnectStatus>(); client.StatusChanged += statuses.Enqueue;
+            await client.PairAsync("synthetic-old-terminal", Array.Empty<string>());
+            fixture.LegacyMessages.Writer.TryWrite("synthetic-failure-trigger");
+            await fixture.LegacyLeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            int marker = statuses.Count; fixture.LegacyFault = "";
+            Task action = replace ? client.PairAsync("synthetic-replacement", Array.Empty<string>()) : client.DisconnectAsync();
+            Assert(statuses.Last().Phase == "Disconnected" && !statuses.Last().Message.Contains("legacy", StringComparison.Ordinal),
+                "explicit action overrides old failure while cleanup is still held");
+            fixture.ReleaseLegacyLeave.TrySetResult(); await action;
+            Assert(replace ? client.Diagnostics.Connected && statuses.Last().Phase == "Connected" :
+                !client.Diagnostics.Connected && statuses.Last().Phase == "Disconnected" && statuses.Last().Message == "Disconnected",
+                replace ? "new pairing owns the final status" : "explicit disconnect finishes with clean status");
+            Assert(!statuses.Skip(marker).Any(status => status.Message.Contains("legacy video service rejected", StringComparison.Ordinal)),
+                "old terminal reason cannot reappear after explicit cancellation or replacement");
+        }
+    }
+
     sealed class ServiceFixture : HttpMessageHandler
     {
         public MemorySocket Socket;
@@ -660,6 +725,8 @@ internal static class FeelConnectTests
         public readonly ConcurrentQueue<(string Uuid, string State)> LegacyHeartbeats = new(), LegacySubscriptions = new();
         public readonly ConcurrentQueue<string> LegacyLeaves = new(), AuthKinds = new();
         public bool HoldLegacyLeave;
+        public string LegacyFault = "";
+        public bool FailLegacyPrime;
         public readonly TaskCompletionSource LegacyLeaveEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly TaskCompletionSource ReleaseLegacyLeave = new(TaskCreationOptions.RunContinuationsAsynchronously);
         long legacySequence;
@@ -713,7 +780,19 @@ internal static class FeelConnectTests
                 }
                 LegacySubscriptions.Enqueue((query["uuid"], query["state"]));
                 Interlocked.Increment(ref LegacySubscribeCount);
-                string message = request.RequestUri.Query.Contains("&tt=0&", StringComparison.Ordinal) ? "" : await LegacyMessages.Reader.ReadAsync(cancellationToken);
+                bool prime = request.RequestUri.Query.Contains("&tt=0&", StringComparison.Ordinal);
+                string message = prime ? "" : await LegacyMessages.Reader.ReadAsync(cancellationToken);
+                if (prime && FailLegacyPrime || message == "synthetic-failure-trigger")
+                {
+                    switch (LegacyFault)
+                    {
+                        case "timeout": throw new TaskCanceledException("private-timeout-marker https://private.invalid/token");
+                        case "http": return new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("private-body-marker") };
+                        case "json": return Json("{private-invalid-json-marker");
+                        case "shape": return Json("{\"t\":\"private-malformed-cursor\",\"m\":[]}");
+                        case "connection": throw new HttpRequestException("private-connection-marker https://private.invalid/token");
+                    }
+                }
                 string cursor = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 10000).ToString();
                 return Json("{\"t\":{\"t\":\"" + cursor + "\",\"r\":1},\"m\":[" + message + "]}");
             }

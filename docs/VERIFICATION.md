@@ -5,6 +5,7 @@
 - Ordered legacy batches are tested through the real decoder, client, native UI handlers and fake motor links. Coverage includes intermediate peaks, independent gains, delayed acknowledgements, queue expiry, overload, disarm and Stop while the UI is blocked.
 - Guest renewal has 36 offline assertions for authentication, room acknowledgements, hard expiry, bounded retries, stale socket events and preservation of website presence and legacy subscriptions. A separate 14-assertion suite covers post-pairing room discovery and cancellation.
 - The current native video pipeline has 80 assertions, and the ordered motor writer has 41. Tests do not operate Bluetooth hardware or a third-party player.
+- Legacy failure tests preserve timeout, rejection, malformed-response and connection-loss reasons through cleanup. Intentional disconnect and replacement clear prior failure state; raw request and response data are excluded from displayed errors.
 - These fixes do not establish live website playback compatibility. A recent paired session received no candidate cues; its motor output remained off. Live token renewal and third-party playback remain unverified.
 
 ## Native controls update — 2026-11-17

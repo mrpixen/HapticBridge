@@ -270,6 +270,8 @@ namespace LovenseConnector
             lock (sync)
             {
                 if (current == null) return;
+                current.OperatorCancelled = true;
+                current.TerminalFailure = null;
                 current.Accepting = false;
                 current.Stop.Cancel();
                 current.Socket?.Abort();
@@ -370,6 +372,8 @@ namespace LovenseConnector
                 {
                     if (ReferenceEquals(current, session))
                     {
+                        if (session.OperatorCancelled) { phase = "Disconnected"; message = "Disconnected"; }
+                        else if (session.TerminalFailure is { } terminal) { phase = terminal.Phase; message = terminal.Message; }
                         session.Accepting = false;
                         EmitOutputLocked(session, session.Protocol.Reset(message));
                         EmitStatusLocked(session, phase, message, false);
@@ -668,14 +672,16 @@ namespace LovenseConnector
             session.BufferedRoom = "";
         }
 
-        void LegacyFailed(Session session, string reason)
+        void LegacyFailed(Session session, FeelConnectLegacy.FailureKind kind)
         {
             lock (sync)
             {
                 if (!ReferenceEquals(current, session) || session.Stop.IsCancellationRequested) return;
+                var terminal = FeelConnectLegacy.DescribeFailure(kind);
+                session.TerminalFailure = terminal;
                 session.Accepting = false;
-                EmitOutputLocked(session, session.Protocol.Reset(reason));
-                EmitStatusLocked(session, "Disconnected", reason, false);
+                EmitOutputLocked(session, session.Protocol.Reset(terminal.Message));
+                EmitStatusLocked(session, terminal.Phase, terminal.Message, false);
                 session.Stop.Cancel(); session.Socket?.Abort();
             }
         }
@@ -1170,6 +1176,8 @@ namespace LovenseConnector
             public DateTimeOffset? ExpiresAt, RenewAt;
             public int FecGeneration, RenewalAttempts;
             public bool RotatingFec;
+            public bool OperatorCancelled;
+            public (string Phase, string Message)? TerminalFailure;
             public bool Accepting, PresenceRegistered, RefreshRequested;
             public bool UseFecWebsite = true;
             public bool Starting = true, Buffering;
