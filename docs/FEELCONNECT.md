@@ -34,6 +34,8 @@ The client reports online/offline presence and refreshes device display names wh
 
 ## Compatibility limits
 
+The optional **Settings → Browser helper → Save helper…** exports a small browser extension for pages whose interactive integration reads the wrong video clock. Extract the ZIP and follow its README. Edge supports loading the extracted folder through its extension developer page; Firefox's temporary development installation ends when Firefox restarts. Normal Firefox distribution requires signing. Saving the helper does not install it or change browser settings. Enable it deliberately on the relevant tab; it does not repair failed service pairing or guarantee live playback.
+
 **Playback settings → Playback mode** offers **Timed cues** (default, version 3) and **Live levels (legacy)** (version 2). Live levels avoids the legacy sender's clock lookup and timed batching. **Apply mode** stops output and reconnects with a fresh receiver identity using the current pairing held in memory. Select **Enable output** afterward. A rejected or expired pairing needs a fresh QR code.
 
 Live levels still requires the website to send playback updates. It does not fix a stalled video clock. Network delay affects each update, and a gap longer than five seconds stops output, including a long hold in a sparse track. Timed cues is preferable when the player supports it. Neither mode changes the authorized channel scope or the available motor intensity range.

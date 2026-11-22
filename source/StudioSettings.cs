@@ -73,6 +73,10 @@ namespace LovenseConnector
             var appearanceCard=new Border { CornerRadius=new CornerRadius(24),Padding=new Thickness(22),Margin=new Thickness(0,0,0,12),BorderBrush=Color("#30E4D3FF"),BorderThickness=new Thickness(0,1,0,0),Child=appearance };appearanceCard.SetResourceReference(Border.BackgroundProperty,"Glass");body.Children.Add(appearanceCard);
             studioSettingsStatus=Text("",13);studioSettingsStatus.Visibility=Visibility.Collapsed;studioSettingsStatus.Foreground=Color("#C4BAD7");body.Children.Add(studioSettingsStatus);
 
+            var browserHelper=new StackPanel { Margin=new Thickness(0,24,0,0) };browserHelper.Children.Add(Text("Browser helper",21));
+            var browserNote=Text("Save the helper, then load it in your browser. Instructions included.",13);browserNote.TextWrapping=TextWrapping.Wrap;browserNote.Foreground=Color("#C4BAD7");browserNote.Margin=new Thickness(0,8,0,8);browserHelper.Children.Add(browserNote);
+            var browserActions=new WrapPanel();browserActions.Children.Add(Action("Save helper…",SaveBrowserHelper));browserHelper.Children.Add(browserActions);body.Children.Add(browserHelper);
+
             var diagnostics=new StackPanel { Margin=new Thickness(0,24,0,0) };diagnostics.Children.Add(Text("Diagnostics",21));
             var actions=new WrapPanel();
             actions.Children.Add(Action("Copy diagnostics",()=> { Clipboard.SetText(StudioDiagnosticSummary());studioSettingsStatus.Text="Copied app status without device names, IDs or access keys.";studioSettingsStatus.Visibility=Visibility.Visible;return System.Threading.Tasks.Task.CompletedTask; }));
@@ -84,6 +88,24 @@ namespace LovenseConnector
             tabs.SelectionChanged+=(s,e)=> { if(ReferenceEquals(e.Source,tabs))window.Dispatcher.BeginInvoke(new Action(ApplyStudioAppearance)); };
             window.ContentRendered+=(s,e)=>ApplyStudioAppearance();
             ApplyStudioAppearance();
+        }
+
+        async System.Threading.Tasks.Task SaveBrowserHelper()
+        {
+            studioSettingsStatus.Visibility=Visibility.Visible;
+            try
+            {
+                if(!await StopAll())
+                {
+                    studioSettingsStatus.Text="Could not confirm Stop. Stop all output before saving the helper.";
+                    return;
+                }
+                var dialog=new Microsoft.Win32.SaveFileDialog { Filter="Browser helper ZIP|*.zip",FileName="HapticBridge-Browser-Helper.zip",DefaultExt=".zip",AddExtension=true,OverwritePrompt=true };
+                if(dialog.ShowDialog(window)!=true){studioSettingsStatus.Visibility=Visibility.Collapsed;return;}
+                BrowserHelper.Export(dialog.FileName);
+                studioSettingsStatus.Text="Saved. Extract the ZIP and follow README.txt to load it in your browser.";
+            }
+            catch { studioSettingsStatus.Text="Could not save the browser helper. Choose a writable folder and try again."; }
         }
 
         static Grid StudioSettingRow(string title,FrameworkElement control)

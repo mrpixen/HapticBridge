@@ -27,6 +27,12 @@ namespace LovenseConnector
         public CurveDocument Document { get => (CurveDocument)GetValue(DocumentProperty); set => SetValue(DocumentProperty, value); }
         public string ActiveLaneId { get => (string)GetValue(ActiveLaneIdProperty); set => SetValue(ActiveLaneIdProperty, value); }
         public bool IsReadOnly { get => (bool)GetValue(IsReadOnlyProperty); set => SetValue(IsReadOnlyProperty, value); }
+        double? previewPositionMs;
+        public double? PreviewPositionMs
+        {
+            get => previewPositionMs;
+            set { previewPositionMs = value.HasValue && double.IsFinite(value.Value) ? value : null; InvalidateVisual(); }
+        }
         public event EventHandler SelectionChanged;
         public event EventHandler StopRequested;
         public event Action<string> EditError;
@@ -166,6 +172,14 @@ namespace LovenseConnector
             if (laneIndex % 3 == 1) pen.DashStyle = DashStyles.Dash;
             if (laneIndex % 3 == 2) pen.DashStyle = DashStyles.Dot;
             context.DrawGeometry(null, pen, line);
+            if (previewPositionMs.HasValue)
+            {
+                double time = Math.Clamp(previewPositionMs.Value, 0, Document.LengthMs);
+                double x = plot.Left + plot.Width * time / Document.LengthMs;
+                double y = plot.Bottom - plot.Height * Document.Sample(lane.Id, time) / 20.0;
+                context.DrawLine(new Pen(TextBrush, 1), new Point(x, plot.Top), new Point(x, plot.Bottom));
+                context.DrawEllipse(accent, new Pen(TextBrush, 2), new Point(x, y), 6, 6);
+            }
             if (!IsReadOnly)
             {
                 for (int i = 0; i < lane.Points.Count; i++)

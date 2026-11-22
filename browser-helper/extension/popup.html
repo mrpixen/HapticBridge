@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HapticBridge Clock Helper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 12c7 0 7 8 14 8h6M6 20v-8m20 0v8"/></svg></span><span>HapticBridge</span></header>
+    <section class="surface" aria-labelledby="heading">
+      <div class="eyebrow">CURRENT TAB</div>
+      <h1 id="heading">Video clock</h1>
+      <div class="state" id="state" data-state="checking"><span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span></div>
+      <p id="detail" role="status" aria-live="polite">Looking for the supported player layout.</p>
+      <button id="toggle" type="button" disabled>Enable for this tab</button>
+      <button id="retry" class="secondary" type="button" hidden>Check again</button>
+    </section>
+    <p class="footnote">Clock compatibility only. Pair and enable output in HapticBridge.</p>
+  </main>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

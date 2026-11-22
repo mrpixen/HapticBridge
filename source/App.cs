@@ -114,7 +114,7 @@ namespace LovenseConnector
         void Run(string[] args)
         {
             dataDir=AssetFiles.DataDirectory; Directory.CreateDirectory(dataDir);
-            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.5.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
+            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.6.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
             catalog=Catalog.FromJson(AssetFiles.ReadText("models.json"));
             using(var stream=AssetFiles.Open("MainWindow.xaml")) window=(Window)XamlReader.Load(stream);
             _=new WindowFrame(window);
@@ -327,6 +327,7 @@ namespace LovenseConnector
         async Task<bool> StopAll()
         {
             operatorGeneration++;
+            StopStudioPreview();
             ClearStudioOwnership();
             CancelSweep();
             var sources=PauseExternalSources();var stops=StopPlayers();
@@ -410,7 +411,7 @@ namespace LovenseConnector
             if(dataDir==null) return;
             try
             {
-                var state=new { version="0.5.0",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
+                var state=new { version="0.6.0",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
                     devices=devices.Values.Select(d=>new { name=d.Name,advertisedName=d.AdvertisedName,connected=d.Connected,state=d.Status,battery=d.Battery,firmware=d.Firmware,controlsEnabled=d.Supported,
                         motors=d.Motors.Values.Select(m=>new { channel=m.Channel,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray() };
                 var path=Path.Combine(dataDir,"status.json"); var temp=Path.Combine(dataDir,"status.tmp"); File.WriteAllText(temp,json.Serialize(state)); if(File.Exists(path)) File.Replace(temp,path,null); else File.Move(temp,path);

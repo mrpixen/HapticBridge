@@ -1,0 +1,6 @@
+{
+  "name": "hapticbridge-clock-helper",
+  "private": true,
+  "type": "module",
+  "scripts": { "check": "node --check extension/clock-bridge.js && node --check extension/popup.js && node --check tests/browser-fixture.js", "package": "powershell -NoProfile -File package.ps1" }
+}

@@ -82,6 +82,33 @@ namespace LovenseConnector
         public CurveDocument(int lengthMs = 6000, bool loop = true)
         { ValidateLength(lengthMs); LengthMs = lengthMs; Loop = loop; }
 
+        /// <summary>Copies a complete document, including unassigned lanes and links.</summary>
+        public CurveDocument Copy()
+        {
+            var copy = new CurveDocument(LengthMs, Loop);
+            copy.ReplaceWith(this);
+            return copy;
+        }
+
+        /// <summary>Atomically replaces topology on import; existing editor bindings stay valid.</summary>
+        public void ReplaceWith(CurveDocument source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            EnsureNoEdit();
+            var states = new Dictionary<CurveState, CurveState>();
+            var replacement = source.lanes.Select(lane =>
+            {
+                if (!states.TryGetValue(lane.State, out var state))
+                    states.Add(lane.State, state = lane.State.Copy());
+                return new CurveLaneModel(lane.Id, lane.DisplayName, state) { IsAvailable = lane.IsAvailable };
+            }).ToArray();
+            int length = source.LengthMs; bool loop = source.Loop;
+            lanes.Clear(); byId.Clear();
+            foreach (var lane in replacement) { lanes.Add(lane); byId.Add(lane.Id, lane); }
+            LengthMs = length; Loop = loop; undo.Clear(); redo.Clear();
+            Notify(); HistoryChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         public bool ContainsLane(string id) => id != null && byId.ContainsKey(id);
         public CurveLaneModel GetLane(string id)
         {

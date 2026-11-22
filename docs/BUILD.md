@@ -11,7 +11,9 @@ The Python example and privacy checker have offline tests: `python -m unittest d
 
 The default output is `dist/win-x64/HapticBridge.exe`. For Windows on ARM, run `./build.ps1 -Runtime win-arm64 -Locked`. The project pins its NuGet dependencies through `source/packages.lock.json`; omit `-Locked` only when intentionally updating that lock file. `-DotNet` accepts an alternate SDK executable path.
 
-The publish script checks that its output directory contains exactly one executable and prints its SHA-256 hash. XAML, the device catalog, help and notices are embedded. Debug symbols are omitted and source paths are mapped to a generic build path. Native runtime files may extract into the operating system's runtime cache during launch.
+The publish script checks that its output directory contains exactly one executable and prints its SHA-256 hash. XAML, the device catalog, help, notices and the six distributable browser-helper files are embedded. The helper's tests and research files are excluded. Debug symbols are omitted and source paths are mapped to a generic build path. Native runtime files may extract into the operating system's runtime cache during launch.
+
+**Settings → Browser helper → Save helper…** exports the bundled helper ZIP. The app remains one executable; using the optional browser workaround requires loading that extension separately. The export includes setup instructions and does not install anything in a browser.
 
 Before publishing, run the privacy checker against the source and each release file:
 

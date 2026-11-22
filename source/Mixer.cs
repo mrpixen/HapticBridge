@@ -31,8 +31,14 @@ namespace LovenseConnector
         readonly Dictionary<string,MixerMotor> mixerRows=new Dictionary<string,MixerMotor>();
         ComboBox audioMode; Slider mixerHigh,audioGain; TextBox mixerDuration,mixerTransition;
         TextBlock mixerLabel,audioLabel;
-        AudioSync audioCapture; DispatcherTimer mixerTimer; bool audioTickBusy;
-        MixerMotor[] audioTargets; int audioGeneration;
+        IAudioSource audioCapture; DispatcherTimer mixerTimer; bool audioTickBusy;
+        MixerMotor[] audioTargets; int audioGeneration,audioStartRequest;
+        sealed class AudioStopRetry
+        {
+            public Device Device;public Playback Player;public int Channel;public PlaybackStopRevision Revision;
+            public bool Unconfirmed => ReferenceEquals(Device.Player,Player)&&Player.HasUnconfirmedStop(Channel,Revision);
+        }
+        AudioStopRetry[] audioStopRetries;
         static string MixerKey(Device d,int c) { return d.Address.ToString("X12")+"/"+c; }
         void InitializeMixer()
         {
@@ -58,20 +64,47 @@ namespace LovenseConnector
         {
             var targets=SelectedMixer();if(targets.Length==0)throw new InvalidOperationException("Connect and select at least one motor.");
             int generation=audioGeneration,operation=operatorGeneration;
+            string outputId=(audioOutputChoice?.SelectedItem as AudioOutput)?.Id;
             await Task.WhenAll(devices.Values.Where(d=>d.Player!=null).Select(d=>d.Player.StopAll()));
             if(generation!=audioGeneration||operation!=operatorGeneration||closing||integration!=null)return;
-            var capture=new AudioSync();try { capture.Start(); }catch { capture.Dispose();throw; }
-            audioTargets=mixerRows.Values.Where(m=>m.Device.Connected).ToArray();audioCapture=capture;audioGeneration++;audioLabel.Text="Listening to Windows output · selected motors follow the sound";
+            var capture=(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
+            audioTargets=mixerRows.Values.Where(m=>m.Device.Connected).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;audioLabel.Text="Listening · "+capture.OutputName;
         }
-        void StopAudio() { audioGeneration++;var capture=audioCapture;audioCapture=null;if(capture!=null) { try { capture.Dispose(); }catch(Exception ex) { Log("Audio: "+ex.Message); } }if(audioLabel!=null)audioLabel.Text="Sound sync stopped"; }
-        async Task StopAudioMotors() { var targets=audioTargets??new MixerMotor[0];StopAudio();await Task.WhenAll(targets.Where(m=>m.Device.Player!=null).Select(m=>m.Device.Player.Stop(m.Channel))); }
+        AudioStopRetry[] UnconfirmedAudioStops()
+        { return audioStopRetries=(audioStopRetries??Array.Empty<AudioStopRetry>()).Where(r=>r.Unconfirmed).ToArray(); }
+        string AudioStoppedMessage(string confirmed) => UnconfirmedAudioStops().Length>0?"Stop unconfirmed · press Stop sound sync to retry":confirmed;
+        void StopAudio() { audioGeneration++;var capture=audioCapture;audioCapture=null;if(capture!=null) { try { capture.Dispose(); }catch(Exception ex) { Log("Audio: "+ex.Message); } }if(audioLabel!=null)audioLabel.Text=AudioStoppedMessage("Sound sync stopped"); }
+        Task StopAudioMotors() => StopAudioMotorsCore(false);
+        Task StopAudioOutput() { audioStartRequest++;return StopAudioMotorsCore(true); }
+        async Task StopAudioMotorsCore(bool retry)
+        {
+            // Capture exact players before stopping: a reconnect must not inherit an old retry.
+            var targets=audioCapture==null?Array.Empty<MixerMotor>():audioTargets??Array.Empty<MixerMotor>();
+            var attempts=targets.Where(m=>m.Device.Player!=null).Select(m=>new AudioStopRetry { Device=m.Device,Player=m.Device.Player,Channel=m.Channel }).ToArray();
+            bool existing=attempts.Length==0;
+            if(existing&&retry)attempts=UnconfirmedAudioStops();
+            audioTargets=null;StopAudio();int generation=audioGeneration;
+            if(attempts.Length==0)return;
+            audioLabel.Text="Stopping sound sync";
+            var stops=new List<Task>();
+            foreach(var attempt in attempts) {
+                PlaybackStopRevision claim;
+                var stop=existing?attempt.Player.RetryStop(attempt.Channel,attempt.Revision,out claim):attempt.Player.StopTracked(attempt.Channel,out claim);
+                attempt.Revision=claim;stops.Add(stop);
+            }
+            try { await Task.WhenAll(stops); }
+            finally {
+                audioStopRetries=(audioStopRetries??Array.Empty<AudioStopRetry>()).Concat(attempts).Distinct().Where(r=>r.Unconfirmed).ToArray();
+                if(generation==audioGeneration)audioLabel.Text=AudioStoppedMessage("Sound sync stopped");
+            }
+        }
         async Task AudioTick()
         {
             if(audioCapture==null||audioTickBusy)return;audioTickBusy=true;int generation=audioGeneration;
             Exception failure=null;try {
                 if(audioCapture.Error!=null)throw new InvalidOperationException(audioCapture.Error);
                 double energy=audioCapture.Read(audioMode.SelectedIndex==0);int level=AudioMeter.Level(energy,audioGain.Value);
-                audioLabel.Text="Sound sync · level "+level+" / 20";
+                audioLabel.Text=audioCapture.OutputName+" · level "+level+" / 20";
                 foreach(var m in audioTargets) {
                     if(generation!=audioGeneration||audioCapture==null)return;
                     if(!m.Device.Connected||m.Device.Player==null)throw new InvalidOperationException("A sound-sync motor disconnected.");
@@ -80,7 +113,11 @@ namespace LovenseConnector
                     else if(!player.UpdateSteady(m.Channel,scaled,500,150))await player.Start(m.Channel,new PatternSpec { mode="Steady",high=scaled,durationMs=500,transitionMs=150 },20);
                 }
             }catch(Exception ex) { failure=ex; }finally { audioTickBusy=false; }
-            if(failure!=null) { StopAudio();Report(failure);await StopAudioMotors(); }
+            if(failure!=null&&generation==audioGeneration) {
+                try { await StopAudioMotors();audioLabel.Text=failure.Message; }
+                catch(Exception stopError) { audioLabel.Text=failure.Message+" · Stop unconfirmed";Report(stopError); }
+                Report(failure);
+            }
         }
     }
 }

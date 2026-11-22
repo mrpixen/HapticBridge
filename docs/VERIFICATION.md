@@ -1,5 +1,20 @@
 # Release verification
 
+## Controls and sound update — 2026-11-22
+
+Two reviewers scored offline authoring/preview, lossless mix imports, captured live-session timing and truthful output status 9/10. Selecting an audio endpoint scored 8/10 and 9/10. These changes were selected because they solve observed gaps and can be tested without hardware. A proposed gameplay HUD recognizer scored 6/10 and was deferred pending recorded gameplay and measured detection accuracy. Duplicate status and Undo/Redo controls were rejected at 2/10.
+
+- Pattern preview samples the editable curves and animates a playhead without a Playback or Bluetooth call. Drafts can be created, linked, imported and saved with no connected device. Unassigned curves and older saved mixes retain every lane.
+- A motor joining an active live session inherits its original deadline and transition. Editing duration to zero or leaving invalid text in the next-run fields cannot extend that session.
+- Sound follows a selected Windows audio output. Selection, refresh and endpoint failure stop that source without automatically restarting. Inactive audio settings do not interrupt a newer manual source.
+- Output stays marked unconfirmed when a transport does not acknowledge a stop; an unknown level is never presented as an acknowledged zero.
+- The explicit sound Stop retries a failed stop only while that exact playback generation still owns the target. A new manual session, reconnect or hardware preset invalidates the retry, including while a write is queued.
+- All 15 core suites, 41 Windows QR assertions, 80 video-pipeline assertions, 107 Studio assertions, 21 audio-routing assertions, 14 legacy-import assertions and six Python release-tool tests passed. Audio endpoints and actuator links were synthetic.
+- The real native window was checked with zero and three simulated motors at 850 × 620. Offline point editing, visual preview, Stop all, readable audio endpoint names and refresh-to-stop passed. Preview keeps the graph and time labels visible without moving the footer.
+- The neutral browser-helper fixture passed nine real-browser cases (45 assertions); 14 independent adversarial cases and six-file ZIP/source comparison also passed. This verifies the conditional clock adapter, not a third-party player or browser extension installation.
+
+Physical output, real endpoint switching during capture, ARM64 execution and live third-party video playback require separate validation. This update does not change the disabled live VALORANT integration.
+
 ## Receiver update — 2026-11-17
 
 - Ordered legacy batches are tested through the real decoder, client, native UI handlers and fake motor links. Coverage includes intermediate peaks, independent gains, delayed acknowledgements, queue expiry, overload, disarm and Stop while the UI is blocked.

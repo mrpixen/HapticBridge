@@ -10,7 +10,7 @@
     <StartupObject>LovenseConnector.ConnectorApp</StartupObject>
     <AssemblyName>HapticBridge</AssemblyName>
     <RootNamespace>LovenseConnector</RootNamespace>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <SelfContained>true</SelfContained>
@@ -29,6 +29,12 @@
   <ItemGroup>
     <Compile Include="*.cs" />
     <EmbeddedResource Include="MainWindow.xaml" LogicalName="HapticBridge.Assets.MainWindow.xaml" />
+    <EmbeddedResource Include="../browser-helper/extension/manifest.json" LogicalName="HapticBridge.BrowserHelper.manifest.json" />
+    <EmbeddedResource Include="../browser-helper/extension/popup.html" LogicalName="HapticBridge.BrowserHelper.popup.html" />
+    <EmbeddedResource Include="../browser-helper/extension/popup.css" LogicalName="HapticBridge.BrowserHelper.popup.css" />
+    <EmbeddedResource Include="../browser-helper/extension/popup.js" LogicalName="HapticBridge.BrowserHelper.popup.js" />
+    <EmbeddedResource Include="../browser-helper/extension/clock-bridge.js" LogicalName="HapticBridge.BrowserHelper.clock-bridge.js" />
+    <EmbeddedResource Include="../browser-helper/extension/README.txt" LogicalName="HapticBridge.BrowserHelper.README.txt" />
     <EmbeddedResource Include="models.json" LogicalName="HapticBridge.Assets.models.json" />
     <EmbeddedResource Include="../docs/*.md" LogicalName="HapticBridge.Assets.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../LICENSE" LogicalName="HapticBridge.Assets.LICENSE" Condition="Exists('../LICENSE')" />

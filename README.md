@@ -10,6 +10,8 @@ A Windows app for controlling compatible Lovense devices, making vibration patte
 
 Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **Video sync** for FeelConnect sessions. **Stop all** stops connected devices; Escape does the same while the window has focus.
 
+Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Assign curve to motor** copies an unassigned curve to a connected motor. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
+
 FeelConnect website playback is experimental. Pairing can succeed before a player sends any vibration cues; see [compatibility notes](docs/FEELCONNECT.md).
 
 Requires Windows 10 version 2004 or newer, or Windows 11, with Bluetooth Low Energy support. Internet is needed for FeelConnect sessions. A single executable contains the app and its .NET runtime; settings and runtime caches are created locally when it runs. Device capabilities vary by model and firmware.

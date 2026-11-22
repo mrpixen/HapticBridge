@@ -51,8 +51,12 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await AudioRoutingTests.Run();
+        LegacyDraftTests.Run();
         await ThreeMotorsAndIndependentSelection();
         await DynamicJoinUsesSharedDeadline();
+        await EditedDurationCannotExtendRunningSession();
+        await InvalidDraftTimingCannotBreakRunningJoin();
         await DelayedJoinCannotOutliveDeadline();
         await PatternJoinUsesCurrentPhase();
         await StopSupersedesPendingStart();
@@ -65,6 +69,9 @@ internal static class StudioIntegrationTests
         await ManualActionRevokesStudio();
         await DeviceSliderCannotRetargetStudio();
         await ImportIsAtomic();
+        await UnassignedMixLanesSurviveRoundTrip();
+        await NoDeviceDraftRoundTripAndPreview();
+        await FailedStopCannotDisplayOutputOff();
     }
 
     static async Task ThreeMotorsAndIndependentSelection()
@@ -124,6 +131,46 @@ internal static class StudioIntegrationTests
         fixture.Single.ReleaseLatest.TrySetResult();
         await Until(() => !fixture.Rows[2].Device.Player.Active(0), "expired delayed join shuts down after command gate opens");
         Check(!fixture.Single.Snapshot().Skip(marker).Any(command => command.Nonzero), "queued late join never sends a nonzero level past shared deadline");
+    }
+
+    static async Task EditedDurationCannotExtendRunningSession()
+    {
+        await using var fixture = new Fixture();
+        fixture.Duration.Text = "900"; fixture.Rows[2].Include.IsChecked = false;
+        await fixture.Start();
+        await Until(() => fixture.Levels()[0] > 0, "finite session starts before editing its draft duration");
+        var clock = Get<Stopwatch>(fixture.App, "studioClock");
+        while (clock.ElapsedMilliseconds < 200) await Task.Delay(10);
+        fixture.Duration.Text = "0";
+        fixture.Rows[2].Level.Value = 7;
+        fixture.Rows[2].Include.IsChecked = true;
+        await Until(() => fixture.Levels()[2] == 7, "late motor joins with its current level after draft duration changes");
+        Check(fixture.Levels()[0] == 12 && fixture.Levels()[1] == 12, "late motor's level does not retarget existing motors");
+        while (clock.ElapsedMilliseconds < 1200) await Task.Delay(10);
+        Check(fixture.Levels().All(level => level == 0) && fixture.Rows.All(row => !row.Device.Player.Active(row.Channel)),
+            "editing duration to until-stopped cannot extend any motor beyond the captured finite session deadline");
+        Call(fixture.App, "RefreshStudioPlaybackState");
+        Check(!Get<bool>(fixture.App, "studioRunning"), "completed session releases ownership despite an until-stopped draft duration");
+        Check(fixture.Duration.Text == "0", "the edited duration is retained for the next deliberate start");
+    }
+
+    static async Task InvalidDraftTimingCannotBreakRunningJoin()
+    {
+        await using var fixture = new Fixture();
+        fixture.Duration.Text = "900"; fixture.Rows[2].Include.IsChecked = false;
+        await fixture.Start();
+        await Until(() => fixture.Levels()[0] > 0, "finite session starts before partially editing timing fields");
+        var clock = Get<Stopwatch>(fixture.App, "studioClock");
+        fixture.Duration.Text = "editing";
+        Get<TextBox>(fixture.App, "mixerTransition").Text = "editing";
+        fixture.Rows[2].Level.Value = 5;
+        fixture.Rows[2].Include.IsChecked = true;
+        await Until(() => fixture.Levels()[2] == 5, "late motor joins from captured session timing while draft fields are incomplete");
+        Check(Get<bool>(fixture.App, "studioRunning") && fixture.Levels()[0] == 12 && fixture.Levels()[1] == 12,
+            "an incomplete draft timing edit does not abort current output");
+        while (clock.ElapsedMilliseconds < 1200) await Task.Delay(10);
+        Check(fixture.Levels().All(level => level == 0) && fixture.Rows.All(row => !row.Device.Player.Active(row.Channel)),
+            "late join with invalid draft timing still respects the captured deadline");
     }
 
     static async Task StopSupersedesPendingStart()
@@ -338,6 +385,74 @@ internal static class StudioIntegrationTests
         lanes = Enumerable.Range(0, 3).Select(i => new StudioLanePreset { level = 9 + i, selected = i != 1, group = i, curve = "linear",
             points = new[] { new LovenseConnector.Frame { ms = 0, level = i + 1 }, new LovenseConnector.Frame { ms = 300, level = 0 } } }).ToArray() };
 
+    static async Task UnassignedMixLanesSurviveRoundTrip()
+    {
+        await using var fixture = new Fixture();
+        var preset = DraftPreset(5);
+        Call(fixture.App, "ApplyStudioMix", preset);
+        var saved = (StudioPreset)Call(fixture.App, "ExportStudioMix");
+        Check(saved.lanes.Length == 5, "importing five lanes with three motors retains every lane on export");
+        Check(JsonSerializer.Serialize(saved) == JsonSerializer.Serialize(preset),
+            "surplus draft lanes preserve order, curves, link groups, levels and selections");
+        Check(fixture.Commands().Length == 0, "loading and exporting extra curves never sends motor commands");
+    }
+
+    static async Task NoDeviceDraftRoundTripAndPreview()
+    {
+        await using var fixture = new Fixture(withDevices: false);
+        var preset = DraftPreset(3);
+        Call(fixture.App, "ApplyStudioMix", preset);
+        Check(Get<CurveDocument>(fixture.App, "studioDocument").Lanes.Count == 3,
+            "a mix can be opened before any device is connected");
+        Check(fixture.Rows.Length == 0 && Get<Dictionary<ulong, Device>>(fixture.App, "devices").Count == 0,
+            "draft lanes do not create synthetic connected devices or motor routes");
+        var saved = (StudioPreset)Call(fixture.App, "ExportStudioMix");
+        Check(JsonSerializer.Serialize(saved) == JsonSerializer.Serialize(preset),
+            "a disconnected draft preserves the complete file on export");
+        Call(fixture.App, "StartStudioPreview");
+        await Until(() => Get<Stopwatch>(fixture.App, "studioPreviewClock")?.ElapsedMilliseconds >= 40,
+            "visual preview advances without a hardware session");
+        Check(!Get<bool>(fixture.App, "studioRunning") && fixture.Commands().Length == 0,
+            "visual preview never starts physical playback");
+        Check(Get<TextBlock>(fixture.App, "studioPreviewLabel").Text.Contains("Visual only", StringComparison.OrdinalIgnoreCase),
+            "visual preview explicitly distinguishes simulated levels from physical output");
+        await fixture.Stop();
+        Check(Get<Stopwatch>(fixture.App, "studioPreviewClock") == null,
+            "Stop all also ends the visual preview clock");
+        bool refused = false;
+        try { await Invoke(fixture.App, "StartStudio"); } catch (ArgumentException) { refused = true; }
+        Check(refused && fixture.Commands().Length == 0, "unassigned drafts cannot be started as physical motors");
+    }
+
+    static StudioPreset DraftPreset(int count) => new()
+    {
+        lengthMs = 300, loop = true, durationMs = 500, transitionMs = 0,
+        lanes = Enumerable.Range(0, count).Select(i => new StudioLanePreset
+        {
+            level = 4 + i, selected = i % 2 == 0, group = i / 2, curve = "linear",
+            points = new[] { new LovenseConnector.Frame { ms = 0, level = i / 2 + 1 }, new LovenseConnector.Frame { ms = 300, level = 0 } }
+        }).ToArray()
+    };
+
+    static async Task FailedStopCannotDisplayOutputOff()
+    {
+        await using var fixture = new Fixture();
+        fixture.Dual.HoldAndFailNextLaneStop = true;
+        fixture.Dual.ReleaseLaneStop.TrySetResult();
+        bool failed = false;
+        try { await fixture.Rows[0].Device.Player.Stop(fixture.Rows[0].Channel); }
+        catch (InvalidOperationException) { failed = true; }
+        Check(failed && fixture.Levels()[0] < 0, "synthetic failed stop leaves the sent level unknown");
+        Call(fixture.App, "RefreshStudioDock");
+        string source = ((TextBlock)fixture.Window.FindName("OutputSource")).Text;
+        Check(source.Contains("unconfirmed", StringComparison.OrdinalIgnoreCase),
+            "idle output with a failed stop is shown as unconfirmed rather than off");
+        await fixture.Stop();
+        Call(fixture.App, "RefreshStudioDock");
+        Check(((TextBlock)fixture.Window.FindName("OutputSource")).Text == "Output off",
+            "a later confirmed stop restores the output-off state");
+    }
+
     sealed class Fixture : IAsyncDisposable
     {
         public ConnectorApp App { get; }
@@ -346,7 +461,7 @@ internal static class StudioIntegrationTests
         public FakeLink Single { get; } = new("single");
         public MixerMotor[] Rows { get; }
         public TextBox Duration => Get<TextBox>(App, "mixerDuration");
-        public Fixture()
+        public Fixture(bool withDevices = true)
         {
             // Avoid normal field initializers, which resolve the user's actual data directory.
             App = (ConnectorApp)RuntimeHelpers.GetUninitializedObject(typeof(ConnectorApp));
@@ -359,8 +474,11 @@ internal static class StudioIntegrationTests
             Set(App, "activity", (TextBox)Window.FindName("ActivityLog")); Set(App, "sweepButton", (Button)Window.FindName("SweepButton"));
             Set(App, "feelWriteGate", new SemaphoreSlim(1, 1));
             var devices = Get<Dictionary<ulong, Device>>(App, "devices");
-            AddDevice(1, "Synthetic dual actuator", Dual, new[] { 1, 2 });
-            AddDevice(2, "Synthetic single actuator", Single, new[] { 0 });
+            if (withDevices)
+            {
+                AddDevice(1, "Synthetic dual actuator", Dual, new[] { 1, 2 });
+                AddDevice(2, "Synthetic single actuator", Single, new[] { 0 });
+            }
             Call(App, "InitializeStudioControls"); Call(App, "RefreshStudioMotors");
             Rows = Get<Dictionary<string, MixerMotor>>(App, "mixerRows").Values.ToArray();
             Get<TextBox>(App, "mixerTransition").Text = "0";

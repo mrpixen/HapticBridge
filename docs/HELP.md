@@ -10,13 +10,15 @@ In **Controls → Live**, choose motors and set their individual 0–20 levels. 
 
 In **Pattern**, choose a motor tab and draw its curve. Double-click to add a point, drag to edit it, or use **Edit point** for exact time and level. **More** contains pattern length, looping, presets, linking and mix files. Link selected motors to share one curve, or leave their curves independent. All selected motors use the same playback clock. Undo and Redo work on curve edits. Editing a playing curve stops it before applying changes.
 
-New mix files contain numbered motor lanes rather than device names or identifiers. When opened, lanes map to the connected motors in their displayed order. Older mix files can contain device identifiers.
+Without a device, choose **Create a pattern**. **Preview** animates the curve and shows its sampled level without sending any motor commands. Editing, changing modes, or Stop all ends the preview. **More → Add unassigned curve** adds another draft; **Assign curve to motor** copies its curve to a connected motor. Starting device output still requires **Start selected**.
+
+New mix files contain numbered motor lanes rather than device names or identifiers. When opened, lanes map to the connected motors in their displayed order; extra lanes remain as unassigned drafts and survive saving. Older mix files can contain device identifiers, but conversion preserves their saved curves and saving in the new format removes those identifiers. Live timing is captured when playback starts: changing timing fields applies to the next start, including when another motor joins the current session.
 
 **STOP ALL** ends output and pauses external integrations. Escape does the same when the window has focus. If a Bluetooth connection is lost, the app cannot guarantee that a stop reaches the hardware; use the device's physical control when needed.
 
 ## Sound sync
 
-Select motors under **Controls** or **Sound**. In **Sound**, choose **Bass rumble** or **Full sound**, then **Start sound sync**. Adjust sensitivity and each motor's maximum level. Audio comes from the current Windows output device and is not recorded. If you switch output devices, stop and start sound sync again.
+Select motors under **Controls** or **Sound**. In **Sound**, choose the **Audio output** to follow, choose **Bass rumble** or **Full sound**, then **Start sound sync**. Adjust sensitivity and each motor's maximum level. Audio is analyzed in memory without being recorded. Changing the selected output or pressing **Refresh** stops sound sync; start it again when ready. **Windows default** resolves the current default each time you start.
 
 ## Local programs and mods
 

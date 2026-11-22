@@ -92,6 +92,8 @@ namespace LovenseConnector
         public int Ceiling=20;
     }
 
+    internal readonly record struct PlaybackStopRevision(int Epoch,int Revision);
+
     internal sealed partial class Playback
     {
         readonly ICommandLink link;
@@ -195,13 +197,43 @@ namespace LovenseConnector
                 finally { controls.Release(); job.Cancel.Dispose(); }
             }
         }
-        public async Task Stop(int channel)
+        public async Task Stop(int channel) { await StopTracked(channel,out _).ConfigureAwait(false); }
+        internal Task StopTracked(int channel,out PlaybackStopRevision claim)
         {
             MotorCommand(channel,0);
-            lock(sync) { InvalidateOrdered(channel); revisions[channel]++; MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
+            lock(sync) { InvalidateOrdered(channel); claim=new(epoch,++revisions[channel]); MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
+            return StopClaimed(channel);
+        }
+        async Task StopClaimed(int channel)
+        {
             await controls.WaitAsync().ConfigureAwait(false);
             try { await StopPreset().ConfigureAwait(false); await link.Command(MotorCommand(channel,0)).ConfigureAwait(false); lock(sync) sent[channel]=0; Emit(channel,0,"Stopped"); }
             catch { lock(sync) sent[channel]=-1; Emit(channel,-1,"Stop unconfirmed"); throw; }
+            finally { controls.Release(); }
+        }
+        bool OwnsStopRevision(int channel,PlaybackStopRevision claim) => epoch==claim.Epoch&&revisions[channel]==claim.Revision;
+        internal bool HasUnconfirmedStop(int channel,PlaybackStopRevision claim)
+        { lock(sync)return OwnsStopRevision(channel,claim)&&sent[channel]<0; }
+        internal Task RetryStop(int channel,PlaybackStopRevision previous,out PlaybackStopRevision claim)
+        {
+            lock(sync) {
+                claim=previous;
+                if(!OwnsStopRevision(channel,previous)||sent[channel]>=0)return Task.CompletedTask;
+                claim=new(epoch,++revisions[channel]);
+            }
+            return RetryClaimedStop(channel,claim);
+        }
+        async Task RetryClaimedStop(int channel,PlaybackStopRevision claim)
+        {
+            await controls.WaitAsync().ConfigureAwait(false);
+            try {
+                bool submitted=false;
+                Func<string> sample=()=> { lock(sync) { if(!OwnsStopRevision(channel,claim))return null;submitted=true;return MotorCommand(channel,0); } };
+                var latest=link as ILatestCommandLink;
+                string reply=latest!=null?await latest.CommandLatest(sample,CancellationToken.None).ConfigureAwait(false):await SendOrderedFallback(sample,CancellationToken.None).ConfigureAwait(false);
+                if(submitted&&reply!="") { lock(sync) { if(!OwnsStopRevision(channel,claim))return;sent[channel]=0; }Emit(channel,0,"Stopped"); }
+            }
+            catch { bool current;lock(sync) { current=OwnsStopRevision(channel,claim);if(current)sent[channel]=-1; }if(current)Emit(channel,-1,"Stop unconfirmed");throw; }
             finally { controls.Release(); }
         }
         public void CancelAll()
