@@ -253,14 +253,19 @@ internal static class FeelConnectTests
         try { await client.PairAsync("synthetic-pair-code", Array.Empty<string>()); }
         catch (InvalidOperationException ex) { expired = ex.Message.Contains("expired", StringComparison.OrdinalIgnoreCase); }
         Assert(expired && fixture.ConnectionCount == 0, "expired FEC metadata fails before socket");
-        var active = new ServiceFixture { TokenExpiry = DateTimeOffset.UtcNow.AddSeconds(3).ToUnixTimeSeconds() };
+        // Advance the injected clock only after observing live output. A wall-clock expiry
+        // competing with Until's deadline makes this test depend on runner scheduling.
+        long activeNow = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var active = new ServiceFixture { TokenExpiry = activeNow + 30 };
         using var activeHttp = new HttpClient(active);
-        await using var activeClient = new FeelConnectClient(activeHttp, active.Connect);
+        await using var activeClient = new FeelConnectClient(activeHttp, active.Connect,
+            utcNow: () => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref activeNow)));
         var frames = new ConcurrentQueue<FeelConnectOutput>(); var statuses = new ConcurrentQueue<FeelConnectStatus>();
         activeClient.OutputChanged += frames.Enqueue; activeClient.StatusChanged += statuses.Enqueue;
         await activeClient.PairAsync("synthetic-active-code", Array.Empty<string>());
         active.Socket.Push(Frame("test-website", "website:device_speed", "{\"strength\":70}"));
         await Until(() => frames.Any(x => x.Percent == 70));
+        Interlocked.Add(ref activeNow, 31);
         await Until(() => statuses.Any(x => x.Phase == "Expired"));
         Assert(frames.Last().IsStop && !statuses.Last().Connected, "live token expiry stops without rearming");
     }
