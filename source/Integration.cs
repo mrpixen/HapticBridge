@@ -94,7 +94,7 @@ namespace LovenseConnector
             if(request.Method=="GET")
             {
                 if(request.Path=="/api/v1/devices") return new { devices=ApiDevices() };
-                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.6.0",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
+                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.7.0",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
                 if(request.Path=="/api/v1/capabilities") return new { apiVersion=1,range=new { min=0,max=20,step=1 },patterns=new[]{"Steady","Pulse","Wave","Ramp","Custom"},routes=new[]{"GET /status","GET /devices","POST /session","POST /heartbeat","POST /frame","POST /motor","POST /pattern","POST /release","POST /stop"},timing="Best effort; acknowledged levels are commanded outputs, not sensor readings." };
                 throw new ApiFault(404,"Route not found.");
             }
@@ -105,7 +105,7 @@ namespace LovenseConnector
                 if(integration!=null) throw new ApiFault(409,"Another integration owns the session: "+integration.Name);
                 string name=FieldString(body,"name"); if(name.Length>80) throw new ApiFault(400,"Session name must be at most 80 characters.");
                 int ttl=FieldInt(body,"ttlMs",3000,500,10000),operation=++operatorGeneration;
-                StopAudio();var video=DisarmFeelConnect();var stopped=StopPlayers();await Task.WhenAll(video,stopped);
+                StopAudio();var video=DisarmFeelConnect();var screen=DisarmScreen();var stopped=StopPlayers();await Task.WhenAll(video,screen,stopped);
                 if(closing||operation!=operatorGeneration||!apiEnabled||sweep!=null||integration!=null)throw new ApiFault(409,"Integration ownership changed while opening the session.");
                 if(!await stopped)throw new ApiFault(409,"Output could not be stopped before switching sources.");
                 integration=new IntegrationSession { Id=Guid.NewGuid().ToString("N"),Name=name,TtlMs=ttl }; integration.Touch(); UpdateApiLabel();

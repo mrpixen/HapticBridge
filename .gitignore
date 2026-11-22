@@ -5,6 +5,8 @@ patterns/
 integration.json
 status.json
 session.log
+screen-profile.json
+screen-profile.json.tmp
 *.log
 *.pdb
 *.dmp

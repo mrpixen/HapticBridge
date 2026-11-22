@@ -12,6 +12,8 @@ Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **
 
 Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Assign curve to motor** copies an unassigned curve to a connected motor. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
 
+**Screen sync** provides experimental VALORANT feedback from visible health drops and a calibrated kill badge. Choose a window, check recognition in preview, then enable output. It uses Windows window capture without game hooks or Overwolf. See [screen setup](docs/SCREEN-SYNC.md); actual gameplay accuracy and Riot approval are not established.
+
 FeelConnect website playback is experimental. Pairing can succeed before a player sends any vibration cues; see [compatibility notes](docs/FEELCONNECT.md).
 
 Requires Windows 10 version 2004 or newer, or Windows 11, with Bluetooth Low Energy support. Internet is needed for FeelConnect sessions. A single executable contains the app and its .NET runtime; settings and runtime caches are created locally when it runs. Device capabilities vary by model and firmware.

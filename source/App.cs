@@ -83,7 +83,8 @@ namespace LovenseConnector
             var audio=audioCapture!=null?StopAudioMotors():Task.CompletedTask;
             var video=DisarmFeelConnect();
             var local=RevokeIntegration(true);
-            return Task.WhenAll(audio,video,local);
+            var screen=DisarmScreen();
+            return Task.WhenAll(audio,video,local,screen);
         }
         async Task Manual(Func<Task> action)
         {
@@ -114,7 +115,7 @@ namespace LovenseConnector
         void Run(string[] args)
         {
             dataDir=AssetFiles.DataDirectory; Directory.CreateDirectory(dataDir);
-            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.6.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
+            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.7.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
             catalog=Catalog.FromJson(AssetFiles.ReadText("models.json"));
             using(var stream=AssetFiles.Open("MainWindow.xaml")) window=(Window)XamlReader.Load(stream);
             _=new WindowFrame(window);
@@ -122,6 +123,7 @@ namespace LovenseConnector
             scanButton=Find<Button>("ScanButton"); sweepButton=Find<Button>("SweepButton");
             InitializeMixer();
             InitializeFeelConnect();
+            InitializeScreenSync();
             InitializeTheme();
             InitializeStudioDevices();
             InitializeStudioSettings();
@@ -142,7 +144,7 @@ namespace LovenseConnector
             window.Closing+=async(s,e)=> {
                 if(closeAllowed) return;
                 e.Cancel=true; if(closing) return; closing=true;StopAudio();if(mixerTimer!=null)mixerTimer.Stop(); scanTimer.Stop(); heartbeat.Stop(); if(scanner!=null) scanner.Stop(); if(api!=null) api.Dispose(); if(apiTimer!=null) apiTimer.Stop();
-                await StopAll(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
+                await StopAll();screenTimer?.Stop(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
                 if(scanner!=null) scanner.Dispose(); SaveState(); closeAllowed=true;
                 _=window.Dispatcher.BeginInvoke(new Action(window.Close));
             };
@@ -327,12 +329,13 @@ namespace LovenseConnector
         async Task<bool> StopAll()
         {
             operatorGeneration++;
+            var capture=StopScreenCapture();
             StopStudioPreview();
             ClearStudioOwnership();
             CancelSweep();
             var sources=PauseExternalSources();var stops=StopPlayers();
             bool success;
-            try { await Task.WhenAll(sources,stops);success=await stops; }
+            try { await Task.WhenAll(sources,stops,capture);success=await stops; }
             catch(Exception ex) { Report(ex);success=false; }
             hint.Text=!devices.Values.Any(d=>d.Connected)?"No active toy connections. Disconnected output cannot be confirmed.":success?"All connected motors stopped.":"Stop could not be confirmed for every toy. Check connection status.";SaveState();return success;
         }
@@ -411,7 +414,7 @@ namespace LovenseConnector
             if(dataDir==null) return;
             try
             {
-                var state=new { version="0.6.0",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
+                var state=new { version="0.7.0",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
                     devices=devices.Values.Select(d=>new { name=d.Name,advertisedName=d.AdvertisedName,connected=d.Connected,state=d.Status,battery=d.Battery,firmware=d.Firmware,controlsEnabled=d.Supported,
                         motors=d.Motors.Values.Select(m=>new { channel=m.Channel,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray() };
                 var path=Path.Combine(dataDir,"status.json"); var temp=Path.Combine(dataDir,"status.tmp"); File.WriteAllText(temp,json.Serialize(state)); if(File.Exists(path)) File.Replace(temp,path,null); else File.Move(temp,path);

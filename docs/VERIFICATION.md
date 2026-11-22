@@ -1,5 +1,17 @@
 # Release verification
 
+## Screen sync preview — 2026-11-22
+
+Screen detection was subsequently requested as an experimental feature. This supersedes the earlier deferral below; it does not establish real-game accuracy.
+
+- Windows Graphics Capture successfully captured a separate synthetic HUD window. Freeze, drag selection, digit learning, badge learning, calibration save and resume were exercised through the native UI. A 100-to-80 health change produced one damage event; a cleared and reappearing badge produced one kill event. Preview sent no motor output. Escape stopped capture. Compact controls were checked at 850 × 620.
+- The pure detector passed 58 assertions covering confirmation, healing, missing and out-of-order frames, stale badges, deduplication, malformed profiles and empty images.
+- The native screen pipeline passed 26 assertions with synthetic pixels and actuator transports. Coverage includes multi-motor feedback, automatic pulse completion, focus loss, no automatic rearm, stale capture, death, cancellation during blocked writes, stop failure/retry, newer-owner protection, pending-arm cancellation and late capture callbacks.
+- All 16 core suites, 41 QR assertions, 80 video-pipeline assertions, 107 existing Studio assertions, 21 audio-routing assertions, 14 legacy-import assertions and six Python tests passed. No physical output or game capture was used by these tests.
+- No new package, external recognition service or game asset is required. The Windows capture indicator is retained. Captured frames stay in memory; explicit calibration saves only small binary templates, regions and levels to a private local file.
+
+Real VALORANT match recognition, game-load performance, spectator discrimination and ARM64 execution remain unverified. Avoiding process injection does not guarantee Riot approval. The separate Overwolf integration's approval gate remains unchanged. Live third-party video support is unchanged.
+
 ## Controls and sound update — 2026-11-22
 
 Two reviewers scored offline authoring/preview, lossless mix imports, captured live-session timing and truthful output status 9/10. Selecting an audio endpoint scored 8/10 and 9/10. These changes were selected because they solve observed gaps and can be tested without hardware. A proposed gameplay HUD recognizer scored 6/10 and was deferred pending recorded gameplay and measured detection accuracy. Duplicate status and Undo/Redo controls were rejected at 2/10.

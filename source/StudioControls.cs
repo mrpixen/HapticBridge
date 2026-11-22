@@ -410,7 +410,7 @@ namespace LovenseConnector
         {
             if(window==null)return;var source=Find<TextBlock>("OutputSource");var sent=Find<TextBlock>("OutputLevels");if(source==null||sent==null)return;
             var motors=devices.Values.Where(d=>d.Connected&&d.Player!=null).SelectMany(d=>d.Channels.Select(c=>d.Player.Level(c))).ToArray();sent.Text=motors.Length==0?"No motors connected":"Sent: "+string.Join(" · ",motors.Select((n,i)=>"M"+(i+1)+": "+(n<0?"Unknown":n.ToString())));
-            source.Text=sweep!=null?"Device test":feelArmed?"Video sync":audioCapture!=null?"Sound sync":integration!=null?integration.Name:OwnsStudio?(studioRunningPattern?"Pattern playing":"Live controls"):devices.Values.Any(d=>d.Player?.Running==true)?"Device controls":motors.Any(level=>level<0)?"Output unconfirmed":"Output off";
+            source.Text=sweep!=null?"Device test":screenArmed?"Screen sync":feelArmed?"Video sync":audioCapture!=null?"Sound sync":integration!=null?integration.Name:OwnsStudio?(studioRunningPattern?"Pattern playing":"Live controls"):devices.Values.Any(d=>d.Player?.Running==true)?"Device controls":motors.Any(level=>level<0)?"Output unconfirmed":"Output off";
         }
 
         void ShowStudioLink()

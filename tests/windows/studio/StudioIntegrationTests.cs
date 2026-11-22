@@ -51,6 +51,7 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await ScreenSyncTests.Run();
         await AudioRoutingTests.Run();
         LegacyDraftTests.Run();
         await ThreeMotorsAndIndependentSelection();
