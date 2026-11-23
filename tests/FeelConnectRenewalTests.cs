@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -34,6 +35,22 @@ internal static class FeelConnectRenewalTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (!predicate()) await Task.Delay(10, timeout.Token);
+    }
+    static async Task RenewalFinished(FeelConnectClient client, Fixture fixture, int requestCount)
+    {
+        await Until(() => Volatile.Read(ref fixture.AuthRequests) == requestCount);
+        // The HTTP request begins before its failure schedules the next retry. Advancing
+        // the fake clock at request entry races that scheduling, especially on busy CI.
+        const BindingFlags hidden = BindingFlags.Instance | BindingFlags.NonPublic;
+        object sync = typeof(FeelConnectClient).GetField("sync", hidden).GetValue(client);
+        Task renewal;
+        lock(sync)
+        {
+            object session = typeof(FeelConnectClient).GetField("current", hidden).GetValue(client);
+            renewal = (Task)session.GetType().GetField("RenewalTask").GetValue(session);
+        }
+        if(renewal==null)throw new Exception("Renewal attempt was not scheduled.");
+        await renewal.WaitAsync(TimeSpan.FromSeconds(5));
     }
     static string Token(object payload) => "synthetic." + Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_') + ".signature";
     static void TokenMetadata()
@@ -98,16 +115,16 @@ internal static class FeelConnectRenewalTests
 
     static async Task BoundedRetriesAndHardExpiry()
     {
-        using var f = new Fixture { InitialLifetime = 1000, ExchangeStatus = HttpStatusCode.ServiceUnavailable }; using var http = new HttpClient(f);
+        using var f = new Fixture { InitialLifetime = 1000, ExchangeStatus = HttpStatusCode.ServiceUnavailable, ExchangeResponseDelayMs = 150 }; using var http = new HttpClient(f);
         await using var client = new FeelConnectClient(http, f.Connect, true, () => f.Now);
         await client.PairAsync("synthetic-qr", Array.Empty<string>());
         f.Fec(f.Sockets.Single(), 50); await Until(() => client.CurrentPercent == 50);
-        f.Advance(41); await Until(() => f.AuthRequests == 2);
+        f.Advance(41); await RenewalFinished(client, f, 2);
         await Task.Delay(100); Assert(f.AuthRequests == 2 && f.Sockets.Count == 1 && client.CurrentPercent == 50,
             "temporary exchange failure retains usable old transport and avoids hot retry");
         f.Advance(29); await Task.Delay(100); Assert(f.AuthRequests == 2, "retry does not run before minimum spacing");
-        f.Advance(2); await Until(() => f.AuthRequests == 3);
-        f.Advance(31); await Until(() => f.AuthRequests == 4);
+        f.Advance(2); await RenewalFinished(client, f, 3);
+        f.Advance(31); await RenewalFinished(client, f, 4);
         f.Advance(100); await Task.Delay(100);
         Assert(f.AuthRequests == 4 && client.Diagnostics.Connected, "renewal retry budget is bounded at three exchanges");
         f.Advance(1000); await Until(() => client.Diagnostics.Phase == "Expired");
@@ -189,6 +206,7 @@ internal static class FeelConnectRenewalTests
         public Tuple<MemorySocket, int> PendingJoin;
         public int AuthRequests, RealtimeRequests, RoomRequests, OnlinePresence, OfflinePresence, MetadataCount, LegacyInitialSubscriptions;
         public int InitialLifetime = 100;
+        public int ExchangeResponseDelayMs;
         public bool IncludeIssuedAt = true, HoldReplacementJoin, RejectReplacementJoin, RejectReplacementAuthentication, HoldExchange, ReturnUnchanged;
         public HttpStatusCode ExchangeStatus = HttpStatusCode.OK;
         public DateTimeOffset Now => basis.AddSeconds(Interlocked.Read(ref seconds));
@@ -246,6 +264,7 @@ internal static class FeelConnectRenewalTests
                 {
                     ExchangeEntered.TrySetResult();
                     if (HoldExchange) await Task.Delay(Timeout.Infinite, token);
+                    if (ExchangeResponseDelayMs > 0) await Task.Delay(ExchangeResponseDelayMs, token);
                     if (ExchangeStatus != HttpStatusCode.OK) return new HttpResponseMessage(ExchangeStatus);
                 }
                 return Json(JsonSerializer.Serialize(new { access_token = count == 1 ? "original-access" : "replacement-access-must-be-ignored", fec_token = count == 1 || ReturnUnchanged ? InitialToken : ReplacementToken }));
