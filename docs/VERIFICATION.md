@@ -1,12 +1,12 @@
 # Release verification
 
-## Pattern ordering and inversion — 2026-11-23 (source update)
+## 0.8.1 — Pattern ordering and inversion — 2026-11-23
 
 A regression reproduced curves and selection settings moving to the wrong motor after saving and reopening with an earlier-discovered device disconnected. Export used document insertion order; import used connected-motor order. Export now uses the same motor slots as import, followed by unassigned curves. Tests cover disconnections, drafts created before device discovery, link groups, levels, selections and identifier-free files.
 
 **More → Invert levels** complements the active curve's levels within 0–20, preserving timing, interpolation and linked groups. One Undo restores it. The command is unavailable without an active curve or during a point drag. A changed playing pattern stops and needs an explicit restart.
 
-Passed: 73 curve-document checks, 163 native Studio assertions, 47 screen, 21 audio-routing and 17 legacy-import assertions. The ordering regression failed before its fix. Inversion tests exercise all interpolation modes, Undo/Redo and real playback scheduling with simulated motors, including no positive output during Undo/Redo before explicit restart. No GUI access, real capture or physical output was used. These changes are not in the published 0.8.0 executable.
+Passed: 73 curve-document checks, 163 native Studio assertions, 47 screen, 21 audio-routing and 17 legacy-import assertions. The ordering regression failed before its fix. Inversion tests exercise all interpolation modes, Undo/Redo and real playback scheduling with simulated motors, including no positive output during Undo/Redo before explicit restart. No GUI access, real capture or physical output was used. The 0.8.1 preview includes these changes; live-game and new-window validation remain outstanding.
 
 ## 0.8.0 release scope
 
