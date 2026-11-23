@@ -70,10 +70,16 @@ internal static class ScreenSyncTests
         var visual=new DrawingVisual();using(var dc=visual.RenderOpen()){dc.DrawRectangle(Brushes.Black,null,new Rect(0,0,180,80));dc.DrawText(new FormattedText(text,CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(new FontFamily(font),FontStyles.Normal,FontWeights.Bold,FontStretches.Normal),size,Brushes.White,1),new Point(8,8));}
         var bitmap=new RenderTargetBitmap(180,80,96,96,PixelFormats.Pbgra32);bitmap.Render(visual);var bytes=new byte[180*80*4];bitmap.CopyPixels(bytes,720,0);return new ScreenPixels(bytes,180,80,ScreenCapture.Now);
     }
-    static async Task Feed(ConnectorApp app,Capture capture,string health,int count=1)
+    static ScreenPixels ShieldPixels(string health,string shield)
+    {
+        var hp=Pixels(health);var armor=Pixels(shield);var bytes=new byte[360*80*4];
+        for(int row=0;row<80;row++){Array.Copy(hp.Bgra,row*720,bytes,row*1440,720);Array.Copy(armor.Bgra,row*720,bytes,row*1440+720,720);}
+        return new ScreenPixels(bytes,360,80,ScreenCapture.Now);
+    }
+    static async Task Feed(ConnectorApp app,Capture capture,string health,int count=1,string shield=null)
     {
         for(int i=0;i<count;i++) {
-            var type=typeof(ConnectorApp).GetNestedType("ScreenSample",BindingFlags.NonPublic);var sample=Activator.CreateInstance(type);Set(sample,"Source",capture);Set(sample,"Pixels",Pixels(health));Set(app,"screenPending",sample);await Invoke(app,"ScreenTick");await Task.Delay(110);
+            var type=typeof(ConnectorApp).GetNestedType("ScreenSample",BindingFlags.NonPublic);var sample=Activator.CreateInstance(type);Set(sample,"Source",capture);Set(sample,"Pixels",shield==null?Pixels(health):ShieldPixels(health,shield));Set(app,"screenPending",sample);await Invoke(app,"ScreenTick");await Task.Delay(110);
         }
     }
     internal static async Task Run()
@@ -134,6 +140,32 @@ internal static class ScreenSyncTests
             await Invoke(app,"UndoScreenCalibration");Check(profile.Digits.Count==digitCount&&profile.BadgeMask!=null,"reset can be undone with independent copies of learned digits");
             bool invalid=false;try{Call(app,"SetScreenRegion",new HudRegion {X=2,Width=.1,Height=.1});}catch(TargetInvocationException ex)when(ex.InnerException is ArgumentException){invalid=true;}
             Check(invalid&&!Get<Button>(app,"screenUndoCalibration").IsEnabled,"invalid region leaves calibration and undo history unchanged");
+            profile.Health=new HudRegion {Width=.5,Height=1};profile.BadgeMask=null;
+            Get<ComboBox>(app,"screenRegion").SelectedIndex=2;
+            Call(app,"SetScreenRegion",new HudRegion {X=.5,Width=.5,Height=1});
+            Check(fields[0].Text=="50"&&fields[2].Text=="50","shield selection uses its own numeric region coordinates");
+            await Invoke(app,"SetScreenShieldEnabled",true);
+            Check(profile.ReadShield&&Get<CheckBox>(app,"screenReadShield").IsChecked==true,"shield reading explicitly enabled and reflected in its control");
+            Set(app,"screenFrozen",true);Set(app,"screenFrame",ShieldPixels("100","25"));Get<TextBox>(app,"screenHealthText").Text="25";
+            digitCount=profile.Digits.Count;await Invoke(app,"LearnScreenDigits");
+            Check(profile.Digits.Count==digitCount+2,"learning uses the selected shield digits");
+            await Invoke(app,"UndoScreenCalibration");Check(profile.Digits.Count==digitCount,"shield glyph learning can be undone");
+            await Invoke(app,"LearnScreenDigits");
+            var reading=HudVision.Read(ShieldPixels("100","25"),profile,defaults);
+            Check(reading.Health==100&&reading.Shield==25&&reading.ShieldConfidence>=.82,"same synthetic frame recognizes health and shield independently");
+            Check(HudVision.Read(ShieldPixels("100",""),profile,defaults).Shield==null,"blank shield is unknown rather than zero");
+            Check(HudVision.Read(ShieldPixels("100","80"),profile,defaults).Shield==null,"shield values above 50 are rejected");
+            Set(app,"screenFrozen",false);capture=new Capture();Set(app,"screenCapture",capture);Get<HudEventFilter>(app,"screenFilter").Reset();
+            before=links.Select(l=>l.Positive.Count).ToArray();await Feed(app,capture,"100",3,"25");await Feed(app,capture,"100",3,"10");
+            Check(links.Select(l=>l.Positive.Count).SequenceEqual(before)&&Get<TextBlock>(app,"screenHistory").Text.Contains("−15 shield"),"shield-only damage appears in preview without output");
+            await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3,"10");await Feed(app,capture,"100",3,"5");await Task.Delay(350);
+            Check(links.Select((l,i)=>l.Positive.Count>before[i]).All(x=>x)&&players.All(p=>p.Level(0)==0&&!p.Active(0)),"shield-only damage reaches both selected motors and stops within its bounded pulse");
+            await Invoke(app,"SetScreenShieldEnabled",false);
+            Check(!Get<bool>(app,"screenArmed")&&!profile.ReadShield&&Get<CheckBox>(app,"screenReadShield").IsChecked==false,"changing shield mode disarms output and updates its control");
+            Check(HudVision.Read(ShieldPixels("100","25"),profile,defaults).Shield==null,"disabled shield reading preserves health-only behavior");
+            await Invoke(app,"UndoScreenCalibration");Check(profile.ReadShield&&!Get<bool>(app,"screenArmed"),"undo restores shield calibration without rearming");
+            Call(app,"SaveScreenProfile");var restored=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>(File.ReadAllText(Path.Combine(temp,"screen-profile.json")));
+            Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
     }

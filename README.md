@@ -12,7 +12,7 @@ Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **
 
 Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Duplicate curve** creates an independent, unassigned copy; **Assign curve to motor** copies it to a connected motor. Edits save as a local draft; use **More → Restore previous draft** after reopening. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
 
-**Screen sync** provides experimental VALORANT feedback from visible health drops and a calibrated kill badge. Choose a window, check recognition in preview, then enable output. It uses Windows window capture without game hooks or Overwolf. See [screen setup](docs/SCREEN-SYNC.md); actual gameplay accuracy and Riot approval are not established.
+**Screen sync** provides experimental VALORANT feedback from visible health or shield drops and a calibrated kill badge. Choose a window, check recognition in preview, then enable output. It uses Windows window capture without game hooks or Overwolf. See [screen setup](docs/SCREEN-SYNC.md); actual gameplay accuracy and Riot approval are not established.
 
 FeelConnect website playback is experimental. Pairing can succeed before a player sends any vibration cues; see [compatibility notes](docs/FEELCONNECT.md).
 

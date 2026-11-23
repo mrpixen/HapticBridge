@@ -10,6 +10,7 @@ internal static class ScreenDetectionTests
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
     static int Main()
     {
+        ShieldDamage();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -34,5 +35,32 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void ShieldDamage()
+    {
+        var filter=new HudEventFilter();double time=0;
+        HudEvent[] Push(int? hp,int? shield,double confidence=1)
+        {
+            var events=new System.Collections.Generic.List<HudEvent>();
+            for(int i=0;i<3;i++){events.AddRange(filter.Push(new HudReading { Health=hp,Confidence=1,Shield=shield,ShieldConfidence=confidence },time));time+=.1;}
+            return events.ToArray();
+        }
+        Check(Push(100,25).Length==0,"shield baseline emits nothing");
+        var ev=Push(100,10);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==15&&ev[0].ShieldAmount==15&&ev[0].Health==100,"shield-only loss emits one damage event with unchanged HP");
+        Check(Push(100,10).Length==0,"held shield value does not repeat damage");
+        Check(Push(100,25).Length==0,"regenerating shield silently raises baseline");
+        ev=Push(90,5);Check(ev.Length==1&&ev[0].Amount==30&&ev[0].ShieldAmount==20&&ev[0].Health==90,"same-frame HP and shield loss combine into one event");
+        Check(Push(90,null).Length==0&&Push(90,2).Length==0,"unreadable shield is not zero and reacquires without phantom damage");
+        ev=Push(90,0);Check(ev.Length==1&&ev[0].Amount==2&&ev[0].ShieldAmount==2,"confirmed zero shield is a real decrease");
+        Check(Push(90,25).Length==0&&Push(90,5,.4).Length==0&&Push(90,5).Length==0,"low-confidence shield readings discard their baseline");
+        ev=Push(80,null);Check(ev.Length==1&&ev[0].Amount==10&&ev[0].ShieldAmount==0,"health damage still works without readable shield");
+        Check(Push(null,0).Length==0&&Push(80,1).Length==0,"shield cues require a readable health HUD");
+        Check(Push(100,0).Length==0,"health recovery never turns shield loss into damage");
+        Push(100,25);ev=Push(0,0);Check(ev.Length==1&&ev[0].Kind=="Death","death with shield loss emits only the death event");
+        Check(Push(0,25).Length==0&&Push(0,0).Length==0,"shield changes cannot emit while dead");
+        filter.Reset();Push(100,25);Check(Push(100,51).Length==0&&Push(100,1).Length==0,"out-of-range shield rejected without false loss on reacquisition");
+        Check(Push(100,0,double.NaN).Length==0&&Push(100,0).Length==0,"nonfinite shield confidence never confirms damage");
+        var old=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>("{\"Version\":1}");Check(old.Validate()&&!old.ReadShield,"older saved profiles retain health-only behavior");
+        old.Shield=null;Check(!old.Validate(),"missing shield region rejected");
     }
 }

@@ -23,13 +23,15 @@ namespace LovenseConnector
     {
         public int Version { get; set; }=1;
         public HudRegion Health { get; set; }=new HudRegion { X=.265,Y=.915,Width=.065,Height=.055 };
+        public HudRegion Shield { get; set; }=new HudRegion { X=.225,Y=.925,Width=.035,Height=.04 };
+        public bool ReadShield { get; set; }
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public byte[] BadgeMask { get; set; }
         public List<HudGlyph> Digits { get; set; }=new List<HudGlyph>();
         public int DamageLevel { get; set; }=14;
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
-        public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Badge!=null&&Badge.Valid&&
+        public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
             DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20;
@@ -45,21 +47,23 @@ namespace LovenseConnector
     internal sealed class HudReading
     {
         public int? Health;
-        public double Confidence, BadgeScore;
+        public int? Shield;
+        public double Confidence, ShieldConfidence, BadgeScore;
     }
     internal sealed class HudEvent
     {
         public string Kind;
-        public int Amount,Health;
+        public int Amount,Health,ShieldAmount;
     }
     internal sealed class HudEventFilter
     {
-        int? health,candidate;
-        int repeat,badgeRepeat;
+        int? health,candidate,shield,shieldCandidate;
+        int repeat,badgeRepeat,shieldRepeat;
         double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100;
         bool badgeLatched=true;
         public int? Health => health;
-        public void Reset() { health=candidate=null;repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100; }
+        public void Reset() { health=candidate=null;ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100; }
+        void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;}
         public HudEvent[] Push(HudReading read,double time)
         {
             var events=new List<HudEvent>();
@@ -68,16 +72,28 @@ namespace LovenseConnector
             lastTime=time;
             if(read==null||read.Confidence<.82||!read.Health.HasValue||read.Health<0||read.Health>100) {
                 if(invalidSince<0)invalidSince=time;
-                candidate=null;repeat=badgeRepeat=0;badgeOffSince=-1;
+                candidate=null;repeat=badgeRepeat=0;badgeOffSince=-1;ResetShield();
                 if(time-invalidSince>.6){health=null;badgeLatched=true;}
                 return events.ToArray();
             }
             invalidSince=-1;
             if(candidate==read.Health)repeat++;else{candidate=read.Health;repeat=1;}
+            int healthLoss=0,shieldLoss=0;
             if(repeat>=3&&candidate!=health) {
-                if(health.HasValue&&candidate<health)events.Add(new HudEvent { Kind=candidate==0?"Death":"Damage",Amount=health.Value-candidate.Value,Health=candidate.Value });
+                if(health.HasValue&&candidate<health)healthLoss=health.Value-candidate.Value;
+                if(health.HasValue&&candidate>health)ResetShield(); // Respawn/healing establishes a fresh shield baseline.
                 health=candidate;
             }
+            if(!read.Shield.HasValue||read.Shield<0||read.Shield>50||!double.IsFinite(read.ShieldConfidence)||read.ShieldConfidence<.82)ResetShield();
+            else {
+                if(shieldCandidate==read.Shield)shieldRepeat++;else{shieldCandidate=read.Shield;shieldRepeat=1;}
+                // Wait for health too, so a simultaneous HP/shield drop becomes one event.
+                if(shieldRepeat>=3&&repeat>=3&&shieldCandidate!=shield) {
+                    if(shield.HasValue&&shieldCandidate<shield&&health>0)shieldLoss=shield.Value-shieldCandidate.Value;
+                    shield=shieldCandidate;
+                }
+            }
+            if(healthLoss>0||shieldLoss>0)events.Add(new HudEvent { Kind=health==0?"Death":"Damage",Amount=healthLoss+shieldLoss,ShieldAmount=shieldLoss,Health=health.Value });
             // A badge already visible when starting never emits a stale kill.
             if(read.BadgeScore<.55) {
                 badgeRepeat=0;
@@ -147,29 +163,37 @@ namespace LovenseConnector
             for(int i=0;i<a.Length;i++){total+=a[i]+b[i];if(a[i]>0&&b[i]>0)intersection++;}
             return total<12?0:2.0*intersection/total;
         }
-        public static HudGlyph[] Learn(ScreenPixels frame,HudRegion region,string number)
+        public static HudGlyph[] Learn(ScreenPixels frame,HudRegion region,string number,int maximum=100)
         {
-            if(string.IsNullOrEmpty(number)||number.Length>3||number.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Enter the visible health number (0–100).");
-            if(!int.TryParse(number,out int value)||value>100)throw new ArgumentException("Health must be 0–100.");
+            if(string.IsNullOrEmpty(number)||number.Length>3||number.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Enter the visible number (0–"+maximum+").");
+            if(!int.TryParse(number,out int value)||value>maximum)throw new ArgumentException("The number must be 0–"+maximum+".");
             var parts=Segment(Extract(frame,region));
-            if(parts.Length!=number.Length)throw new ArgumentException("Select just the health digits, then try again. The digit count did not match.");
+            if(parts.Length!=number.Length)throw new ArgumentException("Select just the digits, then try again. The digit count did not match.");
             return parts.Select((p,i)=>new HudGlyph { Digit=number[i]-'0',Aspect=(double)p.Width/p.Height,Mask=Normalize(p) }).ToArray();
         }
         public static HudReading Read(ScreenPixels frame,ScreenProfile profile,IEnumerable<HudGlyph> defaults)
         {
-            var result=new HudReading();var parts=Segment(Extract(frame,profile.Health));
+            var templates=profile.Digits.Concat(defaults).ToArray();
+            var health=ReadNumber(frame,profile.Health,templates,100);
+            var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
+            if(profile.ReadShield) {var shield=ReadNumber(frame,profile.Shield,templates,50);result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;}
+            result.BadgeScore=Similarity(Normalize(Extract(frame,profile.Badge),32,32),profile.BadgeMask);
+            return result;
+        }
+        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum)
+        {
+            var parts=Segment(Extract(frame,region));
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
                     var mask=Normalize(part);double aspect=(double)part.Width/part.Height;
-                    var scores=profile.Digits.Concat(defaults).GroupBy(g=>g.Digit).Select(g=>new { Digit=g.Key,Score=g.Max(t=>Similarity(mask,t.Mask)*Math.Min(aspect/t.Aspect,t.Aspect/aspect)) }).OrderByDescending(s=>s.Score).ToArray();
+                    var scores=templates.GroupBy(g=>g.Digit).Select(g=>new { Digit=g.Key,Score=g.Max(t=>Similarity(mask,t.Mask)*Math.Min(aspect/t.Aspect,t.Aspect/aspect)) }).OrderByDescending(s=>s.Score).ToArray();
                     if(scores.Length<2||scores[0].Score<.82||scores[0].Score-scores[1].Score<.045){confidence=0;break;}
                     number=number*10+scores[0].Digit;confidence=Math.Min(confidence,scores[0].Score);
                 }
-                if(confidence>=.82&&number<=100){result.Health=number;result.Confidence=confidence;}
+                if(confidence>=.82&&number<=maximum)return (number,confidence);
             }
-            result.BadgeScore=Similarity(Normalize(Extract(frame,profile.Badge),32,32),profile.BadgeMask);
-            return result;
+            return (null,0);
         }
     }
 }

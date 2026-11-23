@@ -1,5 +1,11 @@
 # Release verification
 
+## Shield damage — 2026-11-23 (source update)
+
+The health-only detector missed damage absorbed entirely by shields. Optional shield calibration now reads a separate 0–50 number, requires three consistent readings, and emits damage while health is unchanged. Simultaneously confirmed health/shield decreases form one event. Regeneration is silent; unreadable shield digits discard that baseline instead of implying zero. Older profiles leave shield reading off. Calibration undo, reset and save include the shield region and enabled state; changing the mode disarms output.
+
+All 16 core suites passed, including 75 screen-filter assertions covering combined damage, regeneration, invalid/low-confidence readings, reacquisition, death and older profiles. The native screen suite passed 47 assertions, including independent pixel recognition, shield learning/undo, persisted calibration and bounded feedback to both simulated motors. Studio (143), audio routing (21) and legacy import (17) also passed. No visible UI, game capture or physical device was accessed. Actual gameplay, visual layout and ARM64 execution remain unverified. This addition is not in the published 0.7.1 executable.
+
 ## Draft recovery — 2026-11-23 (source update)
 
 Pattern edits save a local draft after a 750 ms pause. Startup offers **More → Restore previous draft** without changing the editor or starting output. Recovery uses normal mix import, preserving curves, links, levels, selection and timing. Timing changes alone before a pattern is edited do not replace a previous draft.
