@@ -31,6 +31,14 @@ internal static class LegacyDraftTests
         var reordered=StudioPresetRules.ConvertLegacy(legacy,new[]{"saved-c/2","saved-a/1","saved-c/2"});
         Check(reordered.lanes.Select(lane=>lane.level).SequenceEqual(new[]{17,5,11}),"current exact matches lead, duplicated current keys do not duplicate saved data");
         Check(StudioPresetRules.ConvertLegacy(legacy,null).lanes.Length==3,"missing current-motor list behaves as offline import");
+        legacy.stagger=true;
+        var ripple=StudioPresetRules.ConvertLegacy(legacy,Array.Empty<string>());
+        Check(ripple.lanes.Select(lane=>lane.points[0].level).SequenceEqual(new[]{0,8,13}),"saved Ripple offsets survive conversion instead of aligning every motor");
+        var ripplePartial=StudioPresetRules.ConvertLegacy(legacy,new[]{"saved-a/1","new-motor/0"});
+        Check(ripplePartial.lanes.Select(lane=>lane.points[0].level).SequenceEqual(new[]{0,0,8,13}),"unselected current motors do not alter saved Ripple phases");
+        var rippleReordered=StudioPresetRules.ConvertLegacy(legacy,new[]{"saved-c/2","saved-a/1"});
+        Check(rippleReordered.lanes.Select(lane=>lane.points[0].level).SequenceEqual(new[]{13,0,8}),"saved Ripple phases follow their curves when current devices are reordered");
+        legacy.stagger=false;
         string exported=JsonSerializer.Serialize(partial);
         Check(!exported.Contains("saved-",StringComparison.Ordinal)&&!exported.Contains("new-motor",StringComparison.Ordinal),"version2 data contains no legacy or current device identifiers");
 

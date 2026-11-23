@@ -1,5 +1,17 @@
 # Release verification
 
+## Calibration and playback fixes — 2026-11-23
+
+Three failures were reproduced with regression tests before correction:
+
+- Cancelling screen output during a slow handoff from another source could still let the pending enable complete. The handoff now checks for screen cancellation before proceeding.
+- Dragging a HUD region left already-open coordinate fields stale. The fields now follow the selection, and editing a saved region marks it unsaved.
+- Importing an older Ripple mix discarded the saved phase offsets. Each imported curve now retains its original phase, including when current motors are missing, reordered or newly connected.
+
+Undo calibration restores up to 20 region and learning edits without reverting feedback strengths. Native UI checks with a synthetic HUD confirmed reset/undo restored health recognition and the learned badge, empty Undo stayed disabled, and dragging refreshed open coordinate fields. No physical motors or game window were used.
+
+The full run passed all 16 core suites (including 58 detector assertions), 41 QR assertions, 80 video-pipeline assertions, 34 screen-sync assertions, 21 audio-routing assertions, 17 legacy-import assertions, 107 Studio assertions and six Python tests. Real-match recognition and ARM64 execution remain unverified; live video compatibility is unchanged.
+
 ## Screen sync preview — 2026-11-22
 
 Screen detection was subsequently requested as an experimental feature. This supersedes the earlier deferral below; it does not establish real-game accuracy.

@@ -12,6 +12,8 @@ Screen sync reads a selected window through Windows Graphics Capture. It estimat
 
 You can also set the selected region using **Region coordinates**, measured as percentages of the captured window. Calibration stays on this computer. Changing resolution, window borders, UI scale or badge cosmetics may require recalibration. Learn more digits from other health values when needed; built-in font templates cover digits you have not taught it.
 
+**Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
+
 ## Feedback
 
 - **Damage:** a brief pulse, stronger at lower remaining health. The slider sets its maximum.

@@ -24,6 +24,12 @@ internal static class ScreenSyncTests
     static void Set(object o,string name,object value)=>o.GetType().GetField(name,Members).SetValue(o,value);
     static object Call(object o,string name,params object[] args)=>o.GetType().GetMethod(name,Members).Invoke(o,args);
     static Task Invoke(object o,string name,params object[] args)=>(Task)Call(o,name,args);
+    static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        yield return root;
+        foreach(var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            foreach(var item in Descendants(child))yield return item;
+    }
     sealed class Capture : IScreenCapture
     {
         public bool Foreground { get; set; }=true;
@@ -31,6 +37,14 @@ internal static class ScreenSyncTests
         public event Action<ScreenPixels> Frame {add{}remove{}}
         public event Action<string> Failed {add{}remove{}}
         public void Dispose()=>Disposed=true;
+    }
+    sealed class AudioSource : IAudioSource
+    {
+        public string Error=>null;
+        public string OutputName=>"Synthetic source";
+        public void Start(){}
+        public double Read(bool bassOnly)=>0;
+        public void Dispose(){}
     }
     sealed class Link : ICommandLink,ILatestCommandLink
     {
@@ -90,9 +104,36 @@ internal static class ScreenSyncTests
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);links[0].FailZero=1;await Invoke(app,"DisarmScreen");Check(players[0].Level(0)<0,"failed stop remains unconfirmed");await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);Check(players[0].Level(0)==0,"failed stop retried for same output revision");
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");links[0].FailZero=1;await Invoke(app,"DisarmScreen");await players[0].Start(0,new PatternSpec {mode="Steady",high=9,durationMs=1000},20);await Task.Delay(120);await Invoke(app,"RetryScreenStops",ScreenCapture.Now+2);Check(players[0].Active(0)&&players[0].Level(0)==9,"old screen stop retry cannot stop a newer manual owner");await players[0].StopAll();
             await Feed(app,capture,"100",3);links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();var arming=Invoke(app,"ArmScreen");await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));await Invoke(app,"DisarmScreen");links[0].Block.TrySetResult(true);await arming;links[0].Block=null;Check(!Get<bool>(app,"screenArmed"),"disarm cancels an arm waiting for existing output to stop");
+            // Cancellation must also cover Manual's earlier source handoff, before ArmScreen's
+            // own StopPlayers await. No real audio capture or output is used here.
+            await Feed(app,capture,"100",3);
+            Set(app,"audioLabel",new TextBlock());Set(app,"audioCapture",new AudioSource());Set(app,"audioTargets",new[]{new MixerMotor {Device=devices[1],Channel=0}});
+            links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
+            arming=Invoke(app,"ArmScreen");await Task.WhenAny(arming,links[0].Entered.Task).WaitAsync(TimeSpan.FromSeconds(2));if(arming.IsCompleted)await arming;await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await Invoke(app,"DisarmScreen");links[0].Block.TrySetResult(true);await arming;links[0].Block=null;
+            Check(!Get<bool>(app,"screenArmed"),"disarm during a slow source handoff cancels the pending screen arm");
             await Invoke(app,"StopScreenCapture");Check(capture.Disposed&&Get<IScreenCapture>(app,"screenCapture")==null&&Get<ScreenPixels>(app,"screenFrame")==null,"stop disposes capture and releases frame");
             await Feed(app,capture,"80",1);Check(Get<ScreenPixels>(app,"screenFrame")==null,"late callback from stopped capture ignored");
             Call(app,"SaveScreenProfile");string saved=File.ReadAllText(Path.Combine(temp,"screen-profile.json"));Check(!saved.Contains("Synthetic actuator")&&!saved.Contains("window",StringComparison.OrdinalIgnoreCase),"saved calibration contains no device or window identity");
+            var coordinatePanel=Descendants(Get<TabControl>(app,"tabs")).OfType<Expander>().Single(e=>(string)e.Header=="Region coordinates");
+            coordinatePanel.IsExpanded=true;
+            var fields=Descendants(coordinatePanel).OfType<TextBox>().ToArray();
+            Get<Action<HudRegion>>(Get<HudPreview>(app,"screenPreview"),"Selected")(new HudRegion {X=.2,Y=.3,Width=.1,Height=.1});
+            Check(fields.Select(f=>double.Parse(f.Text,CultureInfo.InvariantCulture)).SequenceEqual(new[]{20d,30d,10d,10d}),"dragged HUD selection refreshes already-open coordinate fields");
+            await Invoke(app,"UndoScreenCalibration");
+            Check(profile.Health.Width==1&&fields[2].Text=="100"&&!Get<Button>(app,"screenUndoCalibration").IsEnabled,"undo restores the region and coordinates and disables when history is empty");
+            Get<ComboBox>(app,"screenRegion").SelectedIndex=1;
+            profile.BadgeMask=Enumerable.Repeat((byte)1,1024).ToArray();var previousBadge=profile.Badge;
+            Call(app,"SetScreenRegion",new HudRegion {X=.2,Y=.3,Width=.1,Height=.1});
+            Check(profile.BadgeMask==null,"changing badge region clears its incompatible learned mask");
+            profile.KillLevel=7;
+            await Invoke(app,"UndoScreenCalibration");
+            Check(profile.BadgeMask.SequenceEqual(Enumerable.Repeat((byte)1,1024))&&profile.Badge.X==previousBadge.X&&profile.KillLevel==7,"undo recovers learned badge without reverting feedback settings");
+            int digitCount=profile.Digits.Count;
+            await Invoke(app,"ResetScreenCalibration");Check(profile.Digits.Count==0&&profile.BadgeMask==null,"reset clears learned calibration");
+            await Invoke(app,"UndoScreenCalibration");Check(profile.Digits.Count==digitCount&&profile.BadgeMask!=null,"reset can be undone with independent copies of learned digits");
+            bool invalid=false;try{Call(app,"SetScreenRegion",new HudRegion {X=2,Width=.1,Height=.1});}catch(TargetInvocationException ex)when(ex.InnerException is ArgumentException){invalid=true;}
+            Check(invalid&&!Get<Button>(app,"screenUndoCalibration").IsEnabled,"invalid region leaves calibration and undo history unchanged");
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
     }

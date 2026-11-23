@@ -33,11 +33,13 @@ namespace LovenseConnector
         readonly List<ScreenTarget> screenOwned=new List<ScreenTarget>();
         readonly List<ScreenStopAttempt> screenStopRetries=new List<ScreenStopAttempt>();
         readonly Queue<string> screenEvents=new Queue<string>();
+        readonly List<ScreenProfile> screenCalibrationUndo=new List<ScreenProfile>();
         HudPreview screenPreview;
         ComboBox screenWindows,screenRegion;
         TextBlock screenStatus,screenReading,screenHistory,screenNoMotors;
         StackPanel screenMotorPanel;
-        Button screenFreeze,screenOutput;
+        Button screenFreeze,screenOutput,screenUndoCalibration;
+        Action screenRefreshCoordinates;
         TextBox screenHealthText;
         DispatcherTimer screenTimer;
         bool screenFrozen,screenArmed,screenTickBusy,screenCueBusy,screenForegroundSeen;
@@ -63,15 +65,16 @@ namespace LovenseConnector
             screenReading=Text("Health —    Badge —",14);body.Children.Add(screenReading);
             var calibration=new StackPanel();
             var selection=new WrapPanel();screenRegion=new ComboBox { Width=140,Margin=new Thickness(0,0,10,8) };screenRegion.Items.Add("Health");screenRegion.Items.Add("Kill badge");screenRegion.SelectedIndex=0;Accessible(screenRegion,"HUD element to select");selection.Children.Add(screenRegion);selection.Children.Add(Text("Freeze, then drag around the digits or badge.",13));calibration.Children.Add(selection);
-            screenPreview.Selected+=region=> { if(screenRegion.SelectedIndex==0)screenProfile.Health=region;else{screenProfile.Badge=region;screenProfile.BadgeMask=null;}screenFilter.Reset();RefreshScreenReading(); };
+            screenPreview.Selected+=SetScreenRegion;
             var learning=new WrapPanel();screenHealthText=Input("100",75);Accessible(screenHealthText,"Health number visible in frozen preview");learning.Children.Add(screenHealthText);
-            learning.Children.Add(Action("Learn digits",()=>{RequireFrozen();var learned=HudVision.Learn(screenFrame,screenProfile.Health,screenHealthText.Text.Trim());screenProfile.Digits.AddRange(learned);while(screenProfile.Digits.Count>80)screenProfile.Digits.RemoveAt(0);screenStatus.Text="Digits learned · save calibration to keep them";RefreshScreenReading();return Task.CompletedTask;}));
-            learning.Children.Add(Action("Learn kill badge",()=>{RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Badge),32,32);int ink=mask?.Count(x=>x>0)??0;if(ink<24||ink>800)throw new ArgumentException("Select a visible kill confirmation badge with a little surrounding background.");screenProfile.BadgeMask=mask;screenStatus.Text="Badge learned · save calibration to keep it";RefreshScreenReading();return Task.CompletedTask;}));calibration.Children.Add(learning);
+            learning.Children.Add(Action("Learn digits",()=>{RequireFrozen();var learned=HudVision.Learn(screenFrame,screenProfile.Health,screenHealthText.Text.Trim());RememberScreenCalibration();screenProfile.Digits.AddRange(learned);while(screenProfile.Digits.Count>80)screenProfile.Digits.RemoveAt(0);screenStatus.Text="Digits learned · save calibration to keep them";RefreshScreenReading();return Task.CompletedTask;}));
+            learning.Children.Add(Action("Learn kill badge",()=>{RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Badge),32,32);int ink=mask?.Count(x=>x>0)??0;if(ink<24||ink>800)throw new ArgumentException("Select a visible kill confirmation badge with a little surrounding background.");RememberScreenCalibration();screenProfile.BadgeMask=mask;screenStatus.Text="Badge learned · save calibration to keep it";RefreshScreenReading();return Task.CompletedTask;}));calibration.Children.Add(learning);
             var savedButtons=new WrapPanel();savedButtons.Children.Add(Action("Save calibration",()=>{SaveScreenProfile();screenStatus.Text="Calibration saved on this computer";return Task.CompletedTask;}));
-            savedButtons.Children.Add(Action("Reset calibration",async()=>{await DisarmScreen();screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.BadgeMask=null;screenProfile.Digits.Clear();screenFilter.Reset();SaveScreenProfile();screenPreview.InvalidateVisual();RefreshScreenReading();}));calibration.Children.Add(savedButtons);
+            screenUndoCalibration=Action("Undo calibration",UndoScreenCalibration,()=>screenCalibrationUndo.Count>0);screenUndoCalibration.IsEnabled=false;savedButtons.Children.Add(screenUndoCalibration);
+            savedButtons.Children.Add(Action("Reset calibration",ResetScreenCalibration));calibration.Children.Add(savedButtons);
             var coordinates=new WrapPanel();var coords=new[]{Input("26.5",70),Input("91.5",70),Input("6.5",70),Input("5.5",70)};var names=new[]{"Left %","Top %","Width %","Height %"};for(int i=0;i<4;i++){Field(coordinates,names[i],coords[i]);Accessible(coords[i],names[i]);}
-            coordinates.Children.Add(Action("Apply region",async()=>{await DisarmScreen();double[] n=coords.Select(c=>double.Parse(c.Text,CultureInfo.InvariantCulture)/100).ToArray();var region=new HudRegion { X=n[0],Y=n[1],Width=n[2],Height=n[3] };if(!region.Valid)throw new ArgumentException("Keep the region inside the image (0–100%).");if(screenRegion.SelectedIndex==0)screenProfile.Health=region;else{screenProfile.Badge=region;screenProfile.BadgeMask=null;}screenFilter.Reset();screenPreview.InvalidateVisual();RefreshScreenReading();}));
-            var coordinateExpander=new Expander { Header="Region coordinates",Content=coordinates,Margin=new Thickness(0,8,0,0) };Action refreshCoordinates=()=>{var r=screenRegion.SelectedIndex==0?screenProfile.Health:screenProfile.Badge;double[] a={r.X,r.Y,r.Width,r.Height};for(int i=0;i<4;i++)coords[i].Text=(a[i]*100).ToString("0.###",CultureInfo.InvariantCulture);};coordinateExpander.Expanded+=(s,e)=>refreshCoordinates();screenRegion.SelectionChanged+=(s,e)=>refreshCoordinates();calibration.Children.Add(coordinateExpander);body.Children.Add(StudioPanel(new Expander { Header="Calibration",Content=calibration,IsExpanded=screenProfile.Digits.Count==0 }));
+            coordinates.Children.Add(Action("Apply region",async()=>{await DisarmScreen();double[] n=coords.Select(c=>double.Parse(c.Text,CultureInfo.InvariantCulture)/100).ToArray();SetScreenRegion(new HudRegion { X=n[0],Y=n[1],Width=n[2],Height=n[3] });}));
+            var coordinateExpander=new Expander { Header="Region coordinates",Content=coordinates,Margin=new Thickness(0,8,0,0) };screenRefreshCoordinates=()=>{var r=screenRegion.SelectedIndex==0?screenProfile.Health:screenProfile.Badge;double[] a={r.X,r.Y,r.Width,r.Height};for(int i=0;i<4;i++)coords[i].Text=(a[i]*100).ToString("0.###",CultureInfo.InvariantCulture);};coordinateExpander.Expanded+=(s,e)=>screenRefreshCoordinates();screenRegion.SelectionChanged+=(s,e)=>screenRefreshCoordinates();calibration.Children.Add(coordinateExpander);body.Children.Add(StudioPanel(new Expander { Header="Calibration",Content=calibration,IsExpanded=screenProfile.Digits.Count==0 }));
             var feedback=new StackPanel();feedback.Children.Add(Text("Feedback",18));var levels=new WrapPanel();
             AddScreenLevel(levels,"Damage",screenProfile.DamageLevel,v=>screenProfile.DamageLevel=v);AddScreenLevel(levels,"Kill",screenProfile.KillLevel,v=>screenProfile.KillLevel=v);AddScreenLevel(levels,"Death",screenProfile.DeathLevel,v=>screenProfile.DeathLevel=v);feedback.Children.Add(levels);
             feedback.Children.Add(Text("Motors · maximum level",14));screenNoMotors=Text("Connect a device to enable feedback. Preview works without one.",13);feedback.Children.Add(screenNoMotors);screenMotorPanel=new StackPanel();feedback.Children.Add(screenMotorPanel);
@@ -119,6 +122,46 @@ namespace LovenseConnector
             screenStatus.Text=screenFrozen?"Frozen · drag around the selected HUD element":"Preview only · output off";
         }
         void RequireFrozen(){if(!screenFrozen||screenFrame==null)throw new ArgumentException("Start preview, then Freeze on the HUD you want to learn.");}
+        void RememberScreenCalibration()
+        {
+            // Independent copies: later learning and edits must not mutate the undo state.
+            screenCalibrationUndo.Add(json.Deserialize<ScreenProfile>(json.Serialize(screenProfile)));
+            if(screenCalibrationUndo.Count>20)screenCalibrationUndo.RemoveAt(0);
+            screenUndoCalibration.IsEnabled=true;
+        }
+        void RefreshScreenCalibration()
+        {
+            screenFilter.Reset();screenRefreshCoordinates?.Invoke();screenPreview.InvalidateVisual();RefreshScreenReading();
+            screenUndoCalibration.IsEnabled=screenCalibrationUndo.Count>0;
+        }
+        void SetScreenRegion(HudRegion region)
+        {
+            if(region==null||!region.Valid)throw new ArgumentException("Keep the region inside the image (0–100%).");
+            RememberScreenCalibration();
+            if(screenRegion.SelectedIndex==0)screenProfile.Health=region;
+            else {screenProfile.Badge=region;screenProfile.BadgeMask=null;}
+            RefreshScreenCalibration();
+            screenStatus.Text="Region changed · Save calibration to keep it";
+        }
+        Task ResetScreenCalibration()
+        {
+            var stopped=DisarmScreen();RememberScreenCalibration();
+            screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;
+            screenProfile.BadgeMask=null;screenProfile.Digits.Clear();
+            SaveScreenProfile();RefreshScreenCalibration();screenStatus.Text="Calibration reset · Undo restores the previous setup";
+            return stopped;
+        }
+        Task UndoScreenCalibration()
+        {
+            var stopped=DisarmScreen();
+            if(screenCalibrationUndo.Count==0)return stopped;
+            var previous=screenCalibrationUndo[screenCalibrationUndo.Count-1];screenCalibrationUndo.RemoveAt(screenCalibrationUndo.Count-1);
+            // Feedback levels are independent settings, not part of calibration undo.
+            screenProfile.Health=previous.Health;screenProfile.Badge=previous.Badge;
+            screenProfile.BadgeMask=previous.BadgeMask;screenProfile.Digits=previous.Digits;
+            RefreshScreenCalibration();screenStatus.Text="Calibration restored · Save calibration to keep it";
+            return stopped;
+        }
         void SaveScreenProfile(){if(!screenProfile.Validate())throw new ArgumentException("Invalid calibration.");Directory.CreateDirectory(Path.GetDirectoryName(ScreenProfilePath));var temp=ScreenProfilePath+".tmp";File.WriteAllText(temp,json.Serialize(screenProfile));File.Move(temp,ScreenProfilePath,true);}
         HudReading RefreshScreenReading()
         {
@@ -142,14 +185,14 @@ namespace LovenseConnector
             if(screenCapture==null||screenFrozen||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)throw new ArgumentException("Start a live preview first.");
             var read=RefreshScreenReading();if(read?.Health==null||read.Health<=0)throw new ArgumentException("Calibrate health until the preview reads it correctly before enabling output.");
             var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null).ToArray();if(selected.Length==0)throw new ArgumentException("Connect and select a motor first.");
-            await Manual(async()=> {
+            await ManualGuarded(async()=> {
                 int operation=operatorGeneration,generation=screenGeneration;var capture=screenCapture;
                 if(!await StopPlayers())throw new InvalidOperationException("Existing output could not be stopped.");
                 if(closing||screenCapture==null||screenFrozen||capture!=screenCapture||operation!=operatorGeneration||generation!=screenGeneration||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)return;
                 screenOwned.Clear();foreach(var r in selected)if(r.Device.Connected&&r.Device.Player!=null)screenOwned.Add(new ScreenTarget { Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value });
                 if(screenOwned.Count==0)return;
                 screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenArmedAt=ScreenCapture.Now;screenForegroundSeen=false;screenLastGood=ScreenCapture.Now;screenFilter.Reset();screenOutput.Content="Disable output";screenStatus.Text="Armed · return to the selected window within 8 seconds";
-            });
+            },()=>screenGeneration);
         }
         Task DisarmScreen()
         {

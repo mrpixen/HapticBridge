@@ -67,10 +67,10 @@ namespace LovenseConnector
         static TextBox Input(string value,int width=95) { return new TextBox { Text=value,Width=width,Margin=new Thickness(0,0,10,0),Padding=new Thickness(8,6,8,6),VerticalContentAlignment=VerticalAlignment.Center }; }
         static int Number(TextBox box) { int value; if(!int.TryParse(box.Text,out value)) throw new ArgumentException("Enter a whole number for " + (box.ToolTip??"this field") + "."); return value; }
         static void Field(Panel panel,string label,UIElement control) { var group=new StackPanel { Margin=new Thickness(0,0,12,8) }; group.Children.Add(Text(label,12)); group.Children.Add(control); panel.Children.Add(group); }
-        Button Action(string title,Func<Task> action)
+        Button Action(string title,Func<Task> action,Func<bool> canExecute=null)
         {
             var button=new Button { Content=title,Margin=new Thickness(0,0,8,6),Padding=new Thickness(14,8,14,8) };
-            button.Click+=async(s,e)=> { button.IsEnabled=false; try { await action(); } catch(Exception ex) { Report(ex); } finally { button.IsEnabled=true; UpdateSummary(); } };
+            button.Click+=async(s,e)=> { button.IsEnabled=false; try { await action(); } catch(Exception ex) { Report(ex); } finally { button.IsEnabled=canExecute?.Invoke()??true; UpdateSummary(); } };
             return button;
         }
         void UI(Action action) { if(!window.Dispatcher.HasShutdownStarted) window.Dispatcher.BeginInvoke(action); }
@@ -86,12 +86,17 @@ namespace LovenseConnector
             var screen=DisarmScreen();
             return Task.WhenAll(audio,video,local,screen);
         }
-        async Task Manual(Func<Task> action)
+        Task Manual(Func<Task> action) => ManualGuarded(action,null);
+        async Task ManualGuarded(Func<Task> action,Func<int> requestRevision)
         {
             if(sweep!=null) { hint.Text="Stop the speed test before starting a manual output."; return; }
             int generation=++operatorGeneration;
-            await Task.WhenAll(PauseExternalSources(),studioRunning?StopStudioMotors():Task.CompletedTask);
-            if(generation!=operatorGeneration||closing||sweep!=null)return;
+            var stopped=Task.WhenAll(PauseExternalSources(),studioRunning?StopStudioMotors():Task.CompletedTask);
+            // Capture after our synchronous source invalidation, before awaiting a slow stop.
+            // A later cancellation of the requested source must also cancel this handoff.
+            int revision=requestRevision?.Invoke()??0;
+            await stopped;
+            if(generation!=operatorGeneration||closing||sweep!=null||requestRevision!=null&&requestRevision()!=revision)return;
             await action();
         }
         async Task OperatorStop(Func<Task> action)
@@ -115,7 +120,7 @@ namespace LovenseConnector
         void Run(string[] args)
         {
             dataDir=AssetFiles.DataDirectory; Directory.CreateDirectory(dataDir);
-            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.7.0 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
+            File.WriteAllText(Path.Combine(dataDir,"session.log"),"HapticBridge 0.7.1 — "+DateTimeOffset.Now.ToString("o")+Environment.NewLine);
             catalog=Catalog.FromJson(AssetFiles.ReadText("models.json"));
             using(var stream=AssetFiles.Open("MainWindow.xaml")) window=(Window)XamlReader.Load(stream);
             _=new WindowFrame(window);
@@ -414,7 +419,7 @@ namespace LovenseConnector
             if(dataDir==null) return;
             try
             {
-                var state=new { version="0.7.0",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
+                var state=new { version="0.7.1",running=!closing,processId=Process.GetCurrentProcess().Id,updatedUtc=DateTime.UtcNow.ToString("o"),scanning=scanning,testing=sweep!=null,
                     devices=devices.Values.Select(d=>new { name=d.Name,advertisedName=d.AdvertisedName,connected=d.Connected,state=d.Status,battery=d.Battery,firmware=d.Firmware,controlsEnabled=d.Supported,
                         motors=d.Motors.Values.Select(m=>new { channel=m.Channel,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray() };
                 var path=Path.Combine(dataDir,"status.json"); var temp=Path.Combine(dataDir,"status.tmp"); File.WriteAllText(temp,json.Serialize(state)); if(File.Exists(path)) File.Replace(temp,path,null); else File.Move(temp,path);

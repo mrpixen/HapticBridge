@@ -78,12 +78,15 @@ namespace LovenseConnector
             }
             spec.Validate();
             int segments=Math.Min(100,spec.periodMs/100);
+            var savedOrder=legacy.levels.Keys.ToArray();
             return new StudioPreset { lengthMs=spec.periodMs,loop=true,durationMs=legacy.durationMs,transitionMs=legacy.transitionMs,
                 lanes=keys.Select((key,index)=>
                 {
                     int high=legacy.levels.TryGetValue(key,out int level)?level:legacy.high;
                     double ratio=legacy.high==0?0:high/(double)legacy.high;
                     var motor=ForJoin(spec,0);motor.high=high;motor.low=Math.Min(high,(int)Math.Round(legacy.low*ratio));
+                    int savedIndex=Array.IndexOf(savedOrder,key);
+                    if(legacy.stagger&&savedIndex>=0)motor.phaseDegrees=savedIndex*360/savedOrder.Length;
                     if(motor.mode=="Custom")
                     {
                         double[] normalized=legacy.shape=="Heartbeat"?new[]{0.0,1.0,0.0,.8,0.0,0.0}:legacy.shape=="Surge"?new[]{0.0,.2,1.0,1.0,0.0}:new[]{0.0,.25,.5,1.0,0.0};
