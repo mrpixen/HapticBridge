@@ -8,7 +8,9 @@ Passed: 26 shortcut-controller assertions and 214 native Studio assertions, incl
 
 **Copy diagnostics** now includes capture, output, frozen/fresh/stale frame state, shield mode, learned-template presence and selected connected motor count. It does not include window identity, pixels, calibration coordinates, recognized values or event history, and does not sample foreground ownership. No recognition-accuracy claim is inferred from template presence.
 
-The native suite also passed 59 screen, 21 audio and 17 legacy-import assertions. Synthetic checks verify anonymous results, each frame state and target count, and no capture, foreground, ownership or device-command side effects. Both the shortcut and diagnostics additions are included in 0.8.3. Live-game recognition and automatic third-party video compatibility are unchanged.
+The native suite also passed 74 screen, 21 audio and 17 legacy-import assertions. Synthetic checks verify anonymous diagnostics, each frame state and target count, and no capture, foreground, ownership or device-command side effects. Both the shortcut and diagnostics additions are included in 0.8.3. Live-game recognition and automatic third-party video compatibility are unchanged.
+
+Two screen transition bugs were reproduced before correction. Motor selection and strength changes stopped output but left the status saying it was enabled; the status now distinguishes stopping, confirmed off and unconfirmed stops, and clears a failure after a successful retry. A slow handoff could also finish arming after health changed to zero. Arming now checks the current HUD after all stop waits and rejects zero or unreadable health. Regression tests cover motor selection, ceilings, event strengths, explicit disable, failed stops and changing HUD readings during a blocked transport. Logs and API status now derive the app version from the built assembly instead of separate version literals.
 
 ## 0.8.2 — API request deadlines — 2026-11-23
 

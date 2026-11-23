@@ -109,6 +109,7 @@ internal static class ScreenSyncTests
             capture.Foreground=false;await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"focus loss disarms");capture.Foreground=true;await Feed(app,capture,"40",3);Check(!Get<bool>(app,"screenArmed"),"returning to window never rearms output");
             await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"stale capture disarms");
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"death cue ends and disarms before spectating");
+            await OutputChangesAndPendingArm(app,capture,links,players);
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
             int[] before=links.Select(l=>l.Positive.Count).ToArray();links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -174,6 +175,50 @@ internal static class ScreenSyncTests
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static async Task OutputChangesAndPendingArm(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
+    {
+        var status=Get<TextBlock>(app,"screenStatus");var button=Get<Button>(app,"screenOutput");
+        async Task Following()
+        {
+            await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
+            Check(Get<bool>(app,"screenArmed")&&status.Text=="Following HUD · output enabled","transition fixture starts with armed output and a live HUD");
+        }
+        async Task WaitForStops()
+        {
+            var deadline=DateTime.UtcNow.AddSeconds(2);
+            while(status.Text!="Preview only · output off"&&DateTime.UtcNow<deadline)await Task.Delay(10);
+        }
+        var route=((IDictionary)Get<object>(app,"screenRoutes")).Values.Cast<object>().First();
+        var included=Get<CheckBox>(route,"Include");var ceiling=Get<Slider>(route,"Ceiling");
+        await Following();included.IsChecked=false;await WaitForStops();
+        Check(!Get<bool>(app,"screenArmed")&&(string)button.Content=="Enable output"&&status.Text=="Preview only · output off","deselecting a motor replaces stale output-enabled status after stopping");
+        included.IsChecked=true;await WaitForStops();
+        await Following();ceiling.Value=19;await WaitForStops();
+        Check(!Get<bool>(app,"screenArmed")&&status.Text=="Preview only · output off","changing a motor ceiling reports preview-only status");
+        ceiling.Value=20;await WaitForStops();
+        var damage=Descendants(Get<TabControl>(app,"tabs")).OfType<Slider>().Single(s=>System.Windows.Automation.AutomationProperties.GetName(s)=="Damage event strength");
+        await Following();double savedLevel=damage.Value;damage.Value=savedLevel-1;await WaitForStops();
+        Check(!Get<bool>(app,"screenArmed")&&status.Text=="Preview only · output off","changing event strength reports preview-only status");
+        damage.Value=savedLevel;await WaitForStops();
+        await Following();await Invoke(app,"DisarmScreen");
+        Check(!Get<bool>(app,"screenArmed")&&status.Text=="Preview only · output off","explicit Disable output reports output off");
+        await Following();links[0].FailZero=1;await Invoke(app,"DisarmScreen");
+        Check(players[0].Level(0)<0&&status.Text.Contains("unconfirmed"),"control disarm preserves unconfirmed stop status");
+        await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);
+        Check(players[0].Level(0)==0&&status.Text=="Preview only · output off","confirmed retry clears the unconfirmed status without rearming");
+        foreach(string currentHealth in new[]{"0",""})
+        {
+            await Feed(app,capture,"100",3);int[] positive=links.Select(l=>l.Positive.Count).ToArray();
+            links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
+            var arming=Invoke(app,"ArmScreen");await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            try {await Feed(app,capture,currentHealth);}
+            finally {links[0].Block.TrySetResult(true);}
+            await arming;links[0].Block=null;
+            Check(!Get<bool>(app,"screenArmed")&&(string)button.Content=="Enable output"&&status.Text.Contains("health"),"zero or unreadable health during a slow handoff prevents arming");
+            Check(links.Select(l=>l.Positive.Count).SequenceEqual(positive),"rejected handoff never commands positive output");
+        }
     }
 
     static void DiagnosticsRemainAnonymousAndReadOnly()

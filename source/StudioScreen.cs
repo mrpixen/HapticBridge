@@ -210,23 +210,38 @@ namespace LovenseConnector
                 int operation=operatorGeneration,generation=screenGeneration;var capture=screenCapture;
                 if(!await StopPlayers())throw new InvalidOperationException("Existing output could not be stopped.");
                 if(closing||screenCapture==null||screenFrozen||capture!=screenCapture||operation!=operatorGeneration||generation!=screenGeneration||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)return;
+                // The HUD can change while another source or device is stopping.
+                // Do not arm using the positive reading taken before those waits.
+                var current=RefreshScreenReading();
+                if(current?.Health==null||current.Health<=0){screenStatus.Text="HUD changed · verify health before enabling output";return;}
                 screenOwned.Clear();foreach(var r in selected)if(r.Device.Connected&&r.Device.Player!=null)screenOwned.Add(new ScreenTarget { Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value });
                 if(screenOwned.Count==0)return;
                 screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenArmedAt=ScreenCapture.Now;screenForegroundSeen=false;screenLastGood=ScreenCapture.Now;screenFilter.Reset();screenOutput.Content="Disable output";screenStatus.Text="Armed · return to the selected window within 8 seconds";
             },()=>screenGeneration);
         }
-        Task DisarmScreen()
+        async Task DisarmScreen()
         {
+            bool wasArmed=screenArmed;
             screenArmed=false;screenGeneration++;
             if(screenOutput!=null)screenOutput.Content="Enable output";
             // Capture exact playback instances before awaiting; never stop a replacement device.
             var targets=screenOwned?.ToArray()??Array.Empty<ScreenTarget>();screenOwned?.Clear();
-            return Task.WhenAll(targets.Select(async t=>{
+            if(screenStatus!=null&&(wasArmed||targets.Length>0))screenStatus.Text="Stopping output…";
+            await Task.WhenAll(targets.Select(async t=>{
                 var attempt=new ScreenStopAttempt { Target=t,Pending=true };screenStopRetries.Add(attempt);
                 try{var task=t.Player.StopTracked(t.Channel,out var revision);attempt.Revision=revision;await task;}
-                catch{if(screenStatus!=null)screenStatus.Text="Output stop unconfirmed · check device connection";}
+                catch{if(screenStatus!=null&&!screenArmed&&attempt.Current)screenStatus.Text="Output stop unconfirmed · check device connection";}
                 finally{attempt.Pending=false;if(!attempt.Current)screenStopRetries.Remove(attempt);}
             }));
+            RefreshScreenStopStatus();
+        }
+        void RefreshScreenStopStatus()
+        {
+            if(screenArmed||screenStatus==null||screenStopRetries.Any(a=>a.Pending))return;
+            if(screenStopRetries.Any(a=>a.Current)){screenStatus.Text="Output stop unconfirmed · retrying";return;}
+            // A newer calibration or capture message must survive a late stop.
+            if(screenStatus.Text=="Stopping output…"||screenStatus.Text.StartsWith("Output stop unconfirmed",StringComparison.Ordinal))
+                screenStatus.Text=screenCapture==null?"Capture off · output off":screenFrozen?"Frozen · output off":"Preview only · output off";
         }
         async Task RetryScreenStops(double now)
         {
@@ -241,7 +256,7 @@ namespace LovenseConnector
                     finally{attempt.Pending=false;if(!attempt.Current)screenStopRetries.Remove(attempt);}
                 }
             }
-            if(screenStopRetries.Any(a=>!a.Pending&&a.Current))screenStatus.Text="Output stop unconfirmed · retrying";
+            RefreshScreenStopStatus();
         }
         async Task ScreenTick()
         {
