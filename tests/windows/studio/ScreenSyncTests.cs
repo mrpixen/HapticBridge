@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -32,7 +33,9 @@ internal static class ScreenSyncTests
     }
     sealed class Capture : IScreenCapture
     {
-        public bool Foreground { get; set; }=true;
+        bool foreground=true;
+        public int ForegroundReads;
+        public bool Foreground { get { ForegroundReads++;return foreground; } set { foreground=value; } }
         public bool Disposed;
         public event Action<ScreenPixels> Frame {add{}remove{}}
         public event Action<string> Failed {add{}remove{}}
@@ -50,10 +53,11 @@ internal static class ScreenSyncTests
     {
         public ConcurrentQueue<int> Positive=new ConcurrentQueue<int>();
         public TaskCompletionSource<bool> Block,Entered;
-        public int FailZero;
+        public int FailZero,Commands,LatestSamples;
         public Task<string> Command(string command)=>Command(command,CancellationToken.None);
         public async Task<string> Command(string command,CancellationToken token)
         {
+            Interlocked.Increment(ref Commands);
             if(Block!=null){Entered?.TrySetResult(true);await Block.Task;token.ThrowIfCancellationRequested();}
             if(command=="Vibrate:0;"&&FailZero>0){FailZero--;throw new IOException("Synthetic stop failure");}
             if(command.StartsWith("Vibrate")&&int.TryParse(command.Split(':')[1].TrimEnd(';'),out int level)&&level>0)Positive.Enqueue(level);
@@ -61,6 +65,7 @@ internal static class ScreenSyncTests
         }
         public async Task<string> CommandLatest(Func<string> command,CancellationToken token)
         {
+            Interlocked.Increment(ref LatestSamples);
             if(Block!=null){Entered?.TrySetResult(true);await Block.Task;token.ThrowIfCancellationRequested();}
             var text=command();return text==null?"":await Command(text,token);
         }
@@ -84,6 +89,7 @@ internal static class ScreenSyncTests
     }
     internal static async Task Run()
     {
+        DiagnosticsRemainAnonymousAndReadOnly();
         var defaults=HudDefaultGlyphs.Create();Check(defaults.Length==60,"built-in glyphs generated for ten digits in three fonts and two weights");
         var profile=new ScreenProfile { Health=new HudRegion {Width=1,Height=1} };
         foreach(string number in new[]{"100","80","60","40","20","0"})profile.Digits.AddRange(HudVision.Learn(Pixels(number),profile.Health,number));
@@ -168,5 +174,46 @@ internal static class ScreenSyncTests
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static void DiagnosticsRemainAnonymousAndReadOnly()
+    {
+        var app=new ConnectorApp();var capture=new Capture();var link=new Link();
+        string Summary()=>(string)Call(app,"StudioDiagnosticSummary");
+        string initial=Summary();
+        Check(initial.Contains("Screen capture active: False")&&initial.Contains("Screen output enabled: False")&&
+            initial.Contains("Screen preview frozen: False")&&initial.Contains("Screen frame: none"),"diagnostics distinguish inactive capture and output without starting either");
+        Check(initial.Contains("Screen shield reading enabled: False")&&initial.Contains("Screen learned digit templates present: False")&&
+            initial.Contains("Screen learned kill badge present: False")&&initial.Contains("Screen selected connected motors: 0"),"diagnostics report absent learned templates and targets honestly");
+        const string privateText="PRIVATE-DIAGNOSTIC-SENTINEL";
+        var windows=new ComboBox();windows.Items.Add(new CaptureWindow {Handle=new IntPtr(0x123456),Title=privateText});windows.SelectedIndex=0;
+        Set(app,"screenWindows",windows);Set(app,"screenStatus",new TextBlock {Text=privateText+" status"});Set(app,"screenHistory",new TextBlock {Text=privateText+" health history"});
+        Set(app,"screenReading",new TextBlock {Text=privateText+" recognized values"});Set(app,"screenFailure",privateText+" capture failure");Set(app,"apiToken",privateText+" token");
+        var profile=Get<ScreenProfile>(app,"screenProfile");profile.ReadShield=true;profile.Health.X=.123456;
+        profile.Digits.Add(new HudGlyph {Digit=8,Aspect=1,Mask=Enumerable.Repeat((byte)1,384).ToArray()});profile.BadgeMask=Enumerable.Repeat((byte)1,1024).ToArray();
+        var routes=(IDictionary)Get<object>(app,"screenRoutes");var devices=Get<Dictionary<ulong,Device>>(app,"devices");
+        void AddRoute(ulong address,bool connected,bool selected,bool supported=true)
+        {
+            var device=new Device {Address=address,Name=privateText,Connected=connected,Channels=new[]{0},Player=supported?new Playback(link,new[]{0}):null};devices.Add(address,device);
+            var route=Activator.CreateInstance(typeof(ConnectorApp).GetNestedType("ScreenRoute",BindingFlags.NonPublic));
+            Set(route,"Device",device);Set(route,"Channel",0);Set(route,"Include",new CheckBox {IsChecked=selected});routes.Add(privateText+address,route);
+        }
+        AddRoute(0xABCDEF012345,true,true);AddRoute(2,true,false);AddRoute(3,false,true);AddRoute(4,true,true,false);
+        Set(app,"screenCapture",capture);Set(app,"screenArmed",true);Set(app,"screenGeneration",23);Set(app,"operatorGeneration",17);
+        var frame=new ScreenPixels(Enumerable.Repeat((byte)97,256).ToArray(),8,8,ScreenCapture.Now);Set(app,"screenFrame",frame);
+        string live=Summary();
+        Check(live.Contains("Screen capture active: True")&&live.Contains("Screen output enabled: True")&&live.Contains("Screen frame: fresh"),"diagnostics distinguish fresh preview from armed output");
+        Check(live.Contains("Screen shield reading enabled: True")&&live.Contains("Screen learned digit templates present: True")&&live.Contains("Screen learned kill badge present: True"),"diagnostics report settings and template presence without claiming recognition accuracy");
+        Check(live.Contains("Screen selected connected motors: 1"),"diagnostic target count excludes disconnected, unselected and unsupported motors");
+        Check(!live.Contains(privateText)&&!live.Contains("ABCDEF012345")&&!live.Contains(".123456")&&!live.Contains(Convert.ToBase64String(profile.BadgeMask))&&
+            !live.Contains(Convert.ToBase64String(frame.Bgra)),"diagnostics omit identities, calibration coordinates, images, status text and recognized history");
+        Set(app,"screenFrame",new ScreenPixels(frame.Bgra,8,8,ScreenCapture.Now-10));Check(Summary().Contains("Screen frame: stale"),"old preview frames are marked stale");
+        Set(app,"screenFrozen",true);Check(Summary().Contains("Screen frame: frozen")&&Summary().Contains("Screen preview frozen: True"),"frozen preview is distinguished from a stale live stream");
+        Set(app,"screenFrozen",false);Set(app,"screenFrame",null);Check(Summary().Contains("Screen frame: none"),"active capture can report that no preview frame has arrived");
+        Set(app,"screenFrame",new ScreenPixels(frame.Bgra,8,8,ScreenCapture.Now));Set(app,"screenCapture",null);
+        Check(Summary().Contains("Screen capture active: False")&&Summary().Contains("Screen frame: stale"),"a stored frame is not reported as fresh after capture ends");
+        Check(link.Commands==0&&link.LatestSamples==0&&capture.ForegroundReads==0&&!capture.Disposed,"diagnostics never sample foreground, change capture or send device commands");
+        Check(Get<bool>(app,"screenArmed")&&Get<int>(app,"screenGeneration")==23&&Get<int>(app,"operatorGeneration")==17&&
+            ReferenceEquals(Get<ScreenProfile>(app,"screenProfile"),profile)&&Get<string>(app,"screenFailure")==privateText+" capture failure", "diagnostics leave source ownership, calibration and error state unchanged");
     }
 }

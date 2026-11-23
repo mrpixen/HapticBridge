@@ -141,6 +141,14 @@ namespace LovenseConnector
             result.AppendLine("Local integrations enabled: "+apiEnabled);
             result.AppendLine("Sound capture active: "+(audioCapture!=null));
             result.AppendLine("Video output enabled: "+feelArmed);
+            result.AppendLine("Screen capture active: "+(screenCapture!=null));
+            result.AppendLine("Screen output enabled: "+screenArmed);
+            result.AppendLine("Screen preview frozen: "+screenFrozen);
+            result.AppendLine("Screen frame: "+(screenFrame==null?"none":screenFrozen?"frozen":screenCapture!=null&&ScreenCapture.Now-screenFrame.Time<=.75?"fresh":"stale"));
+            result.AppendLine("Screen shield reading enabled: "+(screenProfile?.ReadShield??false));
+            result.AppendLine("Screen learned digit templates present: "+(screenProfile?.Digits?.Count>0));
+            result.AppendLine("Screen learned kill badge present: "+(screenProfile?.BadgeMask!=null));
+            result.AppendLine("Screen selected connected motors: "+screenRoutes.Values.Count(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null));
             result.AppendLine("Material: "+studioUiPreferences.Material);
             result.AppendLine("Motion: "+studioUiPreferences.Motion);
             return result.ToString();

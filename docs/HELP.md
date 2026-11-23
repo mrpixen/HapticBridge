@@ -40,6 +40,8 @@ Drag the title bar to move the app; double-click it to maximize or restore. The 
 
 ## Troubleshooting
 
+**Settings → Copy diagnostics** includes Screen sync capture, output, frame freshness, learned-template presence and selected motor count without window names, captured images or recognized values.
+
 - **No devices:** check Bluetooth Low Energy support, device power and whether another app is connected.
 - **Connected but no output:** select a motor, confirm its level is above zero and check the active source. Stop all pauses integrations until enabled again.
 - **API unavailable:** close any second copy of the app using port `17896`. Check that the client uses the local connection file from this installation.

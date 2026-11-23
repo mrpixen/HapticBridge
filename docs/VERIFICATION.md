@@ -1,5 +1,11 @@
 # Release verification
 
+## Screen sync diagnostics — 2026-11-23 (source update)
+
+**Copy diagnostics** now includes capture, output, frozen/fresh/stale frame state, shield mode, learned-template presence and selected connected motor count. It does not include window identity, pixels, calibration coordinates, recognized values or event history, and does not sample foreground ownership. No recognition-accuracy claim is inferred from template presence.
+
+The native suite passed 59 screen, 191 Studio, 21 audio and 17 legacy-import assertions. Synthetic checks verify anonymous results, each frame state and target count, and no capture, foreground, ownership or device-command side effects. This source update is newer than the published 0.8.2 executable.
+
 ## 0.8.2 — API request deadlines — 2026-11-23
 
 A regression reproduced a queued motor command starting after its HTTP request had timed out. Closing the socket had not cancelled dispatch. The five-second deadline and server shutdown now cancel pending dispatch, source handoffs and playback starts. Stops already admitted still finish, and accepted output retains its own duration and heartbeat lease. A client disconnecting earlier still cannot infer whether its request was accepted.
