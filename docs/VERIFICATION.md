@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.4 — Advanced device controls — 2026-11-23
+
+Two conflicts were reproduced before correction. An advanced device slider could raise a Screen sync damage pulse above its configured strength; edits now prepare the next manual value without changing screen-owned output. Explicit manual Start still takes control normally.
+
+An all-motors pattern request could start a later motor after Stop all cancelled its first pending start. The request now checks its operation, device generation and player before each motor and after awaited playback admission. Tests exercise a blocked preset stop, global cancellation, replacement connections, explicit restarts and independent manual levels. An old request cannot start a reconnected player.
+
+Native suites and focused reconnection checks passed with invisible controls, synthetic HUD frames and fake command links. The new screen checks also confirm that the bounded cue completes while the prepared slider value is retained. No GUI control, actual capture, real shortcut registration or physical output was used. Real-match recognition, live shortcut delivery and ARM64 execution remain unverified.
+
 ## 0.8.3 — Global Stop all and screen diagnostics — 2026-11-23
 
 **Settings → Global Stop all** provides an optional Windows-registered shortcut. It is disabled by default. Users choose two or three modifiers and F6–F11, then explicitly enable it. A conflicting replacement preserves the working shortcut; disable and close unregister it. Only the current registration can invoke Stop all, and each press cancels pending starts immediately even while an earlier stop awaits a slow transport. No keyboard hook or input injection is used.

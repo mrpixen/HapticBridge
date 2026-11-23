@@ -181,7 +181,7 @@ namespace LovenseConnector
                 panel.Children.Add(Text(channel==0?"Vibration motor":"Motor "+channel,21)); var display=Text("3 / 20",17); panel.Children.Add(display);
                 v.Level=new Slider { Minimum=0,Maximum=20,Value=3,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,TickPlacement=System.Windows.Controls.Primitives.TickPlacement.BottomRight,Margin=new Thickness(0,4,0,8) };
                 System.Windows.Automation.AutomationProperties.SetName(v.Level,d.Name+" motor "+channel+" speed");
-                v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed&&!OwnsStudio) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
+                v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed&&!screenArmed&&!OwnsStudio) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
                 var nudges=Row(); nudges.Children.Add(Action("−1",()=> { v.Level.Value--; return Task.FromResult(0); })); nudges.Children.Add(Action("+1",()=> { v.Level.Value++; return Task.FromResult(0); })); panel.Children.Add(nudges);
                 var time=Row(); v.Duration=Input("10000"); v.Duration.ToolTip="duration in milliseconds"; Field(time,"Duration (ms)",v.Duration); panel.Children.Add(time);
                 var buttons=new WrapPanel();
@@ -215,7 +215,12 @@ namespace LovenseConnector
             var actions=new WrapPanel { Margin=new Thickness(0,10,0,0) };
             actions.Children.Add(Action("Play pattern",()=>Manual(async()=> {
                 var spec=read(); var selected=d.Motors.Values.ToArray(); if(target.SelectedIndex<selected.Length) selected=new[]{selected[target.SelectedIndex]};
-                foreach(var motor in selected) await d.Player.Start(motor.Channel,json.Deserialize<PatternSpec>(json.Serialize(spec)),20);
+                int operation=operatorGeneration,deviceGeneration=d.Generation;var player=d.Player;
+                bool Current()=>!closing&&operation==operatorGeneration&&deviceGeneration==d.Generation&&d.Connected&&player!=null&&ReferenceEquals(d.Player,player);
+                foreach(var motor in selected) {
+                    if(!Current())return;
+                    await player.Start(motor.Channel,json.Deserialize<PatternSpec>(json.Serialize(spec)),20,isCurrent:Current);
+                }
             })));
             actions.Children.Add(Action("Save JSON…",async()=> { var spec=read(); if(!await StopAll())return; var dialog=new SaveFileDialog { Filter="Pattern JSON|*.json",FileName="pattern.json",InitialDirectory=AssetFiles.PatternDirectory }; Directory.CreateDirectory(dialog.InitialDirectory); if(dialog.ShowDialog(window)==true) File.WriteAllText(dialog.FileName,json.Serialize(spec)); }));
             actions.Children.Add(Action("Load JSON…",async()=> {

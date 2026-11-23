@@ -82,6 +82,8 @@ internal static partial class StudioIntegrationTests
         await DisconnectDoesNotReleaseReplacement();
         await ManualActionRevokesStudio();
         await DeviceSliderCannotRetargetStudio();
+        await DevicePatternCannotResumeAfterStop();
+        await DevicePatternCannotReachReconnectedPlayer();
         await ImportIsAtomic();
         await UnassignedMixLanesSurviveRoundTrip();
         await NoDeviceDraftRoundTripAndPreview();

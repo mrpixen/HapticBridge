@@ -110,6 +110,7 @@ internal static class ScreenSyncTests
             await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"stale capture disarms");
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"death cue ends and disarms before spectating");
             await OutputChangesAndPendingArm(app,capture,links,players);
+            await AdvancedSliderCannotRetargetScreen(app,capture,devices[1],links[0]);
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
             int[] before=links.Select(l=>l.Positive.Count).ToArray();links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -175,6 +176,23 @@ internal static class ScreenSyncTests
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static async Task AdvancedSliderCannotRetargetScreen(ConnectorApp app,Capture capture,Device device,Link link)
+    {
+        device.Supported=true;device.Controls=new StackPanel();Call(app,"BuildControls",device);
+        await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
+        int marker=link.Positive.Count;
+        await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});
+        device.Motors[0].Level.Value=19;
+        await Task.Delay(350);
+        var cue=link.Positive.Skip(marker).ToArray();
+        Check(cue.Any()&&cue.All(level=>level<=7),"an inactive advanced device slider cannot raise a screen-owned damage cue above its configured level");
+        Check(Get<bool>(app,"screenArmed")&&device.Motors[0].Level.Value==19&&device.Player.Level(0)==0,
+            "advanced slider prepares the next manual value while the bounded screen cue completes normally");
+        await Invoke(app,"Manual",new Func<Task>(()=>device.Player.Start(0,new PatternSpec {mode="Steady",high=(int)device.Motors[0].Level.Value,durationMs=1000,transitionMs=0},20)));
+        Check(!Get<bool>(app,"screenArmed")&&device.Player.Level(0)==19,"explicit manual Start still takes ownership using the prepared advanced-slider value");
+        await device.Player.StopAll();
     }
 
     static async Task OutputChangesAndPendingArm(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
