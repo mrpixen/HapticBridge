@@ -1,5 +1,15 @@
 # Release verification
 
+## Draft recovery — 2026-11-23 (source update)
+
+Pattern edits save a local draft after a 750 ms pause. Startup offers **More → Restore previous draft** without changing the editor or starting output. Recovery uses normal mix import, preserving curves, links, levels, selection and timing. Timing changes alone before a pattern is edited do not replace a previous draft.
+
+Offline tests covered debounce, close-time flushing, recovery with and without simulated motors, invalid timing, unfinished drags, malformed files and a locked destination. Failed replacement retained the previous valid file and removed the temporary file. The Studio suite passed 143 assertions; native screen (34), audio routing (21) and legacy import (17) also passed. No GUI, real screen capture or hardware was accessed. These source additions are not included in the published 0.7.1 executable.
+
+## Renewal test timing — 2026-11-23
+
+A CI timeout in `BoundedRetriesAndHardExpiry` was reproduced by delaying its synthetic failed response. The test advanced its fake clock when the request started, before the receiver scheduled its next retry. It now waits for that renewal attempt to finish before advancing time; the delayed response remains in the test. All 16 core suites passed afterward. No receiver runtime behavior or test timeout was changed.
+
 ## Curve duplication — 2026-11-23 (source update)
 
 **More → Duplicate curve** copies the active curve to an independent, unassigned lane. It preserves interpolation, saved level and selection metadata, including when the source is linked to another curve. Editing the copy leaves the source group unchanged. Copies can be previewed, saved and assigned to a motor later.

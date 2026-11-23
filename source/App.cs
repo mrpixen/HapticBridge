@@ -149,7 +149,7 @@ namespace LovenseConnector
             window.Closing+=async(s,e)=> {
                 if(closeAllowed) return;
                 e.Cancel=true; if(closing) return; closing=true;StopAudio();if(mixerTimer!=null)mixerTimer.Stop(); scanTimer.Stop(); heartbeat.Stop(); if(scanner!=null) scanner.Stop(); if(api!=null) api.Dispose(); if(apiTimer!=null) apiTimer.Stop();
-                await StopAll();screenTimer?.Stop(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
+                FinishStudioDraftSaving();await StopAll();screenTimer?.Stop(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
                 if(scanner!=null) scanner.Dispose(); SaveState(); closeAllowed=true;
                 _=window.Dispatcher.BeginInvoke(new Action(window.Close));
             };

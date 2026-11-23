@@ -10,7 +10,7 @@ A Windows app for controlling compatible Lovense devices, making vibration patte
 
 Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **Video sync** for FeelConnect sessions. **Stop all** stops connected devices; Escape does the same while the window has focus.
 
-Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Duplicate curve** creates an independent, unassigned copy to experiment with. **More → Assign curve to motor** copies an unassigned curve to a connected motor. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
+Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Duplicate curve** creates an independent, unassigned copy; **Assign curve to motor** copies it to a connected motor. Edits save as a local draft; use **More → Restore previous draft** after reopening. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
 
 **Screen sync** provides experimental VALORANT feedback from visible health drops and a calibrated kill badge. Choose a window, check recognition in preview, then enable output. It uses Windows window capture without game hooks or Overwolf. See [screen setup](docs/SCREEN-SYNC.md); actual gameplay accuracy and Riot approval are not established.
 

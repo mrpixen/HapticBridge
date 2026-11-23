@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -51,6 +52,7 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await DraftRecoverySurvivesRestartAndFailures();
         await DuplicateCurvesStayIndependent();
         await ScreenSyncTests.Run();
         await AudioRoutingTests.Run();
@@ -426,6 +428,62 @@ internal static class StudioIntegrationTests
         Check(refused && fixture.Commands().Length == 0, "unassigned drafts cannot be started as physical motors");
     }
 
+    static async Task DraftRecoverySurvivesRestartAndFailures()
+    {
+        string folder=Path.Combine(Path.GetTempPath(),"HapticBridge-draft-test-"+Guid.NewGuid().ToString("N"));
+        string path=Path.Combine(folder,"studio-draft.mix.json");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string saved;
+            await using(var fixture=new Fixture(withDevices:false))
+            {
+                Set(fixture.App,"dataDir",folder);Call(fixture.App,"InitializeStudioDraftRecovery");
+                fixture.Duration.Text="750";
+                Check(!(bool)Call(fixture.App,"SaveStudioDraft")&&!File.Exists(path),"timing changes without an authored pattern do not replace the previous draft");
+                Call(fixture.App,"ApplyStudioMix",DraftPreset(3));
+                await Until(()=>File.Exists(path),"edited mix is saved after the debounce",5000);
+                saved=File.ReadAllText(path);
+                Check(saved==StudioDraftStore.Encode((StudioPreset)Call(fixture.App,"ExportStudioMix")),"automatic draft preserves the complete mix");
+                fixture.Duration.Text="unfinished input";
+                Check(!(bool)Call(fixture.App,"SaveStudioDraft")&&File.ReadAllText(path)==saved,"invalid timing leaves the previous valid draft intact");
+                fixture.Duration.Text="1200";
+                var doc=Get<CurveDocument>(fixture.App,"studioDocument");
+                doc.BeginEdit();doc.MovePoint(doc.Lanes[0].Id,0,0,7);
+                Check(!(bool)Call(fixture.App,"SaveStudioDraft")&&File.ReadAllText(path)==saved,"an unfinished drag is not written as a committed draft");
+                doc.CancelEdit();Call(fixture.App,"FinishStudioDraftSaving");saved=File.ReadAllText(path);
+                Check(StudioDraftStore.Load(path).durationMs==1200,"closing flushes pending valid changes without waiting for debounce");
+            }
+            foreach(bool withDevices in new[]{false,true})
+            {
+                await using var fixture=new Fixture(withDevices);
+                Set(fixture.App,"dataDir",folder);Call(fixture.App,"InitializeStudioDraftRecovery");
+                Check(Get<MenuItem>(fixture.App,"studioRestoreDraftChoice").IsEnabled&&fixture.Commands().Length==0,
+                    "startup offers previous-draft recovery without output commands");
+                await Invoke(fixture.App,"RestoreStudioDraft");
+                Check(StudioDraftStore.Encode((StudioPreset)Call(fixture.App,"ExportStudioMix"))==saved,"explicit recovery restores links, levels, selections, timing and curves");
+                Check(!fixture.Commands().Any(c=>c.Nonzero)&&!Get<bool>(fixture.App,"studioRunning"),"recovery never starts motor playback");
+                Call(fixture.App,"FinishStudioDraftSaving");
+            }
+            bool rejected=false;
+            using(var held=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read))
+            {
+                try {StudioDraftStore.Save(path,StudioDraftStore.Encode(DraftPreset(1)));}catch(Exception ex)when(ex is IOException||ex is UnauthorizedAccessException){rejected=true;}
+            }
+            Check(rejected&&File.ReadAllText(path)==saved,"failed file replacement preserves the valid previous draft");
+            Check(!File.Exists(path+".tmp.mix.json"),"failed save cleans its temporary file");
+            File.WriteAllText(path,"{broken draft");
+            await using(var fixture=new Fixture(withDevices:false))
+            {
+                Set(fixture.App,"dataDir",folder);Call(fixture.App,"InitializeStudioDraftRecovery");
+                Check(!Get<MenuItem>(fixture.App,"studioRestoreDraftChoice").IsEnabled&&Get<CurveDocument>(fixture.App,"studioDocument").Lanes.Count==0,
+                    "malformed saved draft does not prevent a fresh editor session");
+                Check(File.ReadAllText(path)=="{broken draft"&&fixture.Commands().Length==0,"startup leaves an unreadable draft unchanged without output");
+            }
+        }
+        finally {Directory.Delete(folder,true);}
+    }
+
     static async Task DuplicateCurvesStayIndependent()
     {
         foreach(bool withDevices in new[]{false,true})
@@ -545,6 +603,7 @@ internal static class StudioIntegrationTests
         }
         public async ValueTask DisposeAsync()
         {
+            Get<DispatcherTimer>(App,"studioDraftTimer")?.Stop();
             Dual.ReleasePreset.TrySetResult(); Dual.ReleaseLatest.TrySetResult(); Dual.ReleaseLaneStop.TrySetResult();
             Single.ReleasePreset.TrySetResult(); Single.ReleaseLatest.TrySetResult(); Single.ReleaseLaneStop.TrySetResult();
             await Stop(); Get<SemaphoreSlim>(App, "feelWriteGate").Dispose();

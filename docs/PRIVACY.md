@@ -2,7 +2,9 @@
 
 HapticBridge has no account system or application telemetry service. Device discovery and the native integration API run on this computer. The API binds to IPv4 loopback and authenticates every request with a randomly generated local token. It does not listen on the local network and rejects browser-origin requests.
 
-The app stores its settings, connection file, diagnostic status, activity log and saved patterns below `%LOCALAPPDATA%\HapticBridge`. These files can contain Bluetooth device identifiers, model names, firmware details and application activity. Mixer presets can contain motor identifiers. The API connection file contains a control credential. Treat this directory and copied API connection JSON as private; a local process that can read the token can control the API while integrations are enabled.
+The app stores its settings, connection file, diagnostic status, activity log and saved patterns below `%LOCALAPPDATA%\HapticBridge`. These files can contain Bluetooth device identifiers, model names, firmware details and application activity. Older mixer presets can contain motor identifiers. The API connection file contains a control credential. Treat this directory and copied API connection JSON as private; a local process that can read the token can control the API while integrations are enabled.
+
+Pattern edits save one local `studio-draft.mix.json` for recovery. It contains numbered curves, links, levels and timing, without device names or identifiers. Recovery is explicit and never starts output. Drafts and manually saved mixes are excluded from public builds.
 
 Sound sync analyzes the selected Windows audio output in memory. It does not record audio to disk or use the microphone. Audio endpoint identifiers remain in memory and are not exported in mixes. Changing or refreshing the output stops sound sync; start it again deliberately. If Windows changes its default output, restart sound sync to follow the new default.
 

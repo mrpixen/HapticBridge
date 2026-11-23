@@ -207,6 +207,7 @@ namespace LovenseConnector
             Menu("Link curves…",()=>{ShowStudioLink();return Task.CompletedTask;});Menu("Unlink this curve",()=>{if(studioEditor.ActiveLaneId!=null)studioDocument.Unlink(studioEditor.ActiveLaneId);return Task.CompletedTask;});
             Menu("Pattern settings…",()=>{studioOptionsPopup.PlacementTarget=studioMore;studioOptionsPopup.IsOpen=true;studioLength.Focus();return Task.CompletedTask;});
             Menu("Save mix…",SaveStudioMix);Menu("Open mix…",LoadStudioMix);more.ContextMenu=menu;more.Click+=(s,e)=>{menu.PlacementTarget=more;menu.IsOpen=true;};footer.Children.Add(more);
+            studioRestoreDraftChoice=new MenuItem { Header="Restore previous draft",IsEnabled=false };studioRestoreDraftChoice.Click+=async(s,e)=>{try{await RestoreStudioDraft();}catch(Exception ex){Report(ex);}};menu.Items.Add(studioRestoreDraftChoice);
             Menu("Add unassigned curve",()=>{AddStudioDraft();SetStudioMode(true);return Task.CompletedTask;});
             Menu("Duplicate curve",()=>{DuplicateStudioCurve();return Task.CompletedTask;});
             Menu("Assign curve to motor…",()=>{ShowStudioAssignment();return Task.CompletedTask;});
@@ -217,13 +218,13 @@ namespace LovenseConnector
             Grid.SetRow(footer,2);studioSurface.Children.Add(footer);
             mixerTab=new TabItem { Header="Controls",Content=studioRoot };tabs.Items.Insert(0,mixerTab);tabs.SelectedItem=mixerTab;
             studioEditor.SelectionChanged+=(s,e)=>UpdateStudioInspector();studioEditor.EditError+=message=>hint.Text=message;studioEditor.StopRequested+=async(s,e)=>await StopAll();
-            studioDocument.Changed+=async(s,e)=>{StopStudioPreview();studioCurveRevision++;UpdateStudioInspector();if(studioLoading)return;studioPresetChoice.SelectedItem="Custom";if(OwnsStudio&&studioRunningPattern)try{await StopStudioMotors();hint.Text="Pattern edited · output stopped. Start selected to play the new curve.";}catch(Exception ex){Report(ex);}};
+            studioDocument.Changed+=async(s,e)=>{StopStudioPreview();studioCurveRevision++;UpdateStudioInspector();if(studioLoading)return;QueueStudioDraftSave(true);studioPresetChoice.SelectedItem="Custom";if(OwnsStudio&&studioRunningPattern)try{await StopStudioMotors();hint.Text="Pattern edited · output stopped. Start selected to play the new curve.";}catch(Exception ex){Report(ex);}};
             studioDocument.HistoryChanged+=(s,e)=>{studioUndo.IsEnabled=studioDocument.CanUndo;studioRedo.IsEnabled=studioDocument.CanRedo;};
             studioPresetChoice.SelectionChanged+=(s,e)=>{if(studioLoading||studioPresetChoice.SelectedIndex<=0||studioEditor.ActiveLaneId==null)return;try{ApplyStudioPreset((string)studioPresetChoice.SelectedItem);}catch(Exception ex){Report(ex);}};
             studioLoop.Checked+=(s,e)=>{if(!studioLoading)studioDocument.SetLoop(true);};studioLoop.Unchecked+=(s,e)=>{if(!studioLoading)studioDocument.SetLoop(false);};
             studioGraphGrid.SizeChanged+=(s,e)=>LayoutStudioInspector();
             window.PreviewKeyDown+=(s,e)=>{if(tabs.SelectedItem!=mixerTab||Keyboard.FocusedElement is TextBox||studioEditor.IsKeyboardFocusWithin)return;if((Keyboard.Modifiers&ModifierKeys.Control)!=0&&(e.Key==Key.Z||e.Key==Key.Y)){e.Handled=true;try{if(e.Key==Key.Y||(Keyboard.Modifiers&ModifierKeys.Shift)!=0)studioDocument.Redo();else studioDocument.Undo();}catch(Exception ex){Report(ex);}}};
-            SetStudioMode(false);UpdateStudioInspector();
+            SetStudioMode(false);UpdateStudioInspector();InitializeStudioDraftRecovery();
         }
 
         Border BuildStudioInspector()
@@ -304,7 +305,7 @@ namespace LovenseConnector
                     m.Trace=new LiveMotorTrace { VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,16,0) };Grid.SetColumn(m.Trace,1);panel.Children.Add(m.Trace);
                     m.Level=new Slider { Orientation=Orientation.Vertical,Height=100,Minimum=0,Maximum=20,Value=12,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,VerticalAlignment=VerticalAlignment.Center };Accessible(m.Level,d.Name+" motor "+channel+" live level");Grid.SetColumn(m.Level,2);panel.Children.Add(m.Level);
                     m.Meter=new ProgressBar { Minimum=0,Maximum=20,Visibility=Visibility.Collapsed };m.Card=StudioPanel(panel,16);m.Card.Margin=new Thickness(0,0,0,12);mixerRows.Add(key,m);mixerMotors.Children.Add(m.Card);
-                    m.Level.ValueChanged+=(s,e)=>{value.Text=(int)m.Level.Value+" / 20";if(!studioLoading&&OwnsStudio&&!studioRunningPattern&&m.Include.IsChecked==true)m.Device.Player?.LiveLevel(m.Channel,(int)m.Level.Value);};
+                    m.Level.ValueChanged+=(s,e)=>{value.Text=(int)m.Level.Value+" / 20";QueueStudioDraftSave();if(!studioLoading&&OwnsStudio&&!studioRunningPattern&&m.Include.IsChecked==true)m.Device.Player?.LiveLevel(m.Channel,(int)m.Level.Value);};
                     m.Include.Checked+=async(s,e)=>await StudioTargetChanged(m);m.Include.Unchecked+=async(s,e)=>await StudioTargetChanged(m);
                     added=true;
                 }
@@ -339,6 +340,7 @@ namespace LovenseConnector
         async Task StudioTargetChanged(MixerMotor motor)
         {
             if(studioLoading)return;studioStart.IsEnabled=SelectedMixer().Length>0;UpdateStudioTargetCount();
+            QueueStudioDraftSave();
             string key=MixerKey(motor.Device,motor.Channel);int session=studioSession,operation=operatorGeneration;
             int targetVersion=studioTargetVersions.GetValueOrDefault(key)+1;studioTargetVersions[key]=targetVersion;
             var player=motor.Device.Player;
@@ -504,6 +506,7 @@ namespace LovenseConnector
             finally{studioLoading=wasLoading;}
             RebuildStudioSelectors();studioPresetChoice.SelectedItem="Custom";SetStudioMode(true);UpdateStudioInspector();UpdateStudioTargetCount();studioStart.IsEnabled=SelectedMixer().Length>0;
             hint.Text=draftOptions.Count>0?"Mix loaded · "+draftOptions.Count+" unassigned curves preserved · output off":"Mix loaded · output off";
+            QueueStudioDraftSave(true);
         }
     }
 }
