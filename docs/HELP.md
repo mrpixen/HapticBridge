@@ -20,6 +20,8 @@ New mix files contain numbered motor lanes rather than device names or identifie
 
 **STOP ALL** ends output and pauses external integrations. Escape does the same when the window has focus. If a Bluetooth connection is lost, the app cannot guarantee that a stop reaches the hardware; use the device's physical control when needed.
 
+For a shortcut while another app has focus, open **Settings → Global Stop all**, choose modifiers and a key, then **Enable shortcut**. It starts disabled. **Active** confirms Windows registered it; choose another combination if it is in use. **Apply shortcut** changes an active binding; a conflict keeps the previous one. **Disable** releases it. Choose a combination your game and other apps do not use.
+
 ## Sound sync
 
 Select motors under **Controls** or **Sound**. In **Sound**, choose the **Audio output** to follow, choose **Bass rumble** or **Full sound**, then **Start sound sync**. Adjust sensitivity and each motor's maximum level. Audio is analyzed in memory without being recorded. Changing the selected output or pressing **Refresh** stops sound sync; start it again when ready. **Windows default** resolves the current default each time you start.

@@ -53,6 +53,8 @@ internal static partial class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await ShortcutPreferencesAndConflicts();
+        await ShortcutCancelsEachPendingStart();
         await TimedOutApiQueueCannotStartOutput();
         await CancelledApiHandoffCannotAcquireSession();
         await CancelledApiFrameStopsBeforeNextMotor();

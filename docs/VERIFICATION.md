@@ -1,10 +1,14 @@
 # Release verification
 
-## Screen sync diagnostics — 2026-11-23 (source update)
+## 0.8.3 — Global Stop all and screen diagnostics — 2026-11-23
+
+**Settings → Global Stop all** provides an optional Windows-registered shortcut. It is disabled by default. Users choose two or three modifiers and F6–F11, then explicitly enable it. A conflicting replacement preserves the working shortcut; disable and close unregister it. Only the current registration can invoke Stop all, and each press cancels pending starts immediately even while an earlier stop awaits a slow transport. No keyboard hook or input injection is used.
+
+Passed: 26 shortcut-controller assertions and 214 native Studio assertions, including settings persistence, registration conflicts, startup failure, stale messages, cleanup and repeated-press ownership races. Tests use a fake registrar and simulated motors without displaying a window or registering a real shortcut. Actual delivery while backgrounded, minimized or playing a game, visual layout and ARM64 execution remain unverified.
 
 **Copy diagnostics** now includes capture, output, frozen/fresh/stale frame state, shield mode, learned-template presence and selected connected motor count. It does not include window identity, pixels, calibration coordinates, recognized values or event history, and does not sample foreground ownership. No recognition-accuracy claim is inferred from template presence.
 
-The native suite passed 59 screen, 191 Studio, 21 audio and 17 legacy-import assertions. Synthetic checks verify anonymous results, each frame state and target count, and no capture, foreground, ownership or device-command side effects. This source update is newer than the published 0.8.2 executable.
+The native suite also passed 59 screen, 21 audio and 17 legacy-import assertions. Synthetic checks verify anonymous results, each frame state and target count, and no capture, foreground, ownership or device-command side effects. Both the shortcut and diagnostics additions are included in 0.8.3. Live-game recognition and automatic third-party video compatibility are unchanged.
 
 ## 0.8.2 — API request deadlines — 2026-11-23
 

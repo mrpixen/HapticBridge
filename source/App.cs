@@ -132,6 +132,7 @@ namespace LovenseConnector
             InitializeTheme();
             InitializeStudioDevices();
             InitializeStudioSettings();
+            InitializeStopShortcut();
             scanButton.Click+=async(s,e)=> { try { if(scanning) await EndScan(false); else StartScan(true); } catch(Exception ex) { Report(ex); } };
             Find<Button>("StopAllButton").Click+=async(s,e)=>await StopAll();
             Find<Button>("DisconnectAllButton").Click+=async(s,e)=> { await StopAll(); foreach(var d in devices.Values.ToArray()) await Disconnect(d); };
@@ -148,7 +149,7 @@ namespace LovenseConnector
             };
             window.Closing+=async(s,e)=> {
                 if(closeAllowed) return;
-                e.Cancel=true; if(closing) return; closing=true;StopAudio();if(mixerTimer!=null)mixerTimer.Stop(); scanTimer.Stop(); heartbeat.Stop(); if(scanner!=null) scanner.Stop(); if(api!=null) api.Dispose(); if(apiTimer!=null) apiTimer.Stop();
+                e.Cancel=true; if(closing) return; closing=true;CloseStopShortcut();StopAudio();if(mixerTimer!=null)mixerTimer.Stop(); scanTimer.Stop(); heartbeat.Stop(); if(scanner!=null) scanner.Stop(); if(api!=null) api.Dispose(); if(apiTimer!=null) apiTimer.Stop();
                 FinishStudioDraftSaving();await StopAll();screenTimer?.Stop(); await CloseFeelConnect(); foreach(var d in devices.Values.ToArray()) Release(d,"Disconnected");
                 if(scanner!=null) scanner.Dispose(); SaveState(); closeAllowed=true;
                 _=window.Dispatcher.BeginInvoke(new Action(window.Close));
