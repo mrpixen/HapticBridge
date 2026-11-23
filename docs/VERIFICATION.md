@@ -1,5 +1,9 @@
 # Release verification
 
+## 0.8.0 release scope
+
+This release includes optional shield damage detection, independent curve duplication and local draft recovery, with the checks described below. Validation used synthetic frames and simulated devices without accessing a running game or showing a window. No new live-game, physical-device or ARM64 execution result is claimed. Automatic third-party video playback remains unresolved.
+
 ## Shield damage — 2026-11-23 (source update)
 
 The health-only detector missed damage absorbed entirely by shields. Optional shield calibration now reads a separate 0–50 number, requires three consistent readings, and emits damage while health is unchanged. Simultaneously confirmed health/shield decreases form one event. Regeneration is silent; unreadable shield digits discard that baseline instead of implying zero. Older profiles leave shield reading off. Calibration undo, reset and save include the shield region and enabled state; changing the mode disarms output.

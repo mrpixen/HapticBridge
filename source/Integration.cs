@@ -94,7 +94,7 @@ namespace LovenseConnector
             if(request.Method=="GET")
             {
                 if(request.Path=="/api/v1/devices") return new { devices=ApiDevices() };
-                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.7.1",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
+                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.8.0",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
                 if(request.Path=="/api/v1/capabilities") return new { apiVersion=1,range=new { min=0,max=20,step=1 },patterns=new[]{"Steady","Pulse","Wave","Ramp","Custom"},routes=new[]{"GET /status","GET /devices","POST /session","POST /heartbeat","POST /frame","POST /motor","POST /pattern","POST /release","POST /stop"},timing="Best effort; acknowledged levels are commanded outputs, not sensor readings." };
                 throw new ApiFault(404,"Route not found.");
             }
