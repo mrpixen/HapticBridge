@@ -1,5 +1,11 @@
 # Release verification
 
+## Curve duplication — 2026-11-23 (source update)
+
+**More → Duplicate curve** copies the active curve to an independent, unassigned lane. It preserves interpolation, saved level and selection metadata, including when the source is linked to another curve. Editing the copy leaves the source group unchanged. Copies can be previewed, saved and assigned to a motor later.
+
+Offline tests exercised copying both connected and unassigned lanes, independent edits, complete save/load round trips, the 64-lane limit and absence of output commands. The Studio suite passed 123 assertions; screen, audio and legacy suites also passed. No visible window, game capture, GUI automation or physical device was used. This menu addition has not received a new visual review.
+
 ## Calibration and playback fixes — 2026-11-23
 
 Three failures were reproduced with regression tests before correction:

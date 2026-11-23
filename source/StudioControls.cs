@@ -208,6 +208,7 @@ namespace LovenseConnector
             Menu("Pattern settings…",()=>{studioOptionsPopup.PlacementTarget=studioMore;studioOptionsPopup.IsOpen=true;studioLength.Focus();return Task.CompletedTask;});
             Menu("Save mix…",SaveStudioMix);Menu("Open mix…",LoadStudioMix);more.ContextMenu=menu;more.Click+=(s,e)=>{menu.PlacementTarget=more;menu.IsOpen=true;};footer.Children.Add(more);
             Menu("Add unassigned curve",()=>{AddStudioDraft();SetStudioMode(true);return Task.CompletedTask;});
+            Menu("Duplicate curve",()=>{DuplicateStudioCurve();return Task.CompletedTask;});
             Menu("Assign curve to motor…",()=>{ShowStudioAssignment();return Task.CompletedTask;});
             Menu("Remove unassigned curve",()=>{RemoveStudioDraft();return Task.CompletedTask;});
             menu.PreviewKeyDown+=async(s,e)=>{if(e.Key==Key.Escape){menu.IsOpen=false;e.Handled=true;await StopAll();}};

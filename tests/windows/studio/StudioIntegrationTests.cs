@@ -51,6 +51,7 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await DuplicateCurvesStayIndependent();
         await ScreenSyncTests.Run();
         await AudioRoutingTests.Run();
         LegacyDraftTests.Run();
@@ -423,6 +424,45 @@ internal static class StudioIntegrationTests
         bool refused = false;
         try { await Invoke(fixture.App, "StartStudio"); } catch (ArgumentException) { refused = true; }
         Check(refused && fixture.Commands().Length == 0, "unassigned drafts cannot be started as physical motors");
+    }
+
+    static async Task DuplicateCurvesStayIndependent()
+    {
+        foreach(bool withDevices in new[]{false,true})
+        {
+            await using var fixture = new Fixture(withDevices);
+            var original = DraftPreset(3);
+            Call(fixture.App, "ApplyStudioMix", original);
+            var document = Get<CurveDocument>(fixture.App, "studioDocument");
+            var editor = Get<CurveEditorControl>(fixture.App, "studioEditor");
+            var source = document.Lanes[1];
+            editor.ActiveLaneId = source.Id;
+            var before = source.Points.ToArray();
+            Call(fixture.App, "DuplicateStudioCurve");
+            var copy = document.GetLane(editor.ActiveLaneId);
+            Check(document.Lanes.Count == 4 && copy.Id != source.Id && !Get<Dictionary<string,MixerMotor>>(fixture.App,"mixerRows").ContainsKey(copy.Id),
+                "duplicating a connected or offline curve creates a selected unassigned editing lane");
+            Check(copy.Points.SequenceEqual(before) && copy.Interpolation == source.Interpolation && copy.GroupId != source.GroupId,
+                "duplicate retains shape and interpolation without joining the source link group");
+            document.MovePoint(copy.Id, 0, 0, 19);
+            Check(source.Points.SequenceEqual(before) && document.Lanes[0].Points.SequenceEqual(before),
+                "editing the duplicate leaves both linked source curves untouched");
+            var saved = (StudioPreset)Call(fixture.App, "ExportStudioMix");
+            Check(saved.lanes[3].level == original.lanes[1].level && saved.lanes[3].selected == original.lanes[1].selected,
+                "duplicate preserves source level and selection metadata");
+            Call(fixture.App, "ApplyStudioMix", saved);
+            Check(JsonSerializer.Serialize(Call(fixture.App, "ExportStudioMix")) == JsonSerializer.Serialize(saved),
+                "independent copy survives saving and reopening with or without hardware slots");
+            Check(fixture.Commands().Length == 0, "duplicate and round-trip never start output");
+        }
+        await using var capped = new Fixture(withDevices: false);
+        var maximum = DraftPreset(1); maximum.lanes = Enumerable.Repeat(maximum.lanes[0],64).ToArray();
+        Call(capped.App, "ApplyStudioMix", maximum);
+        var snapshot = JsonSerializer.Serialize(Call(capped.App, "ExportStudioMix"));
+        bool rejected = false;
+        try { Call(capped.App, "DuplicateStudioCurve"); } catch(ArgumentException) { rejected = true; }
+        Check(rejected && snapshot == JsonSerializer.Serialize(Call(capped.App, "ExportStudioMix")),
+            "duplicating at the lane limit leaves the mix unchanged");
     }
 
     static StudioPreset DraftPreset(int count) => new()

@@ -29,6 +29,21 @@ namespace LovenseConnector
             studioDocument.RemoveLane(key);studioDraftOptions.Remove(key);RebuildStudioSelectors();SetStudioMode(studioPatternMode);UpdateStudioInspector();
         }
 
+        void DuplicateStudioCurve()
+        {
+            if(studioDocument.Lanes.Count>=64)throw new ArgumentException("A mix supports up to 64 curves.");
+            if(studioDocument.IsEditing)throw new InvalidOperationException("Finish the current point edit first.");
+            var source=studioDocument.GetLane(studioEditor.ActiveLaneId);
+            var options=studioDraftOptions.GetValueOrDefault(source.Id)??new StudioLanePreset();
+            bool assigned=mixerRows.TryGetValue(source.Id,out var motor);
+            string key=NewStudioDraftKey();
+            studioDraftOptions[key]=new StudioLanePreset { level=assigned?(int)motor.Level.Value:options.level,
+                selected=assigned?motor.Include.IsChecked==true:options.selected };
+            studioDocument.AddLane(key,"Unassigned curve "+studioDraftSequence,source.Points,source.Interpolation);
+            studioEditor.ActiveLaneId=key;RebuildStudioSelectors();SetStudioMode(true);UpdateStudioInspector();
+            hint.Text="Curve duplicated · independent, unassigned copy";
+        }
+
         // Visual-only sampling: no Playback, Bluetooth, device/session or API calls.
         void StartStudioPreview()
         {
