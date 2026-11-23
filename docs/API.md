@@ -145,3 +145,5 @@ Errors use the HTTP status code and `{"error":"description"}`. Typical statuses:
 | 500 / 503 | Output failure / app closing |
 
 Connections close after one response. The server allows up to 16 clients and applies a five-second request timeout. Use bounded client timeouts. On errors, cancel queued output and release the session when possible; the lease is the final stop fallback if the client exits.
+
+The server deadline and server shutdown cancel requests still waiting to dispatch or start output. An admitted stop still finishes. Already accepted output keeps its requested duration and session lease. A caller timing out or disconnecting earlier does not prove its request was rejected; avoid blindly retrying an old event.

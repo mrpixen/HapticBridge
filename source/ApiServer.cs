@@ -21,6 +21,7 @@ namespace LovenseConnector
     {
         public string Method,Path;
         public Dictionary<string,object> Body;
+        public CancellationToken Cancellation;
     }
     internal sealed class ApiServer:IDisposable
     {
@@ -28,6 +29,7 @@ namespace LovenseConnector
         readonly Func<ApiRequest,Task<object>> handler;
         readonly HashSet<TcpClient> clients=new HashSet<TcpClient>();
         readonly string token;
+        readonly CancellationTokenSource lifetime=new CancellationTokenSource();
         volatile bool disposed;
         public int Port { get; private set; }
         public string BaseUrl { get { return "http://127.0.0.1:"+Port; } }
@@ -57,11 +59,12 @@ namespace LovenseConnector
             {
                 client.NoDelay=true;
                 using(client)
-                using(var timeout=new CancellationTokenSource(5000))
+                using(var timeout=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
                 using(timeout.Token.Register(()=>client.Close()))
                 {
+                    timeout.CancelAfter(5000);
                     var stream=client.GetStream(); object response; int status=200;
-                    try { var request=await Read(stream).ConfigureAwait(false); if(disposed) throw new ApiFault(503,"Gateway is closing."); response=await handler(request).ConfigureAwait(false); }
+                    try { var request=await Read(stream).ConfigureAwait(false); request.Cancellation=timeout.Token; request.Cancellation.ThrowIfCancellationRequested(); if(disposed) throw new ApiFault(503,"Gateway is closing."); response=await handler(request).ConfigureAwait(false); }
                     catch(ApiFault ex) { status=ex.Status; response=new { error=ex.Message }; }
                     catch(ArgumentException ex) { status=400; response=new { error=ex.Message }; }
                     catch(Exception) { status=500; response=new { error="Request failed. Check gateway connection and activity." }; }
@@ -105,7 +108,7 @@ namespace LovenseConnector
         }
         public void Dispose()
         {
-            disposed=true; listener.Stop(); lock(clients) foreach(var client in clients.ToArray()) client.Close();
+            if(disposed)return;disposed=true;lifetime.Cancel();listener.Stop();lock(clients) foreach(var client in clients.ToArray()) client.Close();lifetime.Dispose();
         }
     }
     internal sealed class IntegrationSession

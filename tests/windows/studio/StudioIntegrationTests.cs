@@ -16,9 +16,10 @@ using System.Windows.Threading;
 using LovenseConnector;
 
 // Real ConnectorApp Studio controls and Playback, with fake command links only.
-// No normal application startup, profile reads/writes, Bluetooth, API listener,
-// audio capture, network, file dialogs or visible window are used.
-internal static class StudioIntegrationTests
+// No normal application startup, profile reads/writes, Bluetooth, external
+// network, audio capture, file dialogs or visible window are used. API cases
+// use ephemeral loopback listeners with synthetic credentials only.
+internal static partial class StudioIntegrationTests
 {
     const BindingFlags Members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     static int assertions;
@@ -52,6 +53,11 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await TimedOutApiQueueCannotStartOutput();
+        await CancelledApiHandoffCannotAcquireSession();
+        await CancelledApiFrameStopsBeforeNextMotor();
+        await CancelledApiStartCannotEscapePlaybackWaits();
+        await AcceptedApiOutputKeepsItsLease();
         await ExportOrderMatchesImportSlots();
         await InvertedPatternRequiresRestart();
         await DraftRecoverySurvivesRestartAndFailures();

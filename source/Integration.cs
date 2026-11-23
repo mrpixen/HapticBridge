@@ -58,8 +58,10 @@ namespace LovenseConnector
             var result=new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             if(closing||window.Dispatcher.HasShutdownStarted) { result.SetException(new ApiFault(503,"Gateway is closing.")); return result.Task; }
             window.Dispatcher.BeginInvoke(new Action(async()=> {
-                await apiGate.WaitAsync();
-                try { result.TrySetResult(await HandleApi(request)); } catch(Exception ex) { result.TrySetException(ex); } finally { apiGate.Release(); }
+                bool acquired=false;
+                try { await apiGate.WaitAsync(request.Cancellation);acquired=true;result.TrySetResult(await HandleApi(request)); }
+                catch(Exception ex) { result.TrySetException(ex); }
+                finally { if(acquired)apiGate.Release(); }
             })); return result.Task;
         }
         static string FieldString(Dictionary<string,object> body,string key)
@@ -88,13 +90,15 @@ namespace LovenseConnector
         }
         async Task<object> HandleApi(ApiRequest request)
         {
+            request.Cancellation.ThrowIfCancellationRequested();
             if(closing) throw new ApiFault(503,"Gateway is closing.");
             if(integration!=null&&integration.Expired) await RevokeIntegration(false);
+            request.Cancellation.ThrowIfCancellationRequested();
             var body=request.Body;
             if(request.Method=="GET")
             {
                 if(request.Path=="/api/v1/devices") return new { devices=ApiDevices() };
-                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.8.1",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
+                if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion="0.8.2",enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
                 if(request.Path=="/api/v1/capabilities") return new { apiVersion=1,range=new { min=0,max=20,step=1 },patterns=new[]{"Steady","Pulse","Wave","Ramp","Custom"},routes=new[]{"GET /status","GET /devices","POST /session","POST /heartbeat","POST /frame","POST /motor","POST /pattern","POST /release","POST /stop"},timing="Best effort; acknowledged levels are commanded outputs, not sensor readings." };
                 throw new ApiFault(404,"Route not found.");
             }
@@ -106,6 +110,7 @@ namespace LovenseConnector
                 string name=FieldString(body,"name"); if(name.Length>80) throw new ApiFault(400,"Session name must be at most 80 characters.");
                 int ttl=FieldInt(body,"ttlMs",3000,500,10000),operation=++operatorGeneration;
                 StopAudio();var video=DisarmFeelConnect();var screen=DisarmScreen();var stopped=StopPlayers();await Task.WhenAll(video,screen,stopped);
+                request.Cancellation.ThrowIfCancellationRequested();
                 if(closing||operation!=operatorGeneration||!apiEnabled||sweep!=null||integration!=null)throw new ApiFault(409,"Integration ownership changed while opening the session.");
                 if(!await stopped)throw new ApiFault(409,"Output could not be stopped before switching sources.");
                 integration=new IntegrationSession { Id=Guid.NewGuid().ToString("N"),Name=name,TtlMs=ttl }; integration.Touch(); UpdateApiLabel();
@@ -131,19 +136,19 @@ namespace LovenseConnector
                     int level=FieldInt(output,"level",-1,0,20); if(level<0) throw new ApiFault(400,"level is required.");
                     if(!keys.Add(d.Address.ToString("X12")+"/"+channel)) throw new ApiFault(400,"Duplicate motor in frame."); commands.Add(Tuple.Create(d,channel,level));
                 }
-                session.Touch();
+                request.Cancellation.ThrowIfCancellationRequested();session.Touch();
                 foreach(var command in commands) {
-                    RequireSession(sessionId); var d=command.Item1; if(d.Player==null) throw new ApiFault(409,"Toy disconnected."); session.Motors.Add(d.Address.ToString("X12")+"/"+command.Item2);
+                    request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); var d=command.Item1; if(d.Player==null) throw new ApiFault(409,"Toy disconnected."); session.Motors.Add(d.Address.ToString("X12")+"/"+command.Item2);
                     if(command.Item3==0) { if(d.Player.Active(command.Item2)||d.Player.Level(command.Item2)!=0) await d.Player.Stop(command.Item2); }
-                    else if(!d.Player.UpdateSteady(command.Item2,command.Item3,duration,transition)) await d.Player.Start(command.Item2,new PatternSpec { mode="Steady",high=command.Item3,durationMs=duration,transitionMs=transition },20);
+                    else if(!d.Player.UpdateSteady(command.Item2,command.Item3,duration,transition,()=>!request.Cancellation.IsCancellationRequested)) await d.Player.Start(command.Item2,new PatternSpec { mode="Steady",high=command.Item3,durationMs=duration,transitionMs=transition },20,isCurrent:()=>!request.Cancellation.IsCancellationRequested);
                 }
-                RequireSession(sessionId); return new { accepted=true,outputs=commands.Count,ttlMs=session.TtlMs };
+                request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); return new { accepted=true,outputs=commands.Count,ttlMs=session.TtlMs };
             }
             if(request.Path=="/api/v1/pattern")
             {
                 var d=ApiDevice(body); int channel=FieldInt(body,"motor",-1,0,3); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                 object value; if(!body.TryGetValue("pattern",out value)) throw new ApiFault(400,"pattern is required."); var pattern=json.Deserialize<PatternSpec>(json.Serialize(value)); if(pattern==null) throw new ApiFault(400,"pattern is required."); pattern.Validate();
-                session.Touch(); session.Motors.Add(d.Address.ToString("X12")+"/"+channel); await d.Player.Start(channel,pattern,20); RequireSession(sessionId); return new { accepted=true };
+                request.Cancellation.ThrowIfCancellationRequested();session.Touch(); session.Motors.Add(d.Address.ToString("X12")+"/"+channel); await d.Player.Start(channel,pattern,20,isCurrent:()=>!request.Cancellation.IsCancellationRequested); request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); return new { accepted=true };
             }
             throw new ApiFault(404,"Route not found.");
         }

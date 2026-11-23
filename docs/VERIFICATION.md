@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.2 — API request deadlines — 2026-11-23
+
+A regression reproduced a queued motor command starting after its HTTP request had timed out. Closing the socket had not cancelled dispatch. The five-second deadline and server shutdown now cancel pending dispatch, source handoffs and playback starts. Stops already admitted still finish, and accepted output retains its own duration and heartbeat lease. A client disconnecting earlier still cannot infer whether its request was accepted.
+
+Passed: all 16 core suites, including 22 API assertions; 191 native Studio, 47 screen, 21 audio, 17 legacy-import, 41 QR and 80 video-pipeline assertions; six Python tests. The timeout regression failed before correction. Tests also cover cancellation between motors, during session acquisition, while waiting for the playback gate or a firmware-preset stop, and accepted HTTP pattern output continuing after its response. All devices, clipboard inputs and capture frames were simulated; network tests used private loopback listeners. No GUI, actual capture or physical output was used. Live-game recognition and ARM64 execution remain unverified.
+
 ## 0.8.1 — Pattern ordering and inversion — 2026-11-23
 
 A regression reproduced curves and selection settings moving to the wrong motor after saving and reopening with an earlier-discovered device disconnected. Export used document insertion order; import used connected-motor order. Export now uses the same motor slots as import, followed by unassigned curves. Tests cover disconnections, drafts created before device discovery, link groups, levels, selections and identifier-free files.
