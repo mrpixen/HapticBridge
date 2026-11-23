@@ -74,7 +74,11 @@ namespace LovenseConnector
         StudioPreset ExportStudioMix()
         {
             var groups=new Dictionary<string,int>();
-            var lanes=studioDocument.Lanes.Select(lane=>
+            // Match import's current motor-slot order. Document insertion order can
+            // differ after a disconnection or when drafts were created before discovery.
+            var ordered=StudioMotorOrder().Select(studioDocument.GetLane)
+                .Concat(studioDocument.Lanes.Where(lane=>!mixerRows.ContainsKey(lane.Id)));
+            var lanes=ordered.Select(lane=>
             {
                 if(!groups.ContainsKey(lane.GroupId))groups.Add(lane.GroupId,groups.Count);
                 bool assigned=mixerRows.TryGetValue(lane.Id,out var motor);

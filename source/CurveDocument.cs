@@ -170,6 +170,14 @@ namespace LovenseConnector
             Apply(() => { lane.State.Points = Array.AsReadOnly(values); lane.State.Interpolation = mode; });
         }
 
+        /// <summary>Creates the complementary levels without changing timing or links.</summary>
+        public void InvertLevels(string id)
+        {
+            EnsureNoEdit();
+            var lane = GetLane(id);
+            ReplaceCurve(id, lane.Points.Select(point => new CurvePoint(point.Ms, 20 - point.Level)), lane.Interpolation);
+        }
+
         public int AddPoint(string id, int ms, int level)
         {
             var lane = GetLane(id);

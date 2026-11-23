@@ -31,11 +31,34 @@ namespace LovenseConnector
             return doc;
         }
 
+        static void InvertLevels()
+        {
+            foreach(var mode in Enum.GetValues<CurveInterpolation>())
+            {
+                var doc=Make();doc.ReplaceCurve("motor-a",Points(0,0,500,7,1000,20),mode);
+                doc.LinkCurves("motor-a",new[]{"motor-a","motor-b"});doc.ClearHistory();
+                var original=doc.ExportPoints("motor-a");var untouched=doc.ExportPoints("motor-c");
+                string group=doc.GetLane("motor-a").GroupId;
+                doc.InvertLevels("motor-b");
+                Check(doc.ExportPoints("motor-a").SequenceEqual(Points(0,20,500,13,1000,0))&&doc.ExportPoints("motor-b").SequenceEqual(doc.ExportPoints("motor-a")),"invert complements the linked group at the original times: "+mode);
+                Check(doc.GetLane("motor-a").Interpolation==mode&&doc.GetLane("motor-a").GroupId==group&&doc.LengthMs==1000&&doc.Loop,"invert preserves interpolation, link identity and playback timing: "+mode);
+                Check(doc.ExportPoints("motor-c").SequenceEqual(untouched),"invert leaves unrelated curves unchanged: "+mode);
+                Check(doc.Undo()&&!doc.CanUndo&&doc.ExportPoints("motor-a").SequenceEqual(original)&&doc.ExportPoints("motor-b").SequenceEqual(original),"one Undo restores the complete inversion: "+mode);
+                Check(doc.Redo()&&doc.GetLane("motor-a").Points[1].Level==13,"Redo restores inverted levels: "+mode);
+                doc.InvertLevels("motor-a");Check(doc.ExportPoints("motor-a").SequenceEqual(original),"inverting twice restores the original: "+mode);
+            }
+            var flat=new CurveDocument(1000);flat.AddLane("flat","Flat",Points(0,10,1000,10));flat.InvertLevels("flat");
+            Check(!flat.CanUndo,"inverting a midpoint-only curve creates no empty Undo entry");
+            flat.BeginEdit();RejectOperation(()=>flat.InvertLevels("flat"),"invert cannot interrupt a point drag");flat.CancelEdit();
+            Reject(()=>flat.InvertLevels("missing"),"invert requires an existing active curve");
+        }
+
         public static int Main()
         {
             try
             {
                 passed = 0;
+                InvertLevels();
                 Reject(() => new CurvePoint(0, 21), "curve rejects levels above native range");
                 Reject(() => new CurvePoint(-1, 0), "curve rejects negative times");
                 Reject(() => new CurveDocument(199), "curve rejects too-short cycles");

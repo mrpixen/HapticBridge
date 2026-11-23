@@ -52,6 +52,8 @@ internal static class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await ExportOrderMatchesImportSlots();
+        await InvertedPatternRequiresRestart();
         await DraftRecoverySurvivesRestartAndFailures();
         await DuplicateCurvesStayIndependent();
         await ScreenSyncTests.Run();
@@ -426,6 +428,73 @@ internal static class StudioIntegrationTests
         bool refused = false;
         try { await Invoke(fixture.App, "StartStudio"); } catch (ArgumentException) { refused = true; }
         Check(refused && fixture.Commands().Length == 0, "unassigned drafts cannot be started as physical motors");
+    }
+
+    static async Task ExportOrderMatchesImportSlots()
+    {
+        string MotorSnapshot(ConnectorApp app)
+        {
+            var document=Get<CurveDocument>(app,"studioDocument");
+            return JsonSerializer.Serialize(Get<Dictionary<string,MixerMotor>>(app,"mixerRows").Select(pair=>new {
+                key=pair.Key,level=pair.Value.Level.Value,selected=pair.Value.Include.IsChecked,
+                points=document.GetLane(pair.Key).Points,curve=document.GetLane(pair.Key).Interpolation,
+                linkedCount=document.LinkedLaneIds(pair.Key).Length }));
+        }
+        void CheckRoundTrip(Fixture fixture,StudioPreset saved,string before)
+        {
+            string encoded=JsonSerializer.Serialize(saved);
+            Check(!encoded.Contains("Synthetic")&&!Get<Dictionary<string,MixerMotor>>(fixture.App,"mixerRows").Keys.Any(encoded.Contains),
+                "ordered export contains no device names or motor identifiers");
+            Call(fixture.App,"ApplyStudioMix",saved);
+            Check(MotorSnapshot(fixture.App)==before,"save/reopen retains each current motor's curve, level, selection and links");
+            Check(JsonSerializer.Serialize((StudioPreset)Call(fixture.App,"ExportStudioMix"))==encoded,
+                "ordered round trip retains all unassigned curves and linked group metadata");
+            Check(fixture.Commands().Length==0,"ordered export/import does not send motor commands");
+        }
+        await using(var fixture=new Fixture())
+        {
+            var original=DraftPreset(5);Call(fixture.App,"ApplyStudioMix",original);
+            fixture.Rows[0].Device.Connected=false;Call(fixture.App,"RefreshStudioMotors");
+            string before=MotorSnapshot(fixture.App);var saved=(StudioPreset)Call(fixture.App,"ExportStudioMix");
+            Check(saved.lanes[0].level==original.lanes[2].level&&saved.lanes[0].points[0].level==original.lanes[2].points[0].level,
+                "export puts the still-connected motor before earlier-discovered disconnected slots");
+            CheckRoundTrip(fixture,saved,before);
+        }
+        await using(var fixture=new Fixture(withDevices:false))
+        {
+            Call(fixture.App,"ApplyStudioMix",DraftPreset(2));
+            var device=new Device { Address=2,Name="Synthetic late actuator",Connected=true,Supported=true,Channels=new[]{0},Player=new Playback(fixture.Single,new[]{0}),
+                Tab=new TabItem(),State=new TextBlock(),Details=new TextBlock(),ConnectButton=new Button(),Controls=new StackPanel() };
+            device.Motors[0]=new MotorView {Channel=0,Output=new TextBlock()};
+            Get<Dictionary<ulong,Device>>(fixture.App,"devices").Add(device.Address,device);Call(fixture.App,"RefreshStudioMotors");
+            var row=Get<Dictionary<string,MixerMotor>>(fixture.App,"mixerRows").Single();row.Value.Level.Value=17;row.Value.Include.IsChecked=false;
+            Get<CurveDocument>(fixture.App,"studioDocument").ReplaceCurve(row.Key,new[]{new CurvePoint(0,9),new CurvePoint(300,7)},CurveInterpolation.Step);
+            string before=MotorSnapshot(fixture.App);var saved=(StudioPreset)Call(fixture.App,"ExportStudioMix");
+            Check(saved.lanes[0].level==17&&saved.lanes[0].points[0].level==9,
+                "export puts a newly discovered motor before drafts authored earlier");
+            Check(saved.lanes[1].group==saved.lanes[2].group&&saved.lanes[0].group!=saved.lanes[1].group,
+                "moving assigned lanes first preserves linked draft groups");
+            CheckRoundTrip(fixture,saved,before);
+        }
+    }
+
+    static async Task InvertedPatternRequiresRestart()
+    {
+        await using var fixture=new Fixture();
+        var preset=new StudioPreset {lengthMs=1000,loop=true,durationMs=0,transitionMs=0,
+            lanes=Enumerable.Range(0,3).Select(i=>new StudioLanePreset {level=12,selected=true,group=i<2?0:1,curve="linear",
+                points=new[]{new LovenseConnector.Frame {ms=0,level=i<2?6:8},new LovenseConnector.Frame {ms=1000,level=i<2?6:8}}}).ToArray()};
+        Call(fixture.App,"ApplyStudioMix",preset);await fixture.Start();
+        await Until(()=>fixture.Levels().SequenceEqual(new[]{6,6,8}),"original linked pattern plays before inversion");
+        var document=Get<CurveDocument>(fixture.App,"studioDocument");string key=document.Lanes[0].Id;int marker=fixture.Commands().Length;
+        document.InvertLevels(key);
+        await Until(()=>!Get<bool>(fixture.App,"studioRunning")&&fixture.Levels().All(level=>level==0),"inverting a playing curve stops the entire owned Studio group");
+        Check(document.Undo()&&document.GetLane(key).Points[0].Level==6,"inversion remains undoable after stopping output");
+        Check(document.Redo()&&document.GetLane(key).Points[0].Level==14,"redo restores the inverted curve without playback");
+        await Task.Delay(160);
+        Check(!fixture.Commands().Skip(marker).Any(command=>command.Nonzero),"invert, undo and redo never restart motor output");
+        await fixture.Start();await Until(()=>fixture.Levels().SequenceEqual(new[]{14,14,8}),"explicit Start plays the inverted linked group and preserves the independent motor");
+        await fixture.Stop();
     }
 
     static async Task DraftRecoverySurvivesRestartAndFailures()

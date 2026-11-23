@@ -203,13 +203,15 @@ namespace LovenseConnector
             studioPreviewTimer=new DispatcherTimer { Interval=TimeSpan.FromMilliseconds(33) };studioPreviewTimer.Tick+=(s,e)=>RefreshStudioPreview();
             studioPointButton=Action("Edit point",()=>{studioPointOpen=!studioPointOpen;LayoutStudioInspector();if(studioPointOpen)studioTime.Focus();return Task.CompletedTask;});footer.Children.Add(studioPointButton);
             var more=Action("More…",()=>Task.CompletedTask);studioMore=more;var menu=new ContextMenu();
-            void Menu(string title,Func<Task> action){var item=new MenuItem{Header=title};item.Click+=async(s,e)=>{try{await action();}catch(Exception ex){Report(ex);}};menu.Items.Add(item);}
+            MenuItem Menu(string title,Func<Task> action){var item=new MenuItem{Header=title};item.Click+=async(s,e)=>{try{await action();}catch(Exception ex){Report(ex);}};menu.Items.Add(item);return item;}
             Menu("Link curves…",()=>{ShowStudioLink();return Task.CompletedTask;});Menu("Unlink this curve",()=>{if(studioEditor.ActiveLaneId!=null)studioDocument.Unlink(studioEditor.ActiveLaneId);return Task.CompletedTask;});
             Menu("Pattern settings…",()=>{studioOptionsPopup.PlacementTarget=studioMore;studioOptionsPopup.IsOpen=true;studioLength.Focus();return Task.CompletedTask;});
             Menu("Save mix…",SaveStudioMix);Menu("Open mix…",LoadStudioMix);more.ContextMenu=menu;more.Click+=(s,e)=>{menu.PlacementTarget=more;menu.IsOpen=true;};footer.Children.Add(more);
             studioRestoreDraftChoice=new MenuItem { Header="Restore previous draft",IsEnabled=false };studioRestoreDraftChoice.Click+=async(s,e)=>{try{await RestoreStudioDraft();}catch(Exception ex){Report(ex);}};menu.Items.Add(studioRestoreDraftChoice);
             Menu("Add unassigned curve",()=>{AddStudioDraft();SetStudioMode(true);return Task.CompletedTask;});
             Menu("Duplicate curve",()=>{DuplicateStudioCurve();return Task.CompletedTask;});
+            var invert=Menu("Invert levels",()=>{studioDocument.InvertLevels(studioEditor.ActiveLaneId);return Task.CompletedTask;});
+            menu.Opened+=(s,e)=>invert.IsEnabled=studioDocument.ContainsLane(studioEditor.ActiveLaneId)&&!studioDocument.IsEditing;
             Menu("Assign curve to motor…",()=>{ShowStudioAssignment();return Task.CompletedTask;});
             Menu("Remove unassigned curve",()=>{RemoveStudioDraft();return Task.CompletedTask;});
             menu.PreviewKeyDown+=async(s,e)=>{if(e.Key==Key.Escape){menu.IsOpen=false;e.Handled=true;await StopAll();}};

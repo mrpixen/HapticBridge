@@ -12,9 +12,11 @@ In **Pattern**, choose a motor tab and draw its curve. Double-click to add a poi
 
 Without a device, choose **Create a pattern**. **Preview** animates the curve and shows its sampled level without sending any motor commands. Editing, changing modes, or Stop all ends the preview. **More → Add unassigned curve** adds another draft; **Duplicate curve** makes an independent copy of the active curve. **Assign curve to motor** copies an unassigned curve to a connected motor. Starting device output still requires **Start selected**.
 
+**More → Invert levels** flips the active curve's strengths (`0 ↔ 20`, `6 ↔ 14`) while preserving its timing. Linked curves change together; duplicate first for an independent opposite pattern. One Undo restores the original. Changing a playing pattern stops output until **Start selected** is pressed again.
+
 Pattern edits automatically save one local draft after a short pause. After reopening, choose **More → Restore previous draft** to recover it. Recovery stops output before loading, uses the same motor mapping as opening a mix, and never starts playback. Invalid timing or an unfinished point drag leaves the last valid draft intact. Use **Save mix** to keep separate patterns.
 
-New mix files contain numbered motor lanes rather than device names or identifiers. When opened, lanes map to the connected motors in their displayed order; extra lanes remain as unassigned drafts and survive saving. Older mix files can contain device identifiers, but conversion preserves their saved curves and saving in the new format removes those identifiers. Live timing is captured when playback starts: changing timing fields applies to the next start, including when another motor joins the current session.
+New mix files contain numbered motor lanes rather than device names or identifiers. Saved lanes list connected motors first, then disconnected motor slots and unassigned curves. Opening uses the same motor order; extra lanes remain as unassigned drafts and survive saving. Older mix files can contain device identifiers, but conversion preserves their saved curves and saving in the new format removes those identifiers. Live timing is captured when playback starts: changing timing fields applies to the next start, including when another motor joins the current session.
 
 **STOP ALL** ends output and pauses external integrations. Escape does the same when the window has focus. If a Bluetooth connection is lost, the app cannot guarantee that a stop reaches the hardware; use the device's physical control when needed.
 
