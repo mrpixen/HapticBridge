@@ -84,9 +84,16 @@ namespace LovenseConnector
             if(closing||!apiEnabled||sweep!=null) throw new ApiFault(409,"Integrations paused; enable Allow integrations in the gateway.");
             if(integration==null||integration.Id!=id||integration.Expired) throw new ApiFault(409,"Session expired or was revoked. Open a new session."); return integration;
         }
+        static object ApiStrokeRange(Device device)
+        {
+            var profile=device.Player?.Profile;
+            if(!device.Connected||profile?.HasStroke!=true)return null;
+            var range=profile.StrokeRange;
+            return new { start=range.Item1,end=range.Item2 };
+        }
         object ApiDevices()
         {
-            return devices.Values.Select(d=>new { id=d.Address.ToString("X12"),name=d.Name,connected=d.Connected,firmware=d.Firmware,battery=d.Battery,functions=new { depth=d.Functions?.HasDepth??false,position=d.Functions?.HasPosition??false,stroke=d.Functions?.HasStroke??false,reverse=d.Functions?.HasRotation??false },
+            return devices.Values.Select(d=>new { id=d.Address.ToString("X12"),name=d.Name,connected=d.Connected,firmware=d.Firmware,battery=d.Battery,configuredStroke=ApiStrokeRange(d),functions=new { depth=d.Functions?.HasDepth??false,position=d.Functions?.HasPosition??false,stroke=d.Functions?.HasStroke??false,reverse=d.Functions?.HasRotation??false },
                 motors=d.Motors.Values.Select(m=>new { channel=m.Channel,function=d.Functions?.Outputs.FirstOrDefault(a=>a.Channel==m.Channel)?.Function??"vibration",label=d.ChannelLabel(m.Channel),nativeMax=d.Functions?.Outputs.FirstOrDefault(a=>a.Channel==m.Channel)?.NativeMaximum??20,min=0,max=20,step=1,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray();
         }
         async Task<object> HandleApi(ApiRequest request)

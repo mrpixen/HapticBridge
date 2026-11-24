@@ -30,6 +30,8 @@ The status response's `video` object reports `phase`, `connected`, `playbackMode
 
 `videoReferencePresence` similarly caches the manual **Check old SDK route** occupancy result. This diagnostic does not change transport routing.
 
+Device discovery and status include `configuredStroke`: `{ "start": 0, "end": 100 }` for a connected stroke-capable device, or `null` otherwise. These percentages describe the range HapticBridge will use for subsequent thrusting commands, not measured position. An accepted `stroke` setting updates them; reconnecting starts a new configuration.
+
 ## Own a session
 
 Only one external integration owns the motors at a time. Opening a session stops existing local playback. Manual control or Stop all can revoke the session. If the app returns 409, report that control is unavailable and wait for the user; do not continuously reclaim it.

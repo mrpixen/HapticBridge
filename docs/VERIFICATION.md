@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased — Stroke configuration discovery — 2026-11-24
+
+Device discovery now includes the configured stroke endpoints so integrations can display the range used by subsequent thrusting commands. Both endpoints come from one immutable snapshot. Disconnected devices and devices without stroke control report null; the values are app configuration, not physical-position feedback.
+
+Passed: 334 native Studio assertions, including default range, accepted changes, disconnection and replacement by a model without stroke control. Windows build completed without warnings or errors; source privacy scan found no configured markers. Tests used offline simulated devices.
+
 ## Unreleased — Position move status — 2026-11-24
 
 Reproduced a position command reporting inactive output at level zero while still in flight. Position moves now participate in playback and channel activity, with an unknown speed rather than a fabricated zero. Confirmed cleanup restores level zero; failed cleanup keeps output unconfirmed while clearing the completed task.

@@ -34,6 +34,7 @@ namespace LovenseConnector
         public string Note { get; private set; }
         // The immutable pair is replaced atomically. Sampling never sees half a range.
         Tuple<int,int> stroke=Tuple.Create(0,100);
+        public Tuple<int,int> StrokeRange=>stroke;
         public int StrokeLow=>stroke.Item1;
         public int StrokeHigh=>stroke.Item2;
         public static ActuatorProfile Create(ModelMatch model,string symbol,string firmware)
