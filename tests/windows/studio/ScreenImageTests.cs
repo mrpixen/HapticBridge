@@ -8,8 +8,8 @@ internal static partial class ScreenSyncTests
         using(var file=File.Create(path))encoder.Save(file);
         var image=ScreenCalibrationImage.Load(path);File.Delete(path);
         Check(image.Valid&&image.Bgra.SequenceEqual(pixels.Bgra),"HUD image loads exact pixels and releases its file");
-        File.WriteAllText(path,"not an image");bool rejected=false;try{ScreenCalibrationImage.Load(path);}catch(Exception ex)when(ex is NotSupportedException||ex is System.IO.FileFormatException){rejected=true;}
-        Check(rejected,"invalid image rejected");File.Delete(path);
+        File.WriteAllText(path,"not an image");bool rejected=false;try{ScreenCalibrationImage.Load(path);}catch(ArgumentException ex){rejected=ex.Message.Contains("valid PNG, JPEG or BMP");}
+        Check(rejected,"invalid image gives a useful format error");File.Delete(path);
         await Feed(app,capture,"100",3,"25");await Invoke(app,"ArmScreen");int before=links.Sum(l=>l.Positive.Count);
         await Invoke(app,"ApplyScreenImage",image);
         Check(capture.Disposed&&Get<Capture>(app,"screenCapture")==null&&!Get<bool>(app,"screenArmed"),"opening HUD image stops live capture and disarms");

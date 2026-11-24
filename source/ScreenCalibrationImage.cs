@@ -10,6 +10,13 @@ namespace LovenseConnector
         {
             using var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
             if(stream.Length>32*1024*1024)throw new ArgumentException("Choose a HUD image smaller than 32 MB.");
+            try { return Decode(stream); }
+            catch(Exception ex) when(ex is NotSupportedException||ex is FileFormatException) {
+                throw new ArgumentException("This image could not be read. Choose a valid PNG, JPEG or BMP.",ex);
+            }
+        }
+        static ScreenPixels Decode(Stream stream)
+        {
             var decoder=BitmapDecoder.Create(stream,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnDemand);
             if(!(decoder is PngBitmapDecoder)&&!(decoder is JpegBitmapDecoder)&&!(decoder is BmpBitmapDecoder))throw new ArgumentException("Choose a PNG, JPEG or BMP image.");
             var frame=decoder.Frames[0];int w=frame.PixelWidth,h=frame.PixelHeight;
