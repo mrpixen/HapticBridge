@@ -96,7 +96,14 @@ class Session:
             raise self.failure
         if self.finished.is_set() or self.session_id is None:
             raise GatewayError("The session is not active.")
-        return self.gateway.request(route, {**fields, "sessionId": self.session_id})
+        try:
+            return self.gateway.request(route, {**fields, "sessionId": self.session_id})
+        except GatewayError as error:
+            # A caller may catch the error inside its context. Do not let the
+            # heartbeat keep prior continuous output alive in that case.
+            self.failure = error
+            self.close()
+            raise
 
     def function(self, device_id, function, value=None, high=None):
         """Apply a discovered motion setting; stops playback on that device."""
@@ -119,6 +126,9 @@ class Session:
             raise self.failure
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
         self.finished.set()
         if self.thread:
             self.thread.join(timeout=2.5)

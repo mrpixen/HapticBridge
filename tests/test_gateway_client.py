@@ -60,6 +60,32 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, 2)
                 gateway.assert_not_called()
 
+    def test_caught_output_failure_releases_and_invalidates_session(self):
+        for route in ("/frame", "/function"):
+            with self.subTest(route=route):
+                fake = FakeGateway()
+                original = fake.request
+                def request(path, body=None):
+                    result = original(path, body)
+                    if path == route:
+                        raise client.GatewayError("Simulated output failure")
+                    return result
+                fake.request = request
+                with fake.session() as session:
+                    with self.assertRaises(client.GatewayError):
+                        if route == "/frame":
+                            session.frame([], duration_ms=0)
+                        else:
+                            session.function("synthetic", "position", 0)
+                    self.assertTrue(session.finished.is_set(), "Caught output failure left heartbeats enabled")
+                    self.assertFalse(session.thread.is_alive())
+                    self.assertEqual(fake.requests[-1][0], "/release")
+                    count = len(fake.requests)
+                    with self.assertRaises(client.GatewayError):
+                        session.function("synthetic", "reverse")
+                    self.assertEqual(len(fake.requests), count)
+                self.assertEqual(sum(path == "/release" for path, _ in fake.requests), 1)
+
     def test_revoked_session_rejects_function(self):
         session = client.Session(FakeGateway(), "test", 3000)
         session.finished.set()
