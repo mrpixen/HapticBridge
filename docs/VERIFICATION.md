@@ -1,6 +1,6 @@
 # Release verification
 
-## Calibrated death text — development branch, 2026-11-24
+## 0.8.21 — Calibrated death text — 2026-11-24
 
 The production image reader and temporal filter were replayed together on three private recording segments at 10 fps, using one learned KILLED YOU template. The 350-frame calibration segment produced one death at 56.6 seconds, and a separate 100-frame segment produced one at 117.0 seconds without retraining. A 450-frame negative segment with a lingering report produced zero deaths. These are limited recorded examples, not a general accuracy rate.
 
