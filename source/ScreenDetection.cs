@@ -445,6 +445,7 @@ namespace LovenseConnector
             // Retry contrast separation without relaxing health brightness or shape scores.
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,contrast:true);
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true,localContrast:true);
+            if(!health.Number.HasValue)health=ReadNearWhite(frame,profile.Health,templates);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
             result.KillFeed=profile.ReadKillFeed?HudKillFeedVision.Read(frame):null;
             if(profile.ReadShield) {
@@ -538,6 +539,38 @@ namespace LovenseConnector
         static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false,bool localContrast=false)
         {
             var parts=Segment(localContrast?ExtractLocalContrast(frame,region):contrast?ExtractContrast(frame,region,maximum==100?155:0):Extract(frame,region,false),trimDigits);
+            return ReadParts(parts,templates,maximum);
+        }
+        internal static (int? Number,double Confidence) ReadNearWhite(ScreenPixels frame,HudRegion region,HudGlyph[] templates)
+        {
+            var mask=Extract(frame,region,false);if(mask==null||mask.Pixels.Length>65536)return (null,0);
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
+            var values=new byte[mask.Pixels.Length];
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+left+x)*4;
+                values[y*mask.Width+x]=Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2]));
+            }
+            // Near-white weapon scenery can join the digits even after background subtraction.
+            // Require the same whole number at neighboring thresholds, and reject conflicting
+            // readings across the range. Keep the usual shape and ambiguity checks.
+            int? accepted=null,previous=null;double confidence=0;bool adjacent=false;
+            for(int threshold=242;threshold<=253;threshold++) {
+                int ink=0,whiteSum=0,darkSum=0;
+                for(int i=0;i<values.Length;i++) {
+                    mask.Pixels[i]=(byte)(values[i]>=threshold?1:0);ink+=mask.Pixels[i];
+                    if(mask.Pixels[i]>0)whiteSum+=values[i];else darkSum+=values[i];
+                }
+                if(ink<12||ink>values.Length*.65||(double)whiteSum/ink-(double)darkSum/(values.Length-ink)<8){previous=null;continue;}
+                var read=ReadParts(Segment(mask,true),templates,100);
+                if(!read.Number.HasValue){previous=null;continue;}
+                if(accepted.HasValue&&accepted!=read.Number)return (null,0);
+                accepted=read.Number;adjacent|=previous==read.Number;previous=read.Number;
+                confidence=Math.Max(confidence,read.Confidence);
+            }
+            return adjacent?(accepted,confidence):(null,0);
+        }
+        static (int? Number,double Confidence) ReadParts(Mask[] parts,HudGlyph[] templates,int maximum)
+        {
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {

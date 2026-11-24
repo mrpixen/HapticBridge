@@ -265,6 +265,19 @@ internal static class ScreenDetectionTests
             Check(HudVision.ExtractLocalContrast(empty,region)==null,"local fallback rejects uniform, weak-contrast or dim foreground");
         var ambiguous=new[]{new HudGlyph {Digit=1,Aspect=profile.Digits[0].Aspect,Mask=profile.Digits[0].Mask}};
         Check(HudVision.Read(washed,profile,ambiguous).Health==null,"local fallback does not resolve ambiguous templates by guessing");
+        var nearWhiteTemplates=profile.Digits.Concat(other).ToArray();
+        Check(HudVision.ReadNearWhite(Frame(255,245),region,nearWhiteTemplates).Number==0,"near-white health separates from a nearly white background");
+        Check(HudVision.Read(Frame(255,245),profile,other).Health==0,"near-white fallback participates in health reading");
+        Check(HudVision.ReadNearWhite(Frame(255,245),region,profile.Digits.Concat(ambiguous).ToArray()).Number==null,"near-white fallback rejects ambiguous glyphs");
+        Check(HudVision.ReadNearWhite(Frame(242,0),region,nearWhiteTemplates).Number==null,"one successful white threshold is insufficient");
+        Check(HudVision.ReadNearWhite(Frame(243,0),region,nearWhiteTemplates).Number==0,"neighboring white thresholds must agree");
+        var changing=Frame(255,0);
+        for(int y=14;y<17;y++)for(int x=13;x<19;x++){int i=(y*32+x)*4;changing.Bgra[i]=changing.Bgra[i+1]=changing.Bgra[i+2]=243;}
+        var changingTemplates=profile.Digits.Concat(HudVision.Learn(changing,region,"8",100)).ToArray();
+        Check(HudVision.ReadNearWhite(changing,region,changingTemplates).Number==null,"different valid numbers across white thresholds are rejected");
+        foreach(var empty in new[]{Frame(255,255),Frame(255,250),Frame(240,0),Frame(145,70)})
+            Check(HudVision.ReadNearWhite(empty,region,nearWhiteTemplates).Number==null,"near-white fallback rejects uniform, weak-contrast or nonwhite crops");
+        Check(HudVision.ReadNearWhite(new ScreenPixels(new byte[257*257*4],257,257,0),region,nearWhiteTemplates).Number==null,"oversized near-white crop is skipped");
         Check(HudVision.ExtractLocalContrast(new ScreenPixels(new byte[257*257*4],257,257,0),region)==null,"oversized local contrast crop is skipped");
         Check(HudVision.Read(Frame(255,175),profile,other).Health==0,"bright health digits separate from a bright gray background");
         Check(HudVision.Read(Frame(255,175,true),profile,other).Health==null,"uniform bright health crop remains unknown");
