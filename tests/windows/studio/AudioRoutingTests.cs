@@ -90,7 +90,7 @@ internal static class AudioRoutingTests
             var programs=new[]{new AudioProgram(1234,5678,"Example")};
             Set(app,"audioProgramSupport",new Func<bool>(()=>true));
             Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
-            AudioProgram requestedProgram=null;var programCapture=new Source();
+            AudioProgram requestedProgram=null;var programCapture=new Source {Ready=false};
             Set(app,"audioProgramFactory",new Func<AudioProgram,IAudioSource>(p=>{requestedProgram=p;return programCapture;}));
             Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=1;
             await Invoke(app,"RefreshAudioPrograms");
@@ -98,7 +98,12 @@ internal static class AudioRoutingTests
             Check(programPicker.Items.Count==1&&programPicker.SelectedItem==null,"program enumeration requires an explicit selection");
             programPicker.SelectedIndex=0;await Invoke(app,"StartAudio");
             Check(ReferenceEquals(requestedProgram,programs[0])&&programCapture.Started,"program mode routes selected identity to its own source factory");
+            Check(label.Text.StartsWith("Starting audio"),"pending capture has a truthful starting label");
+            await Invoke(app,"AudioTick");
+            Check(label.Text.StartsWith("Starting audio")&&!player.Active(0),"pending capture cannot produce feedback even if its reader has energy");
+            programCapture.Ready=true;
             await Invoke(app,"AudioTick");Check(player.Active(0),"program audio reaches synthetic output");
+            Check(label.Text.Contains("level"),"ready capture transitions to the live level display");
             programs=new[]{new AudioProgram(1234,5679,"Example restarted")};
             await Invoke(app,"RefreshAudioPrograms");
             Check(programCapture.Disposed&&!player.Active(0)&&programPicker.SelectedItem==null,"refresh stops output and does not retain a reused process id");
@@ -159,8 +164,9 @@ internal static class AudioRoutingTests
             Check(!player.Running&&link.ZeroCommands==zeros,"retry also checks whole-player epoch when channel revision is unchanged");
         }finally{link.Release?.TrySetResult(true);await player.StopAll();}
     }
-    sealed class Source:IAudioSource
+    sealed class Source:IAudioSource,IAudioSourceReadiness
     {
+        public bool Ready {get;set;}=true;
         internal bool Started,Disposed;internal string Failure;
         public string Error=>Failure;public string OutputName=>"Actual synthetic output";
         public void Start(){Started=true;}

@@ -16,7 +16,7 @@ namespace LovenseConnector
     }
 
     // Capture lifecycle shared by the Windows adapter and offline fake streams.
-    internal sealed class ProcessAudioSource : IAudioSource
+    internal sealed class ProcessAudioSource : IAudioSource,IAudioSourceReadiness
     {
         readonly Func<CancellationToken,Task<IProcessAudioStream>> open;
         readonly Func<bool> targetCurrent;
@@ -26,7 +26,8 @@ namespace LovenseConnector
         AudioMeter meter;
         Task completion=Task.CompletedTask;
         volatile string error;
-        int started,stopped;
+        int started,stopped,ready;
+        public bool Ready=>Volatile.Read(ref ready)!=0&&Volatile.Read(ref stopped)==0&&error==null;
         public string Error=>error;
         public string OutputName { get; }
         internal Task Completion=>completion;
@@ -69,6 +70,7 @@ namespace LovenseConnector
                     throw new InvalidOperationException("Unsupported audio format.");
                 lock(sync)meter=new AudioMeter(stream.Channels,stream.SampleRate);
                 stream.Start(cancellation.Token);
+                Volatile.Write(ref ready,1);
                 while(true)
                 {
                     CheckTarget();
@@ -94,6 +96,7 @@ namespace LovenseConnector
             }
             finally
             {
+                Volatile.Write(ref ready,0);
                 try { stream?.Dispose(); }
                 catch { if(Volatile.Read(ref stopped)==0)error="Program audio could not be closed cleanly. Restart sound sync."; }
                 lock(sync)meter=null;

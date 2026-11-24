@@ -43,7 +43,8 @@ internal static class ProcessAudioTests
         var opening=new TaskCompletionSource<IProcessAudioStream>(TaskCreationOptions.RunContinuationsAsynchronously);
         var late=new Stream();
         var source=new ProcessAudioSource("Synthetic audio",()=>true,token=> { entered.SetResult();return opening.Task; });
-        source.Start();await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));source.Dispose();
+        source.Start();await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Check(!source.Ready,"pending native activation is not reported ready");source.Dispose();
         Check(source.Read(false)==0,"Stop immediately silences a pending source");
         opening.SetResult(late);await source.Completion.WaitAsync(TimeSpan.FromSeconds(3));
         Check(late.Starts==0&&late.Disposals==1&&source.Error==null,"late activation is disposed without starting after Stop");
@@ -51,10 +52,12 @@ internal static class ProcessAudioTests
         var stream=new Stream();stream.Packets.Enqueue(Samples());
         source=new ProcessAudioSource("Synthetic audio",()=>true,token=>Task.FromResult<IProcessAudioStream>(stream));
         source.Start();await Until(()=>source.Read(false)>.49);
+        Check(source.Ready,"started capture reports readiness");
         Check(source.Read(false)<=.51,"float samples reach the existing audio meter");
         bool twice=false;try{source.Start();}catch(InvalidOperationException){twice=true;}
         Check(twice&&stream.Starts==1,"a running source cannot start twice");
         source.Dispose();Check(source.Read(false)==0,"Stop clears a previously positive reading immediately");
+        Check(!source.Ready,"Stop clears readiness immediately");
         await source.Completion.WaitAsync(TimeSpan.FromSeconds(3));source.Dispose();
         Check(stream.Disposals==1,"repeated Stop disposes the stream once");
 
