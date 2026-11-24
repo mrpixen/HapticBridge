@@ -1,0 +1,44 @@
+name: Minecraft offline tests
+
+on:
+  push:
+    paths:
+      - 'integrations/minecraft/**'
+      - '.github/workflows/minecraft.yml'
+  pull_request:
+    paths:
+      - 'integrations/minecraft/**'
+      - '.github/workflows/minecraft.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Download pinned test dependency
+        run: |
+          $jar = Join-Path $env:RUNNER_TEMP 'gson-2.13.2.jar'
+          Invoke-WebRequest 'https://repo.maven.apache.org/maven2/com/google/code/gson/gson/2.13.2/gson-2.13.2.jar' -OutFile $jar
+          if ((Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash -ne 'dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0') {
+            throw 'Gson checksum mismatch'
+          }
+      - name: Test events, configuration and loopback gateway
+        run: >-
+          ./integrations/minecraft/source/test.ps1
+          -JdkPath $env:JAVA_HOME
+          -GsonPath (Join-Path $env:RUNNER_TEMP 'gson-2.13.2.jar')
+          -BuildDirectory (Join-Path $env:RUNNER_TEMP 'minecraft-tests')
