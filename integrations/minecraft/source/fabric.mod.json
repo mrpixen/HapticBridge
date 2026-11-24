@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "minecraft_immersion",
+  "version": "0.2.1",
+  "name": "Minecraft Immersion",
+  "description": "Client-side event-driven motor feedback through the local Lovense Connector gateway.",
+  "environment": "client",
+  "mixins": ["immersion.mixins.json"],
+  "entrypoints": { "client": ["io.pixen.immersion.ImmersionClient"] },
+  "depends": { "fabricloader": ">=0.20.1", "minecraft": "~26.3", "java": ">=25", "fabric-api": "*" }
+}

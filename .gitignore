@@ -55,3 +55,8 @@ __pycache__/
 .vscode/
 work/
 rollback/
+
+# Minecraft build outputs and local game configuration.
+integrations/minecraft/build/
+integrations/minecraft/*.jar
+integrations/minecraft/config/

@@ -59,7 +59,7 @@ Patterns use a common 0–20 scale. The air pump has three native nonzero levels
 
 In **Integrations**, enable **Allow app and game controls**, then use **Copy connection**. The API listens only on this computer and requires the generated local token. Keep that connection information private.
 
-[API reference](docs/API.md) · [Python example](examples/gateway_client.py)
+[Minecraft Fabric mod](integrations/minecraft/README.md) · [API reference](docs/API.md) · [Python example](examples/gateway_client.py)
 
 ### Experimental features
 
