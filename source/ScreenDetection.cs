@@ -26,6 +26,8 @@ namespace LovenseConnector
         public HudRegion Shield { get; set; }=new HudRegion { X=.225,Y=.925,Width=.035,Height=.04 };
         public bool ReadShield { get; set; }
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
+        public HudRegion Spectator { get; set; }=new HudRegion {X=.065625,Y=.785185,Width=.104167,Height=.02963};
+        public byte[] SpectatorMask { get; set; }
         public byte[] BadgeMask { get; set; }
         public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }=new List<HudGlyph>();
@@ -33,6 +35,7 @@ namespace LovenseConnector
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
         public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
+            Spectator!=null&&Spectator.Valid&&(SpectatorMask==null||SpectatorMask.Length==4096&&SpectatorMask.All(x=>x<=1))&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
             BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
@@ -50,12 +53,24 @@ namespace LovenseConnector
     {
         public int? Health;
         public int? Shield;
-        public double Confidence, ShieldConfidence, BadgeScore;
+        public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore;
     }
     internal sealed class HudEvent
     {
         public string Kind;
         public int Amount,Health,ShieldAmount;
+    }
+    internal sealed class HudSpectatorFilter
+    {
+        double last=-1;int matches;
+        public void Reset(){last=-1;matches=0;}
+        public bool Push(double score,double time)
+        {
+            if(!double.IsFinite(time)||time<=last)return false;
+            if(last>=0&&time-last>.5)matches=0;
+            last=time;matches=double.IsFinite(score)&&score>=.85?Math.Min(3,matches+1):0;
+            return matches>=3;
+        }
     }
     internal sealed class HudEventFilter
     {
@@ -194,6 +209,7 @@ namespace LovenseConnector
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
                 result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;
             }
+            result.SpectatorScore=profile.SpectatorMask==null?0:Similarity(Normalize(Extract(frame,profile.Spectator,false),128,32),profile.SpectatorMask);
             var badge=Normalize(Extract(frame,profile.Badge),32,32);
             result.BadgeScore=Similarity(badge,profile.BadgeMask);
             foreach(var variant in profile.BadgeVariants)result.BadgeScore=Math.Max(result.BadgeScore,Similarity(badge,variant));

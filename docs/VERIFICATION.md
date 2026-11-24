@@ -1,5 +1,13 @@
 # Release verification
 
+## Current source — Calibrated spectator suppression
+
+Optional spectator-marker calibration adds a separate image region and template. Three fresh matches at 85% or higher stop active Screen sync output; suspected frames do not start new cues. Output never resumes automatically. Enabling checks the marker both before and after waiting for other output to stop. Clear, region changes, reset, Undo and portable calibration handle the new template. Portable exports now use version 3; versions 1 and 2 remain readable without this feature.
+
+A private recorded-frame probe using an English Switch player marker confirmed spectating before the tested teammate feedback events. A separate normal-play interval of 1,680 frames had no matches at the candidate threshold. Later matches were visually checked as genuine spectator frames after death. This is limited calibration evidence, not universal language, layout, or spectator recognition. Templates and recordings are not distributed. Live game behavior and visual layout remain unverified.
+
+Passed: 17 core suites, including 158 screen-detection assertions; 196 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. New integration checks cover stopping active simulated output, withholding a suspected spectator damage cue, blocking enable both immediately and during an asynchronous handoff, no automatic resume, template copying, clearing and Undo. No visible UI, game capture or hardware was used.
+
 ## 0.8.14 — Recorded HUD recognition — 2026-11-24
 
 Calibration retains up to eight learned kill badge appearances for different skins and animations. Duplicate learning does not replace a template or consume Undo. Clear, Undo, region changes, local saves and portable setup files handle the complete set. New portable files use version 2; version 1 imports remain supported.

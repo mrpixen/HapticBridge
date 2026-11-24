@@ -16,21 +16,21 @@ internal static partial class ScreenSyncTests
         string path=Path.Combine(folder,"Synthetic HUD.hud.json");ScreenCalibrationFiles.Save(path,original);
         using(var document=JsonDocument.Parse(original)) {
             var names=document.RootElement.EnumerateObject().Select(p=>p.Name).OrderBy(s=>s).ToArray();
-            Check(names.SequenceEqual(new[]{"Format","Version","Health","Shield","ReadShield","Badge","BadgeMask","BadgeVariants","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
+            Check(names.SequenceEqual(new[]{"Format","Version","Health","Shield","ReadShield","Badge","BadgeMask","BadgeVariants","Spectator","SpectatorMask","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
         }
         var legacy=ScreenCalibrationFiles.Decode(original);legacy.Version=1;
         Check(legacy.Valid(),"version one calibration remains readable with no additional badges");
         var bank=ScreenCalibrationFiles.Decode(original);bank.BadgeMask=new byte[1024];bank.BadgeMask[0]=1;
         bank.BadgeVariants.Add(Enumerable.Repeat((byte)1,1024).ToArray());
         var bankCopy=ScreenCalibrationFiles.Decode(ScreenCalibrationFiles.Encode(bank.Snapshot()));
-        Check(bankCopy.Version==2&&bankCopy.BadgeVariants.Count==1&&bankCopy.BadgeMask[0]==1,"portable version two preserves multiple badge appearances");
+        Check(bankCopy.Version==3&&bankCopy.BadgeVariants.Count==1&&bankCopy.BadgeMask[0]==1,"portable current version preserves multiple badge appearances");
         var snapshot=bankCopy.Snapshot();bankCopy.BadgeVariants[0][0]=0;
         Check(snapshot.BadgeVariants[0][0]==1,"badge variants are deep copied");
         bank.Version=1;Check(!bank.Valid(),"version one cannot claim multiple badge support");
         var loaded=ScreenCalibrationFiles.Load(path);
         Check(loaded.Valid()&&ScreenCalibrationFiles.Encode(loaded.Snapshot())==original,"setup file round-trip preserves regions, shield mode and learned templates");
         var menu=Descendants(Get<TabControl>(app,"tabs")).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="More calibration actions").ContextMenu;
-        Check(menu.Items.OfType<MenuItem>().Select(m=>(string)m.Header).SequenceEqual(new[]{"Save setup…","Open setup…","Clear learned badges"}),"portable setup actions are available in the calibration menu without opening any dialog");
+        Check(menu.Items.OfType<MenuItem>().Select(m=>(string)m.Header).SequenceEqual(new[]{"Save setup…","Open setup…","Clear learned badges","Clear spectator marker"}),"portable setup actions are available in the calibration menu without opening any dialog");
         string other=original.Replace("hapticbridge-hud","another-format");bool rejected=false;
         try{ScreenCalibrationFiles.Decode(other);}catch(ArgumentException){rejected=true;}
         Check(rejected,"a different JSON format is rejected");
@@ -74,7 +74,7 @@ internal static partial class ScreenSyncTests
         }finally {
             links[0].Block?.TrySetResult(true);links[0].Block=null;await Invoke(app,"DisarmScreen");
             var restored=ScreenCalibrationFiles.Decode(original).Snapshot();
-            profile.Health=restored.Health;profile.Shield=restored.Shield;profile.ReadShield=restored.ReadShield;profile.Badge=restored.Badge;profile.BadgeMask=restored.BadgeMask;profile.BadgeVariants=restored.BadgeVariants;profile.Digits=restored.Digits;
+            profile.Health=restored.Health;profile.Shield=restored.Shield;profile.ReadShield=restored.ReadShield;profile.Spectator=restored.Spectator;profile.SpectatorMask=restored.SpectatorMask;profile.Badge=restored.Badge;profile.BadgeMask=restored.BadgeMask;profile.BadgeVariants=restored.BadgeVariants;profile.Digits=restored.Digits;
             profile.DamageLevel=damage;profile.KillLevel=kill;profile.DeathLevel=death;Call(app,"RefreshScreenCalibration");
         }
     }

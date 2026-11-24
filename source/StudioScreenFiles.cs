@@ -16,7 +16,7 @@ namespace LovenseConnector
                 var item=new MenuItem {Header=title};
                 item.Click+=async(s,e)=>{try{await action();}catch(Exception ex){Report(ex);}};menu.Items.Add(item);
             }
-            Item("Save setup…",ExportScreenCalibration);Item("Open setup…",OpenScreenCalibration);Item("Clear learned badges",ClearScreenBadges);
+            Item("Save setup…",ExportScreenCalibration);Item("Open setup…",OpenScreenCalibration);Item("Clear learned badges",ClearScreenBadges);Item("Clear spectator marker",ClearScreenSpectator);
             button.ContextMenu=menu;button.Click+=(s,e)=>{menu.PlacementTarget=button;menu.IsOpen=true;};return button;
         }
         async Task ExportScreenCalibration()
@@ -43,7 +43,7 @@ namespace LovenseConnector
             if(closing||generation!=screenGeneration)return;
             RememberScreenCalibration();
             screenProfile.Health=incoming.Health;screenProfile.Shield=incoming.Shield;screenProfile.ReadShield=incoming.ReadShield;
-            screenProfile.Badge=incoming.Badge;screenProfile.BadgeMask=incoming.BadgeMask;screenProfile.BadgeVariants=incoming.BadgeVariants;screenProfile.Digits=incoming.Digits;
+            screenProfile.Spectator=incoming.Spectator;screenProfile.SpectatorMask=incoming.SpectatorMask;screenProfile.Badge=incoming.Badge;screenProfile.BadgeMask=incoming.BadgeMask;screenProfile.BadgeVariants=incoming.BadgeVariants;screenProfile.Digits=incoming.Digits;
             RefreshScreenCalibration();SetScreenStatus("Setup loaded · Save calibration to keep it");
         }
     }

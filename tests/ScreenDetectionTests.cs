@@ -15,6 +15,7 @@ internal static class ScreenDetectionTests
         DimShieldDigits();
         BadgeAppearances();
         RapidKillRecovery();
+        SpectatorConfirmation();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -39,6 +40,21 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void SpectatorConfirmation()
+    {
+        var f=new HudSpectatorFilter();
+        Check(!f.Push(.95,1)&&!f.Push(.95,1.1)&&f.Push(.95,1.2),"spectator marker requires three fresh matches");
+        Check(!f.Push(.95,1.2),"duplicate frame cannot confirm spectator state");
+        f.Reset();Check(!f.Push(.95,2)&&!f.Push(.7,2.1)&&!f.Push(.95,2.2)&&!f.Push(.95,2.3),"a nonmatch breaks spectator confirmation");
+        Check(f.Push(.95,2.4),"confirmation recovers after three new matches");
+        f.Reset();f.Push(.95,3);f.Push(.95,3.1);Check(!f.Push(.95,4),"stale gap discards old spectator matches");
+        Check(!f.Push(double.NaN,4.1)&&!f.Push(double.PositiveInfinity,4.2),"nonfinite confidence cannot match a spectator marker");
+        f.Reset();Check(!f.Push(.95,double.NaN)&&!f.Push(.95,5),"invalid timestamps and reset cannot carry confirmation");
+        var profile=new ScreenProfile();profile.SpectatorMask=new byte[4095];Check(!profile.Validate(),"wrong spectator mask size rejected");
+        profile.SpectatorMask=new byte[4096];profile.SpectatorMask[0]=2;Check(!profile.Validate(),"nonbinary spectator marker rejected");
+        profile.SpectatorMask=null;profile.Spectator=null;Check(!profile.Validate(),"missing spectator region rejected");
+        var old=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>("{\"Version\":1}");Check(old.Validate()&&old.SpectatorMask==null,"older local profiles start without spectator suppression");
     }
     static void RapidKillRecovery()
     {

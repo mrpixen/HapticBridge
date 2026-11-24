@@ -31,6 +31,7 @@ namespace LovenseConnector
             if(bitmap==null){Label(dc,"Choose a window, then start preview",new Point(20,24),Brushes.Lavender);return;}
             var view=View;dc.DrawImage(bitmap,view);
             DrawRegion(dc,Profile.Health,Brushes.Violet,"Health",view);DrawRegion(dc,Profile.Badge,Brushes.Aquamarine,"Kill badge",view);
+            if(Profile.SpectatorMask!=null)DrawRegion(dc,Profile.Spectator,Brushes.Gold,"Spectating",view);
             if(Profile.ReadShield)DrawRegion(dc,Profile.Shield,Brushes.SkyBlue,"Shield",view);
             if(drag.HasValue)dc.DrawRectangle(null,new Pen(Brushes.White,2),new Rect(drag.Value,current));
         }
