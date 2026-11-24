@@ -1,5 +1,13 @@
 # Release verification
 
+## Current source — Dim shield digits
+
+Recorded depleted-armor digits fell below the bright-text threshold. A synthetic reproduction failed before correction. Shield reading now tries local luminance contrast when normal matching fails; it keeps the existing digit-confidence and ambiguity thresholds and rejects uniform or weak-contrast crops. Shield learning can use the same fallback when the normal mask cannot separate the supplied number. Health and badge reading are unchanged.
+
+With two calibration samples and a tighter shield region, the reviewed 359-frame segment produced 143 zero-shield readings instead of leaving those frames unknown. In visually checked stable intervals, 145/145 full-shield samples and 118/125 zero-shield samples were correct; the remaining seven were unknown. The production replay matched the experiment frame for frame. A separate 400-frame segment read the visible 34 shield and added no events. These limited checks do not establish general precision/recall. Brief unreadable shield transitions still reset the event baseline, so improved readability does not recover every shield hit. Death and kill recognition remain separate unfinished validation work.
+
+The core suite passed 17 suites, including 84 screen-detection assertions. Native tests passed 174 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. New checks cover dim zero, flat crops, low contrast, learning, and keeping the fallback out of health recognition. Recordings and calibration remain private.
+
 ## Current source — Recorded HUD color interference
 
 Private 1080p SDR recordings exposed teal armor outlines and ability effects entering the number mask. Digit learning and health/shield reading now exclude the saturated teal category; badge matching retains it. Confidence thresholds are unchanged.

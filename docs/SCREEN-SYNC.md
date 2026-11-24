@@ -14,6 +14,8 @@ You can also set the selected region using **Region coordinates**, measured as p
 
 For shield damage, turn on **Read shield damage** in Calibration, choose **Shield**, then freeze and select only its current 0–50 number. Exclude the icon and regeneration reserve. Enter the visible number and use **Learn digits** if needed. Check the shield readout, then **Save calibration**. Shield reading is off by default; changing it disarms output. An unreadable or absent number is unknown, not zero, so health detection continues but some shield breaks may be missed.
 
+Depleted armor can display a dim zero. When normal shield matching fails, the reader tries local contrast within the selected digit region, retaining its usual shape-confidence checks. Keep the region tight around the number. Flat or weak-contrast crops remain unknown. You can also learn a dim shield digit; this fallback does not change health or badge recognition.
+
 **Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
 
 Under **Calibration → More**, **Save setup** exports a `.hud.json` file; **Open setup** loads one. Use separate files for different HUD layouts or move a setup to another computer. Files contain recognition regions, learned templates and the shield-reading choice, without motor assignments or strengths. Opening stops output and replaces calibration as one undoable edit. Check the preview, then **Save calibration** to keep it across launches. Loading never starts capture or output. These files contain your calibration data; keep them out of public bug reports.
@@ -50,6 +52,7 @@ Native Windows capture, calibration, damage and kill previews were tested agains
 
 ## Implementation references
 
+- [OpenCV: Otsu thresholding](https://docs.opencv.org/4.5.5/d7/d4d/tutorial_py_thresholding.html). The shield fallback uses a local luminance histogram; it adds no OpenCV runtime dependency.
 - [Microsoft: Windows screen capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) and [window capture interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow).
 - [Microsoft: RegisterHotKey](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey). Both shortcut actions use separate application ID ranges and suppress keyboard auto-repeat. Conflicting bindings keep the existing working shortcut.
 - [Riot: VALORANT developer policies](https://developer.riotgames.com/docs/valorant). Avoiding game hooks is an implementation choice, not a guarantee of approval or exemption from product-registration rules.

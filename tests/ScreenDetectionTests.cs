@@ -12,6 +12,7 @@ internal static class ScreenDetectionTests
     {
         ShieldDamage();
         NumberColorMask();
+        DimShieldDigits();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -50,6 +51,27 @@ internal static class ScreenDetectionTests
         var read=HudVision.Read(frame,profile,new[]{new HudGlyph {Digit=0,Aspect=1,Mask=new byte[384]}});
         Check(read.Health==5&&read.Shield==5,"health and shield both exclude teal outlines when reading");
         Check(HudVision.Extract(frame,region).Pixels.Count(x=>x>0)>HudVision.Extract(frame,region,false).Pixels.Count(x=>x>0),"badge extraction retains teal marks");
+    }
+    static void DimShieldDigits()
+    {
+        ScreenPixels Frame(byte ink,byte background,bool solid=false)
+        {
+            var bytes=new byte[32*32*4];for(int y=0;y<32;y++)for(int x=0;x<32;x++) {
+                bool ring=x>=10&&x<22&&y>=6&&y<26&&(x<13||x>=19||y<9||y>=23);
+                byte value=solid||ring?ink:background;int i=(y*32+x)*4;bytes[i]=bytes[i+1]=bytes[i+2]=value;bytes[i+3]=255;
+            }return new ScreenPixels(bytes,32,32,0);
+        }
+        var region=new HudRegion {Width=1,Height=1};var profile=new ScreenProfile {Health=region,Shield=region,ReadShield=true};
+        profile.Digits.AddRange(HudVision.Learn(Frame(255,0),region,"0",50));
+        var other=new[]{new HudGlyph {Digit=1,Aspect=1,Mask=new byte[384]}};
+        var dim=Frame(145,70);var reading=HudVision.Read(dim,profile,other);
+        Check(reading.Shield==0&&reading.ShieldConfidence>=.82,"dim shield zero uses contrast without treating an absent number as zero");
+        Check(reading.Health==null,"shield fallback does not relax health reading");
+        Check(HudVision.Read(Frame(145,70,true),profile,other).Shield==null,"uniform shield crop remains unknown");
+        Check(HudVision.Read(Frame(100,90),profile,other).Shield==null,"low-contrast shield noise remains unknown");
+        Check(HudVision.Learn(dim,region,"0",50).Length==1,"dim shield digits can be learned");
+        bool rejected=false;try{HudVision.Learn(dim,region,"0",100);}catch(ArgumentException){rejected=true;}
+        Check(rejected,"dim shield learning fallback is not applied to health");
     }
     static void ShieldDamage()
     {

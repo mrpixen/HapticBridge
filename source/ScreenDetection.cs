@@ -168,6 +168,7 @@ namespace LovenseConnector
             if(string.IsNullOrEmpty(number)||number.Length>3||number.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Enter the visible number (0–"+maximum+").");
             if(!int.TryParse(number,out int value)||value>maximum)throw new ArgumentException("The number must be 0–"+maximum+".");
             var parts=Segment(Extract(frame,region,false));
+            if(maximum==50&&parts.Length!=number.Length)parts=Segment(ExtractContrast(frame,region));
             if(parts.Length!=number.Length)throw new ArgumentException("Select just the digits, then try again. The digit count did not match.");
             return parts.Select((p,i)=>new HudGlyph { Digit=number[i]-'0',Aspect=(double)p.Width/p.Height,Mask=Normalize(p) }).ToArray();
         }
@@ -176,13 +177,41 @@ namespace LovenseConnector
             var templates=profile.Digits.Concat(defaults).ToArray();
             var health=ReadNumber(frame,profile.Health,templates,100);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
-            if(profile.ReadShield) {var shield=ReadNumber(frame,profile.Shield,templates,50);result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;}
+            if(profile.ReadShield) {
+                var shield=ReadNumber(frame,profile.Shield,templates,50);
+                if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
+                result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;
+            }
             result.BadgeScore=Similarity(Normalize(Extract(frame,profile.Badge),32,32),profile.BadgeMask);
             return result;
         }
-        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum)
+        static Mask ExtractContrast(ScreenPixels frame,HudRegion region)
         {
-            var parts=Segment(Extract(frame,region,false));
+            // Depleted armor digits fade below the white-text threshold. Separate their local
+            // luminance classes (Otsu), then keep the normal shape and ambiguity checks.
+            var mask=Extract(frame,region,false);if(mask==null)return null;
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
+            var values=new byte[mask.Pixels.Length];var histogram=new int[256];
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+x+left)*4;
+                byte value=(byte)((54*frame.Bgra[p+2]+183*frame.Bgra[p+1]+19*frame.Bgra[p])/256);
+                values[y*mask.Width+x]=value;histogram[value]++;
+            }
+            double sum=0;for(int i=0;i<256;i++)sum+=i*histogram[i];
+            double belowSum=0,best=-1,low=0,high=0;int below=0,threshold=0;
+            for(int i=0;i<255;i++) {
+                below+=histogram[i];belowSum+=i*histogram[i];int above=values.Length-below;
+                if(below==0||above==0)continue;
+                double a=belowSum/below,b=(sum-belowSum)/above,score=(double)below*above*(a-b)*(a-b);
+                if(score>best){best=score;threshold=i;low=a;high=b;}
+            }
+            if(high-low<25)return null;
+            int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold?1:0);ink+=mask.Pixels[i];}
+            return ink<12||ink>values.Length*.65?null:mask;
+        }
+        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false)
+        {
+            var parts=Segment(contrast?ExtractContrast(frame,region):Extract(frame,region,false));
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
