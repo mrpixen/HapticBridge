@@ -2,6 +2,8 @@
 
 ## Unreleased - Stroke range validation
 
+UI follow-up: invalid text or an invalid stroke range used to revoke the active output source before showing an error. Motion controls now parse and validate before the manual handoff. An offline button-click regression reproduced the interruption; the fixed suite passes 356 Studio assertions and verifies playback, source ownership and the stored range survive rejected settings. No visible window or physical output was used.
+
 An actuator regression reproduced extreme integer endpoints being accepted after subtraction overflow. Both stroke endpoints are now checked against 0-100 before the minimum-span calculation, using shared validation for direct settings and playback preflight. Targeted actuator tests pass: invalid values preserve the previous range and send no commands, while valid minimum-span ranges at both endpoints still work. Physical motion compatibility remains unverified.
 
 ## Unreleased - VALORANT kill feed
