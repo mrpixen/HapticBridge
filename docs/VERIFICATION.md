@@ -1,5 +1,9 @@
 # Release verification
 
+## Death-text resolution follow-up — 2026-11-24
+
+A 1920-wide recorded frame was resampled to widths 1280, 1600, 2560 and 3840. Reusing its original death-text template scored 0.39–0.65, below the 0.90 confirmation threshold; relearning on each resized frame matched that frame at 1.00. This tests image resampling, not actual game rendering at those resolutions. It demonstrates that the small text template should be relearned after changing resolution or HUD scale. No recognition thresholds changed.
+
 ## 0.8.21 — Calibrated death text — 2026-11-24
 
 The production image reader and temporal filter were replayed together on three private recording segments at 10 fps, using one learned KILLED YOU template. The 350-frame calibration segment produced one death at 56.6 seconds, and a separate 100-frame segment produced one at 117.0 seconds without retraining. A 450-frame negative segment with a lingering report produced zero deaths. These are limited recorded examples, not a general accuracy rate.
