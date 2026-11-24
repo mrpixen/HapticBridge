@@ -23,8 +23,9 @@ namespace LovenseConnector
         }
     }
 
-    internal sealed class ActuatorProfile
+    internal sealed class ActuatorProfile : System.ComponentModel.INotifyPropertyChanged
     {
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
         public Actuator[] Outputs { get; private set; }
         public bool SupportsPresets=>Outputs.All(a=>a.Function=="vibration");
         public bool HasDepth { get; private set; }
@@ -82,6 +83,8 @@ namespace LovenseConnector
             if(!HasStroke)throw new NotSupportedException("Stroke range is not supported by this model.");
             if(low<0||high>100||high-low<20)throw new ArgumentException("Stroke endpoints must be 0–100 and at least 20 apart.");
             stroke=Tuple.Create(low,high);
+            PropertyChanged?.Invoke(this,new System.ComponentModel.PropertyChangedEventArgs(nameof(StrokeLow)));
+            PropertyChanged?.Invoke(this,new System.ComponentModel.PropertyChangedEventArgs(nameof(StrokeHigh)));
         }
         string StrokeCommand(int speed)
         {

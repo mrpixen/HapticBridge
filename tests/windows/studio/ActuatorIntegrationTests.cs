@@ -10,6 +10,12 @@ using LovenseConnector;
 
 internal static partial class StudioIntegrationTests
 {
+    static IEnumerable<System.Windows.DependencyObject> MotionDescendants(System.Windows.DependencyObject root)
+    {
+        yield return root;
+        foreach(var child in System.Windows.LogicalTreeHelper.GetChildren(root).OfType<System.Windows.DependencyObject>())
+            foreach(var item in MotionDescendants(child))yield return item;
+    }
     sealed class FunctionLink : ICommandLink,ILatestCommandLink
     {
         public readonly ConcurrentQueue<string> Sent=new();
@@ -37,6 +43,9 @@ internal static partial class StudioIntegrationTests
         Check(!d.Player.Running&&profile.StrokeLow==20&&profile.StrokeHigh==75,"motion settings stop prior playback and update range");
         var configured=DeviceState().GetProperty("configuredStroke");
         Check(configured.GetProperty("start").GetInt32()==20&&configured.GetProperty("end").GetInt32()==75,"API readback reflects the accepted stroke range");
+        var motion=MotionDescendants(d.Controls).OfType<Expander>().Single(e=>(string)e.Header=="Motion settings");
+        var strokeFields=MotionDescendants(motion).OfType<TextBox>().Take(2).ToArray();
+        await Until(()=>strokeFields[0].Text=="20"&&strokeFields[1].Text=="75","motion fields reflect stroke settings accepted through the API");
         await NativeApi(f,"motor",ApiMotor(session,"000000000003",7,10));
         await Until(()=>link.Sent.Any(c=>c.StartsWith("FLVS:")&&c[5]==10&&c[6]==20&&c[7]==75),"next playback uses the configured stroke endpoints");
         setting["function"]="position";setting["value"]=0;

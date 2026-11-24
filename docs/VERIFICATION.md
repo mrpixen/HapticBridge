@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased — Stroke settings display — 2026-11-24
+
+An integration could set the stroke range to 20–75% while the device controls continued showing 0–100%. The offline native-app regression reproduced the mismatch. Stroke fields now follow the accepted profile configuration through one-way bindings; editing a field still requires Set stroke to apply it.
+
+Passed: 335 native Studio assertions, 198 Screen sync, 21 audio and 17 legacy-import assertions; 18 core suites with 200 screen-detection assertions. Tests used invisible controls and simulated transports. No physical motion or normal app startup was used.
+
 ## 0.8.19 — Continuous healing baseline — 2026-11-24
 
 A recorded healing sequence rose from 33 to 66 before falling to 28, but the filter reported only 5 health lost because none of the rising values persisted for three frames. The filter now accepts a trend of three increasing observations with small steps after an established positive baseline. Initial health and losses still require three identical readings; unknown frames break the trend. Isolated spikes, descending or alternating readings and large jumps do not establish a rising trend.

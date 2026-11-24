@@ -18,7 +18,10 @@ namespace LovenseConnector
                 Field(row,"Depth",depth);row.Children.Add(Action("Apply depth",()=>ManualDevice(d,(p,current)=>p.ApplyFunction("depth",(int)depth.SelectedItem,isCurrent:current))));panel.Children.Add(row);
             }
             if(f.HasStroke) {
-                var row=new WrapPanel();var low=Input("0");var high=Input("100");Field(row,"Stroke start %",low);Field(row,"Stroke end %",high);
+                var row=new WrapPanel();var low=Input("");var high=Input("");
+                low.SetBinding(TextBox.TextProperty,new System.Windows.Data.Binding(nameof(ActuatorProfile.StrokeLow)) { Source=f,Mode=System.Windows.Data.BindingMode.OneWay });
+                high.SetBinding(TextBox.TextProperty,new System.Windows.Data.Binding(nameof(ActuatorProfile.StrokeHigh)) { Source=f,Mode=System.Windows.Data.BindingMode.OneWay });
+                Field(row,"Stroke start %",low);Field(row,"Stroke end %",high);
                 row.Children.Add(Action("Set stroke",()=>ManualDevice(d,(p,current)=>p.ApplyFunction("stroke",Number(low),Number(high),current))));panel.Children.Add(row);
             }
             if(f.HasPosition) {
