@@ -70,6 +70,7 @@ class Gateway:
 
 
 class Session:
+    """Single-use context; create a new gateway.session() for each lease."""
     def __init__(self, gateway, name, ttl_ms):
         self.gateway, self.name, self.ttl_ms = gateway, name, ttl_ms
         self.session_id = None
@@ -78,6 +79,8 @@ class Session:
         self.thread = None
 
     def __enter__(self):
+        if self.session_id is not None or self.finished.is_set():
+            raise GatewayError("The session is already active or closed; create a new session.")
         opened = self.gateway.request("/session", {"name": self.name, "ttlMs": self.ttl_ms})
         self.session_id = opened["sessionId"]
         interval = opened["heartbeatMs"] / 1000.0
