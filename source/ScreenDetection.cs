@@ -128,6 +128,7 @@ namespace LovenseConnector
         readonly HudKillFeedFilter feed=new HudKillFeedFilter();
         int? health,candidate,shield,shieldCandidate,healingCandidate;
         int repeat,badgeRepeat,shieldRepeat,rapidRebuilding,healingSteps;
+        int combinedSteps,combinedHealth,combinedShield;
         double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100,rapidSince=-1;
         bool badgeLatched=true;
         public int? Health => health;
@@ -141,10 +142,23 @@ namespace LovenseConnector
             } else healingSteps=1;
             healingCandidate=value;
             // Three rising observations are evidence of gradual healing, not damage.
-            // Do not relax the identical-frame confirmation for health loss or startup.
+            // Health-only loss and startup still require identical-frame confirmation.
             if(healingSteps>=3){health=value;ResetShield();}
         }
-        void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;}
+        void ResetCombinedLoss(){combinedSteps=0;combinedHealth=combinedShield=int.MaxValue;}
+        bool TrackCombinedLoss(HudReading read)
+        {
+            // Corroborating HP and armor drops can change on every rapid hit.
+            // Still require three consecutive non-increasing positive-HP readings;
+            // unknown armor, recovery and zero HP keep their existing strict rules.
+            if(!health.HasValue||!shield.HasValue||read.Health<=0||read.Health>=health||
+                !read.Shield.HasValue||read.Shield<0||read.Shield>=shield||
+                !double.IsFinite(read.ShieldConfidence)||read.ShieldConfidence<.82) {ResetCombinedLoss();return false;}
+            combinedSteps=read.Health<=combinedHealth&&read.Shield<=combinedShield?combinedSteps+1:1;
+            combinedHealth=read.Health.Value;combinedShield=read.Shield.Value;
+            return combinedSteps>=3;
+        }
+        void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;ResetCombinedLoss();}
         public HudEvent[] Push(HudReading read,double time)
         {
             var events=new List<HudEvent>();
@@ -163,8 +177,9 @@ namespace LovenseConnector
             invalidSince=-1;
             if(candidate==read.Health)repeat++;else{candidate=read.Health;repeat=1;}
             TrackHealing(read.Health.Value);
+            bool combinedLoss=TrackCombinedLoss(read);
             int healthLoss=0,shieldLoss=0;
-            if(repeat>=3&&candidate!=health) {
+            if((repeat>=3||combinedLoss)&&candidate!=health) {
                 if(health.HasValue&&candidate<health)healthLoss=health.Value-candidate.Value;
                 if(health.HasValue&&candidate>health)ResetShield(); // Respawn/healing establishes a fresh shield baseline.
                 health=candidate;
@@ -173,11 +188,12 @@ namespace LovenseConnector
             else {
                 if(shieldCandidate==read.Shield)shieldRepeat++;else{shieldCandidate=read.Shield;shieldRepeat=1;}
                 // Wait for health too, so a simultaneous HP/shield drop becomes one event.
-                if(shieldRepeat>=3&&repeat>=3&&shieldCandidate!=shield) {
+                if((shieldRepeat>=3&&repeat>=3||combinedLoss)&&shieldCandidate!=shield) {
                     if(shield.HasValue&&shieldCandidate<shield&&health>0)shieldLoss=shield.Value-shieldCandidate.Value;
                     shield=shieldCandidate;
                 }
             }
+            if(combinedLoss)ResetCombinedLoss();
             if(healthLoss>0||shieldLoss>0)events.Add(new HudEvent { Kind=health==0?"Death":"Damage",Amount=healthLoss+shieldLoss,ShieldAmount=shieldLoss,Health=health.Value });
             if(read.KillFeed!=null) {
                 if(health>0)for(int i=0;i<feedKills;i++)events.Add(new HudEvent {Kind="Kill",Health=health.Value});

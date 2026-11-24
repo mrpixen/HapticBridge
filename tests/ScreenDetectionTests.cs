@@ -125,6 +125,7 @@ internal static class ScreenDetectionTests
         DeathMarkerConfirmation();
         ContinuousHealing();
         ShieldDamage();
+        RapidCombinedDamage();
         NumberColorMask();
         DimShieldDigits();
         DigitBoundaryFallback();
@@ -155,6 +156,27 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void RapidCombinedDamage()
+    {
+        HudReading Pair(int hp,int? armor,double confidence=1)=>new HudReading {Health=hp,Confidence=1,Shield=armor,ShieldConfidence=confidence};
+        var f=new HudEventFilter();
+        void Baseline(){f.Reset();for(int i=0;i<3;i++)f.Push(Pair(100,50),i*.1);}
+        Baseline();
+        Check(f.Push(Pair(89,26),.3).Length==0&&f.Push(Pair(83,15),.4).Length==0,"rapid paired losses wait for three observations");
+        var events=f.Push(Pair(83,15),.5);
+        Check(events.Length==1&&events[0].Kind=="Damage"&&events[0].Amount==52&&events[0].ShieldAmount==35,"rapid paired losses confirm before a disappearing death HUD");
+        Check(f.Push(Pair(83,15),.6).Length==0,"confirmed rapid loss is not counted again");
+        foreach(var middle in new[]{Pair(95,30),Pair(83,null),Pair(83,15,.5),Pair(83,15,double.NaN)}) {
+            Baseline();f.Push(Pair(89,26),.3);f.Push(middle,.4);
+            Check(f.Push(Pair(83,15),.5).Length==0,"rising or uncertain readings break rapid loss confirmation");
+        }
+        Baseline();f.Push(Pair(89,null),.3);f.Push(Pair(83,null),.4);
+        Check(f.Push(Pair(83,null),.5).Length==0,"health-only changing readings retain identical-frame confirmation");
+        Baseline();f.Push(Pair(89,26),.3);f.Push(Pair(83,15),.4);
+        Check(f.Push(Pair(0,0),.5).Length==0,"paired loss does not bypass zero-health death confirmation");
+        Baseline();f.Push(Pair(89,26),.3);f.Push(Pair(83,15),.4);
+        Check(f.Push(Pair(83,15),1.3).Length==0,"capture gaps cannot complete a rapid loss");
     }
     static void ContinuousHealing()
     {
