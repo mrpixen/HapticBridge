@@ -74,12 +74,24 @@ namespace LovenseConnector
     }
     internal sealed class HudEventFilter
     {
-        int? health,candidate,shield,shieldCandidate;
-        int repeat,badgeRepeat,shieldRepeat,rapidRebuilding;
+        int? health,candidate,shield,shieldCandidate,healingCandidate;
+        int repeat,badgeRepeat,shieldRepeat,rapidRebuilding,healingSteps;
         double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100,rapidSince=-1;
         bool badgeLatched=true;
         public int? Health => health;
-        public void Reset() { health=candidate=null;ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
+        public void Reset() { health=candidate=null;ResetHealing();ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
+        void ResetHealing(){healingCandidate=null;healingSteps=0;}
+        void TrackHealing(int value)
+        {
+            if(!health.HasValue||health<=0||value<=health){ResetHealing();return;}
+            if(healingCandidate.HasValue&&value>=healingCandidate&&value-healingCandidate<=3) {
+                if(value>healingCandidate)healingSteps++;
+            } else healingSteps=1;
+            healingCandidate=value;
+            // Three rising observations are evidence of gradual healing, not damage.
+            // Do not relax the identical-frame confirmation for health loss or startup.
+            if(healingSteps>=3){health=value;ResetShield();}
+        }
         void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;}
         public HudEvent[] Push(HudReading read,double time)
         {
@@ -89,12 +101,13 @@ namespace LovenseConnector
             lastTime=time;
             if(read==null||read.Confidence<.82||!read.Health.HasValue||read.Health<0||read.Health>100) {
                 if(invalidSince<0)invalidSince=time;
-                candidate=null;repeat=badgeRepeat=0;badgeOffSince=rapidSince=-1;rapidRebuilding=0;ResetShield();
+                candidate=null;ResetHealing();repeat=badgeRepeat=0;badgeOffSince=rapidSince=-1;rapidRebuilding=0;ResetShield();
                 if(time-invalidSince>.6){health=null;badgeLatched=true;}
                 return events.ToArray();
             }
             invalidSince=-1;
             if(candidate==read.Health)repeat++;else{candidate=read.Health;repeat=1;}
+            TrackHealing(read.Health.Value);
             int healthLoss=0,shieldLoss=0;
             if(repeat>=3&&candidate!=health) {
                 if(health.HasValue&&candidate<health)healthLoss=health.Value-candidate.Value;

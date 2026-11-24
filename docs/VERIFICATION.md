@@ -1,5 +1,13 @@
 # Release verification
 
+## Unreleased — Continuous healing baseline — 2026-11-24
+
+A recorded healing sequence rose from 33 to 66 before falling to 28, but the filter reported only 5 health lost because none of the rising values persisted for three frames. The filter now accepts a trend of three increasing observations with small steps after an established positive baseline. Initial health and losses still require three identical readings; unknown frames break the trend. Isolated spikes, descending or alternating readings and large jumps do not establish a rising trend.
+
+The regression failed before correction. Replaying recorded recognition results changed the affected loss to 38; events in three earlier clips remained identical, including zero events in a buy-phase clip. This is limited offline evidence, not universal match accuracy or game-authoritative damage. Private recordings and calibration are not included in the repository.
+
+Passed: 18 core suites with 200 screen-detection assertions; 198 native Screen sync and 334 Studio assertions; Windows build with no warnings or errors; source privacy scan with no findings. No GUI, live capture or physical output was used.
+
 ## 0.8.18 — Motion control fixes — 2026-11-24
 
 Device summaries, tooltips and accessible controls now name the discovered actuator functions rather than assuming vibration.

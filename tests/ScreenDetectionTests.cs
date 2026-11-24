@@ -10,6 +10,7 @@ internal static class ScreenDetectionTests
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
     static int Main()
     {
+        ContinuousHealing();
         ShieldDamage();
         NumberColorMask();
         DimShieldDigits();
@@ -41,6 +42,27 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void ContinuousHealing()
+    {
+        var f=new HudEventFilter();Stable(f,33,0);
+        for(int i=0;i<6;i++)Check(f.Push(Read(61+i),.3+i*.1).Length==0,"rising healing does not emit damage");
+        Check(f.Health==66,"sustained rising health advances the damage baseline");
+        f.Push(Read(null),.9);f.Push(Read(null),1.0);
+        f.Push(Read(28),1.1);f.Push(Read(28),1.2);
+        var damage=f.Push(Read(28),1.3);
+        Check(damage.Length==1&&damage[0].Amount==38,"damage after healing uses the healed baseline through a brief unreadable hit animation");
+        foreach(var noisy in new[]{new[]{90,33,90},new[]{90,89,88},new[]{34,60,90},new[]{34,35,34}}) {
+            f=new HudEventFilter();Stable(f,33,0);
+            for(int i=0;i<noisy.Length;i++)f.Push(Read(noisy[i]),.3+i*.1);
+            Check(f.Health==33,"isolated, descending, jumping or alternating higher readings do not establish healing");
+        }
+        f=new HudEventFilter();f.Push(Read(61),0);f.Push(Read(62),.1);f.Push(Read(63),.2);
+        Check(f.Health==null,"rising readings cannot establish an initial health baseline");
+        f=new HudEventFilter();Stable(f,33,0);f.Push(Read(61),.3);f.Push(Read(62),.4);f.Push(Read(null),.5);f.Push(Read(63),.6);
+        Check(f.Health==33,"unknown frame breaks unconfirmed healing trend");
+        f.Reset();Stable(f,33,2);f.Push(Read(61),2.3);f.Push(Read(62),2.4);f.Push(Read(63),3.3);
+        Check(f.Health==null,"stale capture gap cannot complete a healing trend");
     }
     static void SpectatorConfirmation()
     {
