@@ -79,6 +79,13 @@ internal static class ScreenDetectionTests
         var region=new HudRegion {X=80.0/128,Y=50.0/128,Width=24.0/128,Height=10.0/128};
         var template=HudVision.Normalize(HudVision.Extract(Frame(50),region,false),128,32);
         Check(HudVision.MatchVerticalText(Frame(50),region,template)>.99,"death text matches at learned position");
+        var redBanner=Frame(50);
+        for(int p=0;p<redBanner.Bgra.Length;p+=4)if(redBanner.Bgra[p]==0){redBanner.Bgra[p]=40;redBanner.Bgra[p+1]=65;redBanner.Bgra[p+2]=220;}
+        var bannerTemplate=HudVision.Normalize(HudVision.ExtractDeathText(redBanner,region),128,32);
+        Check(bannerTemplate.SequenceEqual(template),"respawn banner learning excludes its red background");
+        Check(HudVision.MatchVerticalText(redBanner,region,template)>.99,"white death text remains recognizable over a red banner");
+        for(int p=0;p<redBanner.Bgra.Length;p+=4){redBanner.Bgra[p]=40;redBanner.Bgra[p+1]=65;redBanner.Bgra[p+2]=220;}
+        Check(HudVision.MatchVerticalText(redBanner,region,template)<.1,"red banner without lettering cannot imply a death");
         Check(HudVision.MatchVerticalText(Frame(60),region,template)>.99,"death text follows a shifted report row");
         Check(HudVision.MatchVerticalText(Frame(90),region,template)<.9,"death text search stays vertically bounded");
         Check(HudVision.MatchVerticalText(Frame(50,10),region,template)<.9,"death text does not search unrelated horizontal HUD areas");

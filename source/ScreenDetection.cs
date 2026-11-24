@@ -341,13 +341,24 @@ namespace LovenseConnector
             if(w*h>1000000)return null;
             return ExtractPixels(frame,x,y,w,h,includeTeal);
         }
-        static Mask ExtractPixels(ScreenPixels frame,int x,int y,int w,int h,bool includeTeal)
+        internal static Mask ExtractDeathText(ScreenPixels frame,HudRegion region)
+        {
+            var mask=Extract(frame,region,false);
+            if(mask==null)return null;
+            int x=(int)(region.X*frame.Width),y=(int)(region.Y*frame.Height);
+            for(int j=0;j<mask.Height;j++)for(int i=0;i<mask.Width;i++) {
+                int p=((y+j)*frame.Width+x+i)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                mask.Pixels[j*mask.Width+i]=(byte)(Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85?1:0);
+            }
+            return mask;
+        }
+        static Mask ExtractPixels(ScreenPixels frame,int x,int y,int w,int h,bool includeTeal,bool includeRed=true)
         {
             var result=new Mask { Width=w,Height=h,Pixels=new byte[w*h] };
             for(int j=0;j<h;j++)for(int i=0;i<w;i++) {
                 int p=((j+y)*frame.Width+i+x)*4;int b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
                 // Numbers use white/red text. Teal belongs to badge matching, not armor outlines or ability effects behind digits.
-                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
+                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||includeRed&&r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
             }
             return result;
         }
@@ -362,7 +373,7 @@ namespace LovenseConnector
             int bandHeight=bottom-top+height;if((long)width*bandHeight>1000000)return 0;
             // Extract once, then score normalized windows without allocating one
             // image and normalized mask for every candidate vertical position.
-            var band=ExtractPixels(frame,x,top,width,bandHeight,false);
+            var band=ExtractPixels(frame,x,top,width,bandHeight,false,false);
             var columns=new int[128];var rows=new int[32];
             for(int i=0;i<128;i++)columns[i]=Math.Min(width-1,(int)((i+.5)*width/128));
             for(int i=0;i<32;i++)rows[i]=Math.Min(height-1,(int)((i+.5)*height/32));

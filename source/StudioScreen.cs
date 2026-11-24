@@ -171,9 +171,9 @@ namespace LovenseConnector
         }
         Task LearnScreenDeathMarker()
         {
-            RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.DeathMarker,false),128,32);
+            RequireFrozen();var mask=HudVision.Normalize(HudVision.ExtractDeathText(screenFrame,screenProfile.DeathMarker),128,32);
             int ink=mask?.Count(x=>x>0)??0;
-            if(ink<48||ink>3000)throw new ArgumentException("Select only the KILLED YOU text on the right, with a little surrounding background.");
+            if(ink<48||ink>3000)throw new ArgumentException("Select the fixed death text: KILLED YOU or RESPAWNING IN. Exclude the countdown.");
             RememberScreenCalibration();screenProfile.DeathMarkerMask=mask;screenProfile.DeathMarkerFrameWidth=screenFrame.Width;screenProfile.DeathMarkerFrameHeight=screenFrame.Height;RefreshScreenCalibration();
             SetScreenStatus("Death text learned. Save calibration to keep it");return Task.CompletedTask;
         }
