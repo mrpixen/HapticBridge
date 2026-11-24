@@ -79,3 +79,5 @@ Close Minecraft before copying the JAR into an instance. Remove the older Immers
 ## Verification
 
 Engine/config tests exercise event envelopes, priorities, mining progress, rewards and migration. Offline loopback tests verify discovery and routing of channels 0–9, selected-only routing, reload during connection, and session release after a failed frame or gameplay pause. This does not prove physical behavior for every actuator or game event.
+
+The Minecraft CI workflow runs these tests with JDK 25 and checksum-pinned Gson 2.13.2. It needs no Minecraft installation or devices; it does not build or launch the game mod.
