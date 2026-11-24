@@ -2,6 +2,8 @@
 data/
 patterns/
 *.mix.json
+*.hud.json
+*.hud.json.*.tmp
 integration.json
 status.json
 session.log

@@ -16,7 +16,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LovenseConnector;
 
-internal static class ScreenSyncTests
+internal static partial class ScreenSyncTests
 {
     const BindingFlags Members=BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public;
     static int checks;
@@ -180,6 +180,7 @@ internal static class ScreenSyncTests
             await Invoke(app,"UndoScreenCalibration");Check(profile.ReadShield&&!Get<bool>(app,"screenArmed"),"undo restores shield calibration without rearming");
             Call(app,"SaveScreenProfile");var restored=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>(File.ReadAllText(Path.Combine(temp,"screen-profile.json")));
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
+            await CalibrationFiles(app,capture,temp,links,players);
             await EventRoutingAndPersistence(app,capture,temp);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");

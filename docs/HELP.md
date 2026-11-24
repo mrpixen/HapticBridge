@@ -32,6 +32,8 @@ Select motors under **Controls** or **Sound**. In **Sound**, choose the **Audio 
 
 Choose a window and **Start preview**, then calibrate your health digits and kill badge. Optional shield reading detects damage absorbed by shields. Each motor has its own maximum and **Damage**, **Kill** and **Death** choices. Feedback settings save automatically; calibration uses **Save calibration**. Changes turn output off until **Enable output** is selected again. See **SCREEN-SYNC** for setup and recognition limits.
 
+**Calibration → More → Save setup** keeps a separate `.hud.json` file. **Open setup** restores its regions and learned templates without changing motor choices or strengths. Loading is undoable and leaves output off. After checking it, **Save calibration** keeps the loaded setup across launches.
+
 ## Local programs and mods
 
 In **Integrations**, enable **Allow app and game controls**, then use **Copy connection** to configure a native client. Keep the copied token private. Only one integration session owns output at a time, and its heartbeat must remain active. A manual stop or expired lease ends its output. Re-enable integrations when you want a program to take control again. See **API** for the complete contract.

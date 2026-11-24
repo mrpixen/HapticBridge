@@ -100,6 +100,13 @@ class ReleaseToolsTests(unittest.TestCase):
                 settings.write_text("{}", encoding="utf-8")
                 self.assertEqual(privacy.inspect(settings, [])["private-runtime-or-research-file"], 1)
 
+    def test_hud_setup_exports_are_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for name in ("Example.hud.json", "Example.hud.json.fixture.tmp"):
+                setup = Path(temporary) / name
+                setup.write_text("{}", encoding="utf-8")
+                self.assertEqual(privacy.inspect(setup, [])["private-runtime-or-research-file"], 1)
+
     def test_privacy_scan_rejects_terms_file_inside_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

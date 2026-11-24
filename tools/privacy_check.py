@@ -53,7 +53,8 @@ def candidates(root):
 def inspect(path, private_terms, artifact=False, public_name=""):
     findings = Counter()
     if not artifact and (path.name.lower() in PRIVATE_NAMES or path.suffix.lower() in PRIVATE_SUFFIXES
-                         or path.name.lower().endswith(".mix.json")):
+                         or path.name.lower().endswith((".mix.json", ".hud.json"))
+                         or ".hud.json." in path.name.lower() and path.name.lower().endswith(".tmp")):
         findings["private-runtime-or-research-file"] += 1
     payload = path.read_bytes()
     texts = [payload.decode("utf-8", errors="ignore")]

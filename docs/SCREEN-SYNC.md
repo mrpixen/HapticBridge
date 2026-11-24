@@ -10,11 +10,13 @@ Screen sync reads a selected window through Windows Graphics Capture. It estimat
 4. To recognize kills, freeze a frame containing your own kill confirmation badge. Choose **Kill badge**, select its region, then press **Learn kill badge**. Do not select the shared kill feed. Resume preview and check that the event history recognizes a new badge once.
 5. **Save calibration**, then **Resume preview**. Choose the motors and event strengths. Select **Enable output** and return to the selected game window within eight seconds.
 
-You can also set the selected region using **Region coordinates**, measured as percentages of the captured window. Calibration stays on this computer. Changing resolution, window borders, UI scale or badge cosmetics may require recalibration. Learn more digits from other health values when needed; built-in font templates cover digits you have not taught it.
+You can also set the selected region using **Region coordinates**, measured as percentages of the captured window. **Save calibration** keeps the current setup on this computer. Changing resolution, window borders, UI scale or badge cosmetics may require recalibration. Learn more digits from other health values when needed; built-in font templates cover digits you have not taught it.
 
 For shield damage, turn on **Read shield damage** in Calibration, choose **Shield**, then freeze and select only its current 0–50 number. Exclude the icon and regeneration reserve. Enter the visible number and use **Learn digits** if needed. Check the shield readout, then **Save calibration**. Shield reading is off by default; changing it disarms output. An unreadable or absent number is unknown, not zero, so health detection continues but some shield breaks may be missed.
 
 **Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
+
+Under **Calibration → More**, **Save setup** exports a `.hud.json` file; **Open setup** loads one. Use separate files for different HUD layouts or move a setup to another computer. Files contain recognition regions, learned templates and the shield-reading choice, without motor assignments or strengths. Opening stops output and replaces calibration as one undoable edit. Check the preview, then **Save calibration** to keep it across launches. Loading never starts capture or output. These files contain your calibration data; keep them out of public bug reports.
 
 ## Feedback
 

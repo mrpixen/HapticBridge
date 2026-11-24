@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.10 — Portable HUD setups — 2026-11-23
+
+**Calibration → More** can save and open `.hud.json` setups containing recognition regions, learned digit/badge templates and the shield-reading choice. Import preserves motor assignments and event strengths, stops output, and creates one calibration Undo action. It never starts capture or output; **Save calibration** keeps the loaded setup across launches.
+
+Passed: 300 Studio, 129 screen, 21 audio and 17 legacy-import assertions, plus eight Python release-tool tests. New checks cover file round trips, invalid or oversized input, locked-file replacement and cleanup, deep copies, Undo, cancellation during a delayed stop and preservation of an unconfirmed-stop warning. The release scan rejects exported setups and their temporary files.
+
+These checks used invisible controls, synthetic frames and fake transport. File-picker interaction and live layout were not exercised under the no-GUI restriction. Real-game recognition, Bluetooth timing and ARM64 execution remain unverified.
+
 ## 0.8.9 — Overlapping combat cues — 2026-11-23
 
 A synthetic HUD confirmed damage and a kill in the same frame, but the shared cooldown suppressed the kill even when it used a different motor. Cooldowns now belong to each motor. Events assigned to separate motors can play together; on shared motors, death takes priority over kills, and kills over damage. Lower-priority events cannot cut off a kill's second pulse. Repeated cues remain rate-limited and are skipped rather than queued for later playback.
