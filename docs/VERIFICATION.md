@@ -1,6 +1,16 @@
 # Release verification
 
-## Current source — Dim shield digits
+## 0.8.14 — Recorded HUD recognition — 2026-11-24
+
+Calibration retains up to eight learned kill badge appearances for different skins and animations. Duplicate learning does not replace a template or consume Undo. Clear, Undo, region changes, local saves and portable setup files handle the complete set. New portable files use version 2; version 1 imports remain supported.
+
+Rapid kill animations can restart without the previous 300 ms clear interval. The filter now accepts a deep visibility drop followed by two rebuilding frames and three strong matches within 1.25 seconds. It retains the minimum interval between events and rejects a direct flicker back to the held badge. Reset and unreadable health cancel the pending restart.
+
+A calibrated recorded sequence improved from two to three visible kill detections. A separate 1,958-frame scan retained its single detection without additional kills. These checks include spectated HUDs and prove only limited visual matching, not identification of the player's own kills. Skin coverage, live timing, spectator handling and ARM64 execution remain unverified. No recordings, extracted images or personal calibration files are distributed.
+
+Passed locally: 17 core suites, including 147 screen-detection assertions; 184 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. Tests use synthetic frames and simulated transports. The following two recognition corrections are also included in this release.
+
+### Dim shield digits
 
 Recorded depleted-armor digits fell below the bright-text threshold. A synthetic reproduction failed before correction. Shield reading now tries local luminance contrast when normal matching fails; it keeps the existing digit-confidence and ambiguity thresholds and rejects uniform or weak-contrast crops. Shield learning can use the same fallback when the normal mask cannot separate the supplied number. Health and badge reading are unchanged.
 
@@ -8,7 +18,7 @@ With two calibration samples and a tighter shield region, the reviewed 359-frame
 
 The core suite passed 17 suites, including 84 screen-detection assertions. Native tests passed 174 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. New checks cover dim zero, flat crops, low contrast, learning, and keeping the fallback out of health recognition. Recordings and calibration remain private.
 
-## Current source — Recorded HUD color interference
+### Recorded HUD color interference
 
 Private 1080p SDR recordings exposed teal armor outlines and ability effects entering the number mask. Digit learning and health/shield reading now exclude the saturated teal category; badge matching retains it. Confidence thresholds are unchanged.
 
