@@ -12,7 +12,7 @@ if ($source.PSIsContainer -or $source.Extension -ne '.exe' -or $source.VersionIn
 $installPath = [IO.Path]::GetFullPath($InstallDirectory)
 $menuPath = [IO.Path]::GetFullPath($StartMenuDirectory)
 $target = Join-Path $installPath 'HapticBridge.exe'
-$shortcutPath = Join-Path $menuPath 'HapticBridge.lnk'
+$shortcutPath = Join-Path $menuPath 'HapticBridge - Current app.lnk'
 $sourceHash = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash
 if (!$PSCmdlet.ShouldProcess($target, 'Install HapticBridge and create its Start menu shortcut')) { return }
 
@@ -42,7 +42,11 @@ $shortcut.IconLocation = "$target,0"
 $shortcut.Description = 'HapticBridge — device controls and game feedback'
 $shortcut.Save()
 if ($shell.CreateShortcut($shortcutPath).TargetPath -ne $target) { throw 'Start menu shortcut verification failed.' }
+$oldShortcut = Join-Path $menuPath 'HapticBridge.lnk'
+if ((Test-Path -LiteralPath $oldShortcut) -and $shell.CreateShortcut($oldShortcut).TargetPath -eq $target) {
+    Remove-Item -LiteralPath $oldShortcut
+}
 Write-Output "Installed HapticBridge $($source.VersionInfo.ProductVersion)"
-Write-Output "Start menu: HapticBridge"
+Write-Output "Start menu: HapticBridge - Current app"
 Write-Output "Executable: $target"
 # Settings stay in the existing user data folder. Installation never launches output.
