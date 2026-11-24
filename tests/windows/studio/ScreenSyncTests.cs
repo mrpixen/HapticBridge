@@ -372,7 +372,12 @@ internal static partial class ScreenSyncTests
             var combined=HudEvent.CombineKills(new[]{new HudEvent {Kind="Kill",Health=100},new HudEvent {Kind="Kill",Health=100}}).Single();
             var bounded=(PatternSpec)typeof(ConnectorApp).GetMethod("ScreenKillPattern",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{20,6});bounded.Validate();
             Check(bounded.durationMs<=2000&&bounded.stopAtMs==bounded.durationMs,"largest combined kill pattern is valid and bounded by a shared deadline");
-            await Invoke(app,"SendScreenCue",combined);await Feed(app,capture,"100",6,"");await Task.Delay(120);
+            await Invoke(app,"SendScreenCue",combined);await Feed(app,capture,"100",6,"");
+            // Playback samples every 100 ms: a 750 ms deadline is observed on the
+            // next worker tick, not necessarily by a fixed 780 ms test sleep.
+            // Wait for actual stop acknowledgement, with a bounded failure deadline.
+            var stopDeadline=DateTime.UtcNow.AddSeconds(1);
+            while(players.Any(p=>p.Active(0)||p.Level(0)!=0)&&DateTime.UtcNow<stopDeadline)await Task.Delay(10);
             Check(links.Select((l,i)=>l.Positive.Skip(before[i]).Count(v=>v==profile.KillLevel)>=2).All(x=>x),"same-frame double kill produces two full-strength peaks on each assigned motor: "+string.Join(" | ",links.Select((l,i)=>string.Join(",",l.Positive.Skip(before[i])))));
             Check(players.All(p=>p.Level(0)==0),"combined kill reward ends with stopped output");
         }finally {
