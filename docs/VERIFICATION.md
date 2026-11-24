@@ -1,6 +1,6 @@
 # Release verification
 
-## Unreleased — Stroke settings display — 2026-11-24
+## 0.8.20 — Stroke settings display — 2026-11-24
 
 An integration could set the stroke range to 20–75% while the device controls continued showing 0–100%. The offline native-app regression reproduced the mismatch. Stroke fields now follow the accepted profile configuration through one-way bindings; editing a field still requires Set stroke to apply it.
 
