@@ -79,6 +79,14 @@ On Windows, install the **.NET 10 SDK**, clone this repository, and run these co
 
 Output: `dist/win-x64/HapticBridge.exe`.
 
+To install that build with a **HapticBridge** Start menu entry, close the app and run:
+
+```powershell
+./install.ps1 -Executable ./dist/win-x64/HapticBridge.exe
+```
+
+This installs for your Windows user, preserves settings, and does not launch the app. Run it again with a newer EXE to update. You can also pass the path to a downloaded release.
+
 For Windows on ARM:
 
 ```powershell
