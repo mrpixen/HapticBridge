@@ -58,7 +58,7 @@ namespace LovenseConnector
             var stopped=DisarmScreen();int generation=screenGeneration;await stopped;
             if(closing||generation!=screenGeneration)return;
             RememberScreenCalibration();
-            screenProfile.Health=incoming.Health;screenProfile.Shield=incoming.Shield;screenProfile.ReadShield=incoming.ReadShield;
+            screenProfile.Health=incoming.Health;screenProfile.Shield=incoming.Shield;screenProfile.ReadShield=incoming.ReadShield;screenProfile.ReadKillFeed=incoming.ReadKillFeed;
             screenProfile.Spectator=incoming.Spectator;screenProfile.SpectatorMask=incoming.SpectatorMask;screenProfile.DeathMarker=incoming.DeathMarker;screenProfile.DeathMarkerMask=incoming.DeathMarkerMask;screenProfile.DeathMarkerFrameWidth=incoming.DeathMarkerFrameWidth;screenProfile.DeathMarkerFrameHeight=incoming.DeathMarkerFrameHeight;screenProfile.Badge=incoming.Badge;screenProfile.BadgeMask=incoming.BadgeMask;screenProfile.BadgeVariants=incoming.BadgeVariants;screenProfile.Digits=incoming.Digits;
             RefreshScreenCalibration();SetScreenStatus("Setup loaded · Save calibration to keep it");
         }

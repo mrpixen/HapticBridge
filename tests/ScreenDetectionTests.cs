@@ -8,6 +8,43 @@ internal static class ScreenDetectionTests
     static void Check(bool ok,string name){checks++;if(!ok)throw new Exception("Screen detection: "+name);}
     static HudReading Read(int? health,double badge=0,double confidence=1)=>new HudReading { Health=health,BadgeScore=badge,Confidence=confidence };
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
+    static void KillFeedTracking()
+    {
+        HudKillFeedRow A(int n)=>new HudKillFeedRow {Mask=Enumerable.Range(0,2048).Select(i=>(byte)(i%7==n?1:0)).ToArray(),Y=96+n*40,Height=32};
+        var a=A(0);var b=A(1);var c=A(2);var f=new HudKillFeedFilter();
+        Check(f.Push(new[]{a},0,true)==0&&f.Push(new[]{a},.1,true)==0,"existing feed row at startup is silent");
+        Check(f.Push(new[]{a,b},.2,true)==0&&f.Push(new[]{a,b},.3,true)==1,"new personal row confirms once");
+        Check(f.Push(new[]{b,a},.4,true)==0,"moving rows cannot repeat kills");
+        Check(f.Push(new[]{b,a,c},.5,true)==0&&f.Push(new[]{b,a,c},.6,true)==1,"rapid distinct kill confirms independently");
+        Check(f.Push(new[]{c},2,true)==0&&f.Push(new[]{c},2.1,true)==0,"capture gap establishes a silent feed baseline");
+        Check(f.Push(new[]{c,a},2.2,false)==0&&f.Push(new[]{c,a},2.3,true)==0,"unreadable or spectator HUD cannot replay a pending kill");
+        Check(f.Push(new[]{a},double.NaN,true)==0&&f.Push(new[]{a},1,true)==0,"invalid feed timestamps ignored");
+        f.Reset();Check(f.Push(Array.Empty<HudKillFeedRow>(),0,true)==0&&f.Push(new[]{a},.1,true)==0&&f.Push(Array.Empty<HudKillFeedRow>(),.2,true)==0&&f.Push(new[]{a},.3,true)==1,"brief missed row still requires two matching observations");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);
+        Check(f.Push(new[]{a,b},.1,false,true)==0&&f.Push(new[]{a,b},.2,false,true)==0&&f.Push(new[]{a,b},.3,true)==2,"two fresh kills survive brief unreadable health");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,false,true);f.Push(new[]{a},.5,false,true);
+        Check(f.Push(new[]{a},.7,true)==0,"pending kills expire rather than replay after HUD recovery");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,true);f.Push(new[]{a},.2,true);
+        var faded=new HudKillFeedRow {Mask=c.Mask,Y=a.Y,Height=a.Height};f.Push(new[]{faded},.3,true);
+        var moved=new HudKillFeedRow {Mask=a.Mask,Y=a.Y-40,Height=a.Height};
+        Check(f.Push(new[]{moved},.4,true)==0,"fading before row movement preserves confirmed identity");
+        ScreenPixels Image(bool gold,bool friendly,bool rightSide) {
+            var pixels=new byte[1920*1080*4];int left=rightSide?1820:1500;
+            void Pixel(int x,int y,int r,int g,int b){int p=(y*1920+x)*4;pixels[p]=(byte)b;pixels[p+1]=(byte)g;pixels[p+2]=(byte)r;pixels[p+3]=255;}
+            if(gold){for(int x=left;x<left+58;x++){Pixel(x,96,225,225,100);Pixel(x,128,225,225,100);}for(int y=96;y<=128;y++)Pixel(left,y,225,225,100);}
+            for(int y=97;y<128;y++)for(int x=1560;x<1760;x++)Pixel(x,y,friendly?80:230,friendly?170:80,145);
+            for(int y=97;y<128;y++)for(int x=1760;x<1833;x++)Pixel(x,y,240,80,70);
+            for(int y=105;y<120;y++)for(int x=1770;x<1825;x++)if(x%8<3||y==106)Pixel(x,y,250,250,250);
+            return new ScreenPixels(pixels,1920,1080,0);
+        }
+        Check(HudKillFeedVision.Read(Image(true,true,false)).Length==1,"gold killer outline plus friendly row recognized");
+        Check(HudKillFeedVision.Read(Image(false,true,false)).Length==0,"teammate green row without personal outline ignored");
+        Check(HudKillFeedVision.Read(Image(true,false,false)).Length==0,"hostile killer row ignored");
+        Check(HudKillFeedVision.Read(Image(true,true,true)).Length==0,"victim-side personal outline is not a kill");
+        var events=new HudEventFilter();for(int i=0;i<4;i++)events.Push(new HudReading {Health=100,Confidence=1,KillFeed=Array.Empty<HudKillFeedRow>(),BadgeScore=0},i*.1);
+        Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.4).Length==0,"feed mode does not emit a simultaneous badge");
+        Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.5).Count(e=>e.Kind=="Kill")==1,"feed and badge together produce exactly one kill");
+    }
     static void VerticalDeathText()
     {
         ScreenPixels Frame(int top,int left=80) {
@@ -54,6 +91,7 @@ internal static class ScreenDetectionTests
     }
     static int Main()
     {
+        KillFeedTracking();
         VerticalDeathText();
         DeathMarkerConfirmation();
         ContinuousHealing();

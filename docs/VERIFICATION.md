@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased - VALORANT kill feed
+
+Optional kill-feed mode reads gold personal killer outlines and friendly row color, then tracks victim-text fingerprints locally. Existing rows at startup are silent. Confirmed identities survive fading and row movement; brief unreadable health can hold a fresh event for up to half a second. Feed and badge modes are mutually exclusive.
+
+Production-reader replay of three private 1080p SDR recordings (20 seconds each, 10 frames/second) detected eight visually confirmed personal kills: four, three, and one. This includes a rapid double kill and a segment where the unchanged badge templates detected none. These are limited offline checks, not a general accuracy estimate. Automated validation passed 18 core suites (289 screen-detection assertions), 238 Screen sync assertions and 350 Studio assertions using synthetic inputs and transport. The recordings, names and derived masks are not distributed. Other layouts, color settings, HDR and live capture remain unverified.
+
 ## Feature branch — Program audio
 
 Capture readiness: pending native activation now displays Starting audio and produces no output until the stream starts. Stop clears readiness immediately. Focused checks pass: 18 lifecycle, 31 adapter/identity and 35 routing assertions, using fake streams and device transport.

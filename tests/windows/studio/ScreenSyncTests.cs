@@ -390,7 +390,7 @@ internal static partial class ScreenSyncTests
         async Task Following()
         {
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
-            Check(Get<bool>(app,"screenArmed")&&status.Text=="Following HUD · output enabled","transition fixture starts with armed output and a live HUD");
+            Check(Get<bool>(app,"screenArmed")&&status.Text=="Following HUD · output enabled","transition fixture starts with armed output and a live HUD: armed="+Get<bool>(app,"screenArmed")+"; status="+status.Text);
         }
         async Task WaitForStops()
         {

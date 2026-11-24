@@ -43,7 +43,7 @@ namespace LovenseConnector
         Button screenFreeze,screenOutput,screenUndoCalibration;
         Action screenRefreshCoordinates;
         TextBox screenHealthText;
-        CheckBox screenReadShield;
+        CheckBox screenReadShield,screenReadKillFeed;
         bool screenCalibrationRefreshing;
         DispatcherTimer screenTimer;
         bool screenFrozen,screenArmed,screenTickBusy,screenCueBusy,screenForegroundSeen;
@@ -72,6 +72,8 @@ namespace LovenseConnector
             var selection=new WrapPanel();screenRegion=new ComboBox { Width=140,Margin=new Thickness(0,0,10,8) };screenRegion.Items.Add("Health");screenRegion.Items.Add("Kill badge");screenRegion.Items.Add("Shield");screenRegion.Items.Add("Spectator marker");screenRegion.Items.Add("Death text");screenRegion.SelectedIndex=0;Accessible(screenRegion,"HUD element to select");selection.Children.Add(screenRegion);selection.Children.Add(Text("Freeze, then drag around the digits, badge or text marker.",13));calibration.Children.Add(selection);
             screenReadShield=new CheckBox { Content="Read shield damage",IsChecked=screenProfile.ReadShield,Margin=new Thickness(0,0,0,10) };Accessible(screenReadShield,"Read shield damage from the calibrated shield number");calibration.Children.Add(screenReadShield);
             screenReadShield.Checked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenShieldEnabled(true);};screenReadShield.Unchecked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenShieldEnabled(false);};
+            screenReadKillFeed=new CheckBox {Content="Use kill feed instead of badges",IsChecked=screenProfile.ReadKillFeed,Margin=new Thickness(0,0,0,10)};Accessible(screenReadKillFeed,"Detect personal kills from the top-right feed with gold killer outlines");calibration.Children.Add(screenReadKillFeed);
+            screenReadKillFeed.Checked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenKillFeed(true);};screenReadKillFeed.Unchecked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenKillFeed(false);};
             screenPreview.Selected+=SetScreenRegion;
             var learning=new WrapPanel();screenHealthText=Input("100",75);Accessible(screenHealthText,"Selected health or shield number visible in frozen preview");learning.Children.Add(screenHealthText);
             learning.Children.Add(Action("Learn digits",LearnScreenDigits));
@@ -204,7 +206,7 @@ namespace LovenseConnector
         }
         void RefreshScreenCalibration()
         {
-            screenCalibrationRefreshing=true;try{screenReadShield.IsChecked=screenProfile.ReadShield;}finally{screenCalibrationRefreshing=false;}
+            screenCalibrationRefreshing=true;try{screenReadShield.IsChecked=screenProfile.ReadShield;if(screenReadKillFeed!=null)screenReadKillFeed.IsChecked=screenProfile.ReadKillFeed;}finally{screenCalibrationRefreshing=false;}
             ResetScreenDetection();screenRefreshCoordinates?.Invoke();screenPreview.InvalidateVisual();RefreshScreenReading();
             screenUndoCalibration.IsEnabled=screenCalibrationUndo.Count>0;
         }
@@ -223,7 +225,7 @@ namespace LovenseConnector
         Task ResetScreenCalibration()
         {
             var stopped=DisarmScreen();RememberScreenCalibration();
-            screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.Shield=new ScreenProfile().Shield;screenProfile.ReadShield=false;
+            screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.Shield=new ScreenProfile().Shield;screenProfile.ReadShield=false;screenProfile.ReadKillFeed=false;
             screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();screenProfile.Spectator=new ScreenProfile().Spectator;screenProfile.SpectatorMask=null;screenProfile.DeathMarker=new ScreenProfile().DeathMarker;screenProfile.DeathMarkerMask=null;screenProfile.DeathMarkerFrameWidth=0;screenProfile.DeathMarkerFrameHeight=0;
             SaveScreenProfile();RefreshScreenCalibration();SetScreenStatus("Calibration reset · Undo restores the previous setup");
             return stopped;
@@ -235,17 +237,23 @@ namespace LovenseConnector
             var previous=screenCalibrationUndo[screenCalibrationUndo.Count-1];screenCalibrationUndo.RemoveAt(screenCalibrationUndo.Count-1);
             // Feedback levels are independent settings, not part of calibration undo.
             screenProfile.Health=previous.Health;screenProfile.Badge=previous.Badge;
-            screenProfile.Shield=previous.Shield;screenProfile.ReadShield=previous.ReadShield;
+            screenProfile.Shield=previous.Shield;screenProfile.ReadShield=previous.ReadShield;screenProfile.ReadKillFeed=previous.ReadKillFeed;
             screenProfile.Spectator=previous.Spectator;screenProfile.SpectatorMask=previous.SpectatorMask;screenProfile.DeathMarker=previous.DeathMarker;screenProfile.DeathMarkerMask=previous.DeathMarkerMask;screenProfile.DeathMarkerFrameWidth=previous.DeathMarkerFrameWidth;screenProfile.DeathMarkerFrameHeight=previous.DeathMarkerFrameHeight;
             screenProfile.BadgeMask=previous.BadgeMask;screenProfile.BadgeVariants=previous.BadgeVariants;screenProfile.Digits=previous.Digits;
             RefreshScreenCalibration();SetScreenStatus("Calibration restored · Save calibration to keep it");
             return stopped;
         }
+        async Task SetScreenKillFeed(bool enabled)
+        {
+            var stopped=DisarmScreen();
+            if(screenProfile.ReadKillFeed!=enabled){RememberScreenCalibration();screenProfile.ReadKillFeed=enabled;RefreshScreenCalibration();SetScreenStatus("Kill source: "+(enabled?"feed - gold killer outlines":"learned badges")+" - Save calibration to keep it");}
+            await stopped;
+        }
         void SaveScreenProfile(){if(!screenProfile.Validate())throw new ArgumentException("Invalid calibration.");Directory.CreateDirectory(Path.GetDirectoryName(ScreenProfilePath));var temp=ScreenProfilePath+".tmp";File.WriteAllText(temp,json.Serialize(screenProfile));File.Move(temp,ScreenProfilePath,true);}
         HudReading RefreshScreenReading()
         {
             if(screenFrame==null)return null;var read=HudVision.Read(screenFrame,screenProfile,screenGlyphs);
-            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned")+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+(screenProfile.DeathMarkerFrameWidth>0&&(screenProfile.DeathMarkerFrameWidth!=screenFrame.Width||screenProfile.DeathMarkerFrameHeight!=screenFrame.Height)?"relearn for "+screenFrame.Width+" × "+screenFrame.Height:Math.Round(read.DeathMarkerScore*100)+"% match"));return read;
+            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+(screenProfile.ReadKillFeed?"    Kill feed "+read.KillFeed.Length+" personal rows":"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned"))+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+(screenProfile.DeathMarkerFrameWidth>0&&(screenProfile.DeathMarkerFrameWidth!=screenFrame.Width||screenProfile.DeathMarkerFrameHeight!=screenFrame.Height)?"relearn for "+screenFrame.Width+" × "+screenFrame.Height:Math.Round(read.DeathMarkerScore*100)+"% match"));return read;
         }
         void RefreshScreenRoutes()
         {

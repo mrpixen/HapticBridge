@@ -25,6 +25,7 @@ namespace LovenseConnector
         public HudRegion Health { get; set; }=new HudRegion { X=.265,Y=.915,Width=.065,Height=.055 };
         public HudRegion Shield { get; set; }=new HudRegion { X=.225,Y=.925,Width=.035,Height=.04 };
         public bool ReadShield { get; set; }
+        public bool ReadKillFeed { get; set; }
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public HudRegion Spectator { get; set; }=new HudRegion {X=.065625,Y=.785185,Width=.104167,Height=.02963};
         public byte[] SpectatorMask { get; set; }
@@ -60,6 +61,7 @@ namespace LovenseConnector
         public int? Health;
         public int? Shield;
         public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore, DeathMarkerScore;
+        public HudKillFeedRow[] KillFeed;
     }
     internal sealed class HudEvent
     {
@@ -115,12 +117,13 @@ namespace LovenseConnector
     }
     internal sealed class HudEventFilter
     {
+        readonly HudKillFeedFilter feed=new HudKillFeedFilter();
         int? health,candidate,shield,shieldCandidate,healingCandidate;
         int repeat,badgeRepeat,shieldRepeat,rapidRebuilding,healingSteps;
         double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100,rapidSince=-1;
         bool badgeLatched=true;
         public int? Health => health;
-        public void Reset() { health=candidate=null;ResetHealing();ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
+        public void Reset() { feed.Reset();health=candidate=null;ResetHealing();ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
         void ResetHealing(){healingCandidate=null;healingSteps=0;}
         void TrackHealing(int value)
         {
@@ -140,6 +143,9 @@ namespace LovenseConnector
             if(!double.IsFinite(time)||time<=lastTime)return events.ToArray();
             if(lastTime>=0&&time-lastTime>.75)Reset();
             lastTime=time;
+            // Track even during unreadable HUD frames, so recovery cannot replay an old row.
+            int feedKills=feed.Push(read?.KillFeed,time,read!=null&&read.Health>0&&read.Confidence>=.82&&read.SpectatorScore<.85,
+                health>0&&read!=null&&read.Health!=0&&read.SpectatorScore<.85);
             if(read==null||read.Confidence<.82||!read.Health.HasValue||read.Health<0||read.Health>100) {
                 if(invalidSince<0)invalidSince=time;
                 candidate=null;ResetHealing();repeat=badgeRepeat=0;badgeOffSince=rapidSince=-1;rapidRebuilding=0;ResetShield();
@@ -165,6 +171,10 @@ namespace LovenseConnector
                 }
             }
             if(healthLoss>0||shieldLoss>0)events.Add(new HudEvent { Kind=health==0?"Death":"Damage",Amount=healthLoss+shieldLoss,ShieldAmount=shieldLoss,Health=health.Value });
+            if(read.KillFeed!=null) {
+                if(health>0)for(int i=0;i<feedKills;i++)events.Add(new HudEvent {Kind="Kill",Health=health.Value});
+                return events.ToArray(); // One selected kill source; never double-count a badge and feed row.
+            }
             // Rapid kills can restart the badge without a full clear interval. Require a deep
             // disappearance, a rebuilding phase, then three strong frames; a black-frame flicker
             // returning directly to the held badge is not a new kill.
@@ -184,6 +194,97 @@ namespace LovenseConnector
                 events.Add(new HudEvent { Kind="Kill",Health=health.Value });badgeLatched=true;lastKill=time;badgeOffSince=rapidSince=-1;rapidRebuilding=0;
             } else {badgeOffSince=-1;if(read.BadgeScore<.9)badgeRepeat=0;}
             return events.ToArray();
+        }
+    }
+    // Own-player feed entries have a gold portrait border on the killer (left)
+    // side. Team color alone is deliberately insufficient. No names are retained.
+    internal sealed class HudKillFeedRow {public byte[] Mask;public int Y,Height;}
+    internal static class HudKillFeedVision
+    {
+        public static HudKillFeedRow[] Read(ScreenPixels frame)
+        {
+            var rows=new List<HudKillFeedRow>();
+            if(frame==null||!frame.Valid)return rows.ToArray();
+            double s=frame.Height/1080.0;
+            int left=(int)(frame.Width*.55),right=(int)(frame.Width*.985);
+            int h=Math.Max(12,(int)Math.Round(32*s)),portrait=(int)Math.Round(58*s);
+            bool Gold(int x,int y) {
+                if(x<0||x>=frame.Width||y<0||y>=frame.Height)return false;
+                int p=(y*frame.Width+x)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                return r>140&&g>140&&b<Math.Min(r,g)*.8&&Math.Abs(r-g)<70;
+            }
+            for(int y=(int)(70*s);y<(int)(370*s)-h;y++) {
+                bool found=false;int run=0;
+                for(int x=left;x<right-portrait-(int)(100*s);x++) {
+                    run=Gold(x,y)?run+1:0;
+                    if(run<portrait*.75)continue;
+                    int start=x-run+1,vertical=0,bottom=0,green=0;
+                    for(int dy=0;dy<=h;dy++)if(Gold(start,y+dy)||Gold(start+1,y+dy)||Gold(start-1,y+dy))vertical++;
+                    for(int dx=0;dx<portrait;dx++)if(Gold(start+dx,y+h)||Gold(start+dx,y+h+1)||Gold(start+dx,y+h-1))bottom++;
+                    if(vertical<h*.75||bottom<portrait*.65)continue;
+                    int gx=start+portrait+(int)(12*s),gy=y+h/2;
+                    for(int dx=0;dx<(int)(90*s)&&gx+dx<right;dx++) {
+                        int p=(gy*frame.Width+gx+dx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                        if(g>r*1.15&&b>r*1.05&&g>90)green++;
+                    }
+                    if(green<25*s)continue;
+                    // Fingerprint the victim text only. Weapon icons are identical across
+                    // many kills and otherwise dominate similarity between different rows.
+                    int redStart=-1,redRun=0;
+                    for(int rx=gx;rx<right-portrait;rx++) {
+                        int p=(gy*frame.Width+rx)*4,g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                        redRun=r>130&&r>g*1.4?redRun+1:0;
+                        if(redRun>=6*s){redStart=rx-redRun+1;break;}
+                    }
+                    if(redStart<0)continue;
+                    int textLeft=redStart+(int)(7*s),textRight=right-portrait,textTop=y+(int)(7*s),textHeight=h-(int)(14*s);
+                    if(textRight-textLeft<20*s)continue;
+                    var text=new HudVision.Mask {Width=textRight-textLeft,Height=textHeight,Pixels=new byte[(textRight-textLeft)*textHeight]};
+                    for(int ty=0;ty<textHeight;ty++)for(int tx=0;tx<text.Width;tx++) {
+                        int p=((textTop+ty)*frame.Width+textLeft+tx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                        text.Pixels[ty*text.Width+tx]=(byte)(Math.Min(r,Math.Min(g,b))>=175&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<65?1:0);
+                    }
+                    var mask=HudVision.Normalize(text,128,16);
+                    if(mask!=null&&mask.Count(v=>v!=0)>40){rows.Add(new HudKillFeedRow {Mask=mask,Y=y,Height=h});found=true;break;}
+                }
+                if(found)y+=h;
+                if(rows.Count>=6)break;
+            }
+            return rows.ToArray();
+        }
+    }
+    internal sealed class HudKillFeedFilter
+    {
+        sealed class Track {public byte[] Mask;public int Y;public double Last,First;public int Hits;public bool Done;}
+        readonly List<Track> tracks=new List<Track>();
+        double last=-1;
+        public void Reset(){tracks.Clear();last=-1;}
+        public int Push(HudKillFeedRow[] rows,double time,bool eligible,bool waitForHud=false)
+        {
+            if(!double.IsFinite(time)||time<=last)return 0;
+            if(rows==null){Reset();return 0;}
+            bool baseline=last<0||time-last>.75;
+            if(baseline)tracks.Clear();
+            last=time;tracks.RemoveAll(t=>time-t.Last>1);
+            var used=new HashSet<Track>();int count=0;
+            foreach(var row in rows.Take(6)) {
+                if(row==null||row.Mask==null||row.Mask.Length!=2048)continue;
+                var match=tracks.Where(t=>!used.Contains(t)).Select(t=>new {Track=t,Score=HudVision.Similarity(row.Mask,t.Mask)}).OrderByDescending(t=>t.Score).FirstOrDefault();
+                Track track;
+                // A continuously visible row may fade or change contrast over the world.
+                // Its existing slot remains the same event; new rows append below it.
+                var held=tracks.Where(t=>!used.Contains(t)&&time-t.Last<.2&&Math.Abs(t.Y-row.Y)<row.Height*.3).FirstOrDefault();
+                if(match!=null&&match.Score>=.7) {track=match.Track;track.Hits=time-track.Last<=.3?track.Hits+1:1;}
+                else if(held!=null) {track=held;track.Hits++;}
+                else {track=new Track {Mask=row.Mask,Y=row.Y,First=time,Hits=1,Done=baseline};tracks.Add(track);}
+                used.Add(track);track.Last=time;track.Y=row.Y;
+                // Keep the confirmed appearance: learning every fading frame corrupts
+                // identity just before older rows expire and the remaining rows move up.
+                if(track.Hits==2)track.Mask=row.Mask;
+                if(!eligible&&!waitForHud||time-track.First>.5)track.Done=true;
+                if(eligible&&track.Hits>=2&&!track.Done){track.Done=true;count++;}
+            }
+            return count;
         }
     }
     internal static class HudVision
@@ -303,6 +404,7 @@ namespace LovenseConnector
             var health=ReadNumber(frame,profile.Health,templates,100);
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
+            result.KillFeed=profile.ReadKillFeed?HudKillFeedVision.Read(frame):null;
             if(profile.ReadShield) {
                 var shield=ReadNumber(frame,profile.Shield,templates,50);
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
