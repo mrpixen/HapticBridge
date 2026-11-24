@@ -22,7 +22,7 @@ To stop feedback while spectating, freeze a spectator frame, select **Spectator 
 
 For shield damage, turn on **Read shield damage** in Calibration, choose **Shield**, then freeze and select only its current 0–50 number. Exclude the icon and regeneration reserve. Enter the visible number and use **Learn digits** if needed. Check the shield readout, then **Save calibration**. Shield reading is off by default; changing it disarms output. An unreadable or absent number is unknown, not zero, so health detection continues but some shield breaks may be missed.
 
-Depleted armor can display a dim zero. When normal shield matching fails, the reader tries local contrast within the selected digit region, retaining its usual shape-confidence checks. Keep the region tight around the number. Flat or weak-contrast crops remain unknown. You can also learn a dim shield digit; health uses a separate bright-foreground contrast fallback, while badge recognition is unchanged.
+Depleted armor can display a dim zero. When normal shield matching fails, the reader tries local contrast within the selected digit region, retaining its usual shape-confidence checks. Keep the region tight around the number. Flat or weak-contrast crops remain unknown. You can also learn a dim shield digit; health uses separate contrast and local-background fallbacks for bright effects. These retain shape-confidence checks and can still miss obscured digits.
 
 **Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
 

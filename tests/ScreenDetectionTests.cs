@@ -254,6 +254,14 @@ internal static class ScreenDetectionTests
         var dim=Frame(145,70);var reading=HudVision.Read(dim,profile,other);
         Check(reading.Shield==0&&reading.ShieldConfidence>=.82,"dim shield zero uses contrast without treating an absent number as zero");
         Check(reading.Health==null,"shield fallback does not relax health reading");
+        var washed=Frame(255,220);
+        Check(HudVision.ExtractLocalContrast(washed,region)!=null,"local contrast extracts bright strokes from washed-out background");
+        Check(HudVision.Read(washed,profile,other).Health==0,"washed-out zero retains its correct value");
+        foreach(var empty in new[]{Frame(255,255),Frame(195,185),Frame(145,70)})
+            Check(HudVision.ExtractLocalContrast(empty,region)==null,"local fallback rejects uniform, weak-contrast or dim foreground");
+        var ambiguous=new[]{new HudGlyph {Digit=1,Aspect=profile.Digits[0].Aspect,Mask=profile.Digits[0].Mask}};
+        Check(HudVision.Read(washed,profile,ambiguous).Health==null,"local fallback does not resolve ambiguous templates by guessing");
+        Check(HudVision.ExtractLocalContrast(new ScreenPixels(new byte[257*257*4],257,257,0),region)==null,"oversized local contrast crop is skipped");
         Check(HudVision.Read(Frame(255,175),profile,other).Health==0,"bright health digits separate from a bright gray background");
         Check(HudVision.Read(Frame(255,175,true),profile,other).Health==null,"uniform bright health crop remains unknown");
         Check(HudVision.Read(Frame(195,185),profile,other).Health==null,"low-contrast bright health noise remains unknown");

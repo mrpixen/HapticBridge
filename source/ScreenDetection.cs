@@ -434,6 +434,7 @@ namespace LovenseConnector
             // Bright scenery can join white digits under the fixed color mask.
             // Retry contrast separation without relaxing health brightness or shape scores.
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,contrast:true);
+            if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true,localContrast:true);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
             result.KillFeed=profile.ReadKillFeed?HudKillFeedVision.Read(frame):null;
             if(profile.ReadShield) {
@@ -475,9 +476,58 @@ namespace LovenseConnector
             int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold?1:0);ink+=mask.Pixels[i];}
             return ink<12||ink>values.Length*.65?null:mask;
         }
-        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false)
+        // Expand differences near white before separating washed-out text.
+        static readonly byte[] BrightRange=Enumerable.Range(0,256).Select(v=>(byte)Math.Round(255*Math.Pow(v/255.0,2.2))).ToArray();
+        // Separable sliding extrema keep background removal linear in crop size.
+        static byte[] LocalExtrema(byte[] input,int width,int height,int radius,bool minimum,bool horizontal)
         {
-            var parts=Segment(contrast?ExtractContrast(frame,region,maximum==100?155:0):Extract(frame,region,false),trimDigits);
+            var output=new byte[input.Length];int length=horizontal?width:height,lines=horizontal?height:width;
+            var deque=new int[length];
+            for(int line=0;line<lines;line++) {
+                int head=0,tail=0,next=0;
+                int At(int position)=>horizontal?line*width+position:position*width+line;
+                for(int position=0;position<length;position++) {
+                    int end=Math.Min(length-1,position+radius);
+                    while(next<=end) {
+                        byte value=input[At(next)];
+                        while(tail>head&&(minimum?input[At(deque[tail-1])]>=value:input[At(deque[tail-1])]<=value))tail--;
+                        deque[tail++]=next++;
+                    }
+                    while(head<tail&&deque[head]<position-radius)head++;
+                    output[At(position)]=input[At(deque[head])];
+                }
+            }
+            return output;
+        }
+        internal static Mask ExtractLocalContrast(ScreenPixels frame,HudRegion region)
+        {
+            var mask=Extract(frame,region,false);if(mask==null||mask.Pixels.Length>65536)return null;
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height),radius=Math.Max(2,mask.Height/5);
+            var original=new byte[mask.Pixels.Length];
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+x+left)*4;
+                original[y*mask.Width+x]=BrightRange[Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2]))];
+            }
+            // Opening removes narrow bright strokes from the background estimate.
+            // Subtracting it preserves those strokes even across an uneven bright effect.
+            var background=original;
+            foreach(bool minimum in new[]{true,false})foreach(bool horizontal in new[]{true,false})
+                background=LocalExtrema(background,mask.Width,mask.Height,radius,minimum,horizontal);
+            var values=new byte[original.Length];var histogram=new int[256];double sum=0;
+            for(int i=0;i<values.Length;i++){values[i]=(byte)Math.Max(0,original[i]-background[i]);histogram[values[i]]++;sum+=values[i];}
+            int below=0,threshold=0;double belowSum=0,best=-1,low=0,high=0;
+            for(int i=0;i<255;i++) {
+                below+=histogram[i];belowSum+=i*histogram[i];int above=values.Length-below;if(below==0||above==0)continue;
+                double a=belowSum/below,b=(sum-belowSum)/above,score=(double)below*above*(a-b)*(a-b);
+                if(score>best){best=score;threshold=i;low=a;high=b;}
+            }
+            if(high-low<25)return null;
+            int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold&&original[i]>=155?1:0);ink+=mask.Pixels[i];}
+            return ink<12||ink>values.Length*.65?null:mask;
+        }
+        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false,bool localContrast=false)
+        {
+            var parts=Segment(localContrast?ExtractLocalContrast(frame,region):contrast?ExtractContrast(frame,region,maximum==100?155:0):Extract(frame,region,false),trimDigits);
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
