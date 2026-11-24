@@ -22,7 +22,7 @@ For shield damage, turn on **Read shield damage** in Calibration, choose **Shiel
 - **Kill:** two short pulses, ending at the selected strength.
 - **Death:** a brief pulse when zero health is confirmed, then output disarms.
 
-Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Events closer than 450 ms may be skipped; rapid badges that never disappear may count as one kill. Output is bounded to at most 450 ms per event, even if a device command is delayed.
+Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Damage and kill events closer than 450 ms may be skipped; confirmed death takes priority over that cooldown. Muted or unassigned events do not consume it. Rapid badges that never disappear may count as one kill. Output is bounded to at most 450 ms per event, even if a device command is delayed.
 
 Under each motor, choose **Damage**, **Kill** and **Death** independently. For example, one motor can follow damage while another handles kills. New motors start with all three choices selected. Changing a choice, strength or maximum turns output off; select **Enable output** again when ready.
 

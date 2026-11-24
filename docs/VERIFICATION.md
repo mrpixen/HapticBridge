@@ -4,7 +4,9 @@
 
 Each Screen sync motor now has independent Damage, Kill and Death choices alongside its existing maximum. Changing feedback still disarms output. Strengths, selections, maximums and event assignments save separately from calibration and reload by motor identity without enabling capture or output.
 
-Passed: 300 Studio, 99 screen, 21 audio and 17 legacy-import assertions, plus seven Python release-tool tests. New checks route each event to a different channel of a simulated dual-motor device, cancel a blocked cue when its assignment changes, reject an empty route, reload settings after discovery order changes, preserve a locked settings file and reject invalid saved data. Release privacy checks reject the new local settings file.
+Passed: 300 Studio, 105 screen, 21 audio and 17 legacy-import assertions, plus seven Python release-tool tests. New checks route each event to a different channel of a simulated dual-motor device, cancel a blocked cue when its assignment changes, reject an empty route, reload settings after discovery order changes, preserve a locked settings file and reject invalid saved data. Release privacy checks reject the new local settings file.
+
+A synthetic rapid-hit sequence reproduced recognized death being suppressed by the previous damage cue's cooldown. Death now takes priority over that cooldown and still stops and disarms afterward. Muted events and events assigned to no motors leave the cooldown available for the next cue. Regression checks cover both cases.
 
 Tests used invisible controls, synthetic pixels and fake transports. No game window, actual capture, real shortcut registration or physical device was accessed. Live layout, match recognition, Bluetooth timing and ARM64 execution remain unverified.
 

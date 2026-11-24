@@ -289,14 +289,14 @@ namespace LovenseConnector
             foreach(var ev in events) {
                 string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind;
                 screenEvents.Enqueue(DateTime.Now.ToString("HH:mm:ss")+"  "+description+(screenArmed&&screenForegroundSeen?"":" · preview"));while(screenEvents.Count>8)screenEvents.Dequeue();screenHistory.Text=string.Join(Environment.NewLine,screenEvents.Reverse());
-                if(screenArmed&&screenForegroundSeen&&screenDeathUntil==0&&!screenCueBusy&&now-screenLastCue>=.45)await SendScreenCue(ev);
+                if(screenArmed&&screenForegroundSeen&&screenDeathUntil==0&&!screenCueBusy&&(ev.Kind=="Death"||now-screenLastCue>=.45))await SendScreenCue(ev);
                 if(ev.Kind=="Death"&&screenArmed)screenDeathUntil=now+.4;
             }
             if(screenArmed&&screenForegroundSeen)screenStatus.Text="Following HUD · output enabled";
         }
         async Task SendScreenCue(HudEvent ev)
         {
-            int generation=screenGeneration;screenCueBusy=true;screenLastCue=ScreenCapture.Now;
+            int generation=screenGeneration;screenCueBusy=true;
             try {
                 int high=ev.Kind=="Kill"?screenProfile.KillLevel:ev.Kind=="Death"?screenProfile.DeathLevel:Math.Max(1,(int)Math.Round(screenProfile.DamageLevel*(.35+.65*(100-ev.Health)/100.0)));
                 if(ev.Kind=="Damage"&&screenProfile.DamageLevel==0)high=0;
@@ -307,6 +307,7 @@ namespace LovenseConnector
                     if(!Current())break;
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;
                     var pattern=ev.Kind=="Kill"?new PatternSpec { mode="Custom",durationMs=450,periodMs=450,repeat=false,frames=new[]{new Frame { ms=0,level=Math.Max(1,level*3/4) },new Frame { ms=140,level=0 },new Frame { ms=250,level=level },new Frame { ms=450,level=0 }} }:new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=40 };
+                    if(starts.Count==0)screenLastCue=ScreenCapture.Now;
                     pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current));
                 }
                 await Task.WhenAll(starts);
