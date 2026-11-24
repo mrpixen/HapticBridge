@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.9 — Overlapping combat cues — 2026-11-23
+
+A synthetic HUD confirmed damage and a kill in the same frame, but the shared cooldown suppressed the kill even when it used a different motor. Cooldowns now belong to each motor. Events assigned to separate motors can play together; on shared motors, death takes priority over kills, and kills over damage. Lower-priority events cannot cut off a kill's second pulse. Repeated cues remain rate-limited and are skipped rather than queued for later playback.
+
+Event history now distinguishes preview, muted events, cooldowns, queued motor counts, cancellation and source/command failures. A queued cue is a playback request, not confirmation of physical delivery.
+
+Passed: 300 Studio, 112 screen, 21 audio and 17 legacy-import assertions. The new overlap regression failed before correction. Checks cover separate and shared routing, same-frame recognition, priority during active playback and history outcomes. Existing stop, delayed-command, persistence and death checks also pass. Testing used invisible controls, synthetic frames and fake transport; real game recognition, live layout, Bluetooth timing and ARM64 execution remain unverified.
+
 ## 0.8.8 — Per-motor screen events — 2026-11-23
 
 Each Screen sync motor now has independent Damage, Kill and Death choices alongside its existing maximum. Changing feedback still disarms output. Strengths, selections, maximums and event assignments save separately from calibration and reload by motor identity without enabling capture or output.

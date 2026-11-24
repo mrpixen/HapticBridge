@@ -25,6 +25,7 @@ internal static class ScreenSyncTests
     static void Set(object o,string name,object value)=>o.GetType().GetField(name,Members).SetValue(o,value);
     static object Call(object o,string name,params object[] args)=>o.GetType().GetMethod(name,Members).Invoke(o,args);
     static Task Invoke(object o,string name,params object[] args)=>(Task)Call(o,name,args);
+    static double[] CueTimes(ConnectorApp app)=>((IEnumerable)Get<object>(app,"screenOwned")).Cast<object>().Select(t=>Get<double>(t,"LastCue")).ToArray();
     static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
         yield return root;
@@ -114,6 +115,7 @@ internal static class ScreenSyncTests
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"death cue ends and disarms before spectating");
             await OutputChangesAndPendingArm(app,capture,links,players);
             await RapidDamageThenDeath(app,capture,links,players);
+            await SimultaneousCombatEvents(app,capture,links,players);
             await AdvancedSliderCannotRetargetScreen(app,capture,devices[1],links[0]);
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
             int[] before=links.Select(l=>l.Positive.Count).ToArray();links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
@@ -202,9 +204,9 @@ internal static class ScreenSyncTests
         async Task Arm(){Set(app,"screenFrame",Pixels("100"));await Invoke(app,"ArmScreen");Check(Get<bool>(app,"screenArmed"),"routed test arms only after explicit request");}
         try {
             first["Damage"].IsChecked=false;
-            await Arm();double previousCue=Get<double>(app,"screenLastCue");int previousSamples=link.Positive.Count;
+            await Arm();double[] previousCue=CueTimes(app);int previousSamples=link.Positive.Count;
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});
-            Check(Get<double>(app,"screenLastCue")==previousCue&&link.Positive.Count==previousSamples,"an event without any assigned motor does not consume the feedback cooldown");
+            Check(CueTimes(app).SequenceEqual(previousCue)&&link.Positive.Count==previousSamples,"an event without any assigned motor does not consume the feedback cooldown");
             first["Damage"].IsChecked=true;await Invoke(app,"DisarmScreen");
             foreach(var ev in new[]{new HudEvent {Kind="Damage",Health=20,Amount=10},new HudEvent {Kind="Kill",Health=100},new HudEvent {Kind="Death",Health=0}}) {
                 await Arm();int marker=link.Samples.Count;
@@ -258,14 +260,51 @@ internal static class ScreenSyncTests
             Check(markers.Select((n,i)=>n>before[i]).All(x=>x),"rapid sequence has already delivered damage feedback");
             await Feed(app,capture,"0",2);
             // Keep the cooldown active at the confirming frame even on a slow CI host.
-            Set(app,"screenLastCue",ScreenCapture.Now);await Feed(app,capture,"0",1);await Task.Delay(450);await Invoke(app,"ScreenTick");
+            foreach(var target in ((IEnumerable)Get<object>(app,"screenOwned")).Cast<object>())Set(target,"LastCue",ScreenCapture.Now);
+            await Feed(app,capture,"0",1);await Task.Delay(450);await Invoke(app,"ScreenTick");
             Check(links.Select((l,i)=>l.Positive.Skip(markers[i]).Contains(19)).All(x=>x),"confirmed death after rapid damage still delivers its separate configured pulse");
             Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"priority death still ends output and disarms before spectating");
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");
-            profile.DamageLevel=0;double prior=Get<double>(app,"screenLastCue");int[] counts=links.Select(l=>l.Positive.Count).ToArray();
+            profile.DamageLevel=0;double[] prior=CueTimes(app);int[] counts=links.Select(l=>l.Positive.Count).ToArray();
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});
-            Check(Get<double>(app,"screenLastCue")==prior&&links.Select(l=>l.Positive.Count).SequenceEqual(counts),"a muted event sends no output and does not delay the next event");
+            Check(CueTimes(app).SequenceEqual(prior)&&links.Select(l=>l.Positive.Count).SequenceEqual(counts),"a muted event sends no output and does not delay the next event");
         }finally {profile.DamageLevel=damage;profile.DeathLevel=death;await Invoke(app,"DisarmScreen");}
+    }
+
+    static async Task SimultaneousCombatEvents(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
+    {
+        var profile=Get<ScreenProfile>(app,"screenProfile");var health=profile.Health;var badge=profile.Badge;var mask=profile.BadgeMask;
+        var routes=((IDictionary)Get<object>(app,"screenRoutes")).Values.Cast<object>().ToArray();
+        var choices=routes.Select(r=>Get<Dictionary<string,CheckBox>>(r,"Events")).ToArray();
+        profile.Health=new HudRegion {Width=.5,Height=1};profile.Badge=new HudRegion {X=.5,Width=.5,Height=1};
+        profile.BadgeMask=HudVision.Normalize(HudVision.Extract(ShieldPixels("100","8"),profile.Badge),32,32);
+        async Task Ready()
+        {
+            await Feed(app,capture,"100",3,"");await Invoke(app,"ArmScreen");await Feed(app,capture,"100",4,"");
+        }
+        try {
+            choices[0]["Kill"].IsChecked=false;choices[1]["Damage"].IsChecked=false;
+            await Ready();var before=links.Select(l=>l.Positive.Count).ToArray();
+            await Feed(app,capture,"80",3,"8");await Task.Delay(450);
+            Check(Get<TextBlock>(app,"screenHistory").Text.Contains("Kill")&&Get<TextBlock>(app,"screenHistory").Text.Contains("Damage"),"synthetic HUD confirms damage and a new kill badge in the same frame");
+            Check(links[0].Positive.Skip(before[0]).Any()&&links[1].Positive.Skip(before[1]).Contains(profile.KillLevel),"same-frame damage and kill both reach their independently assigned motors");
+            Check(Get<TextBlock>(app,"screenHistory").Text.Split(Environment.NewLine).Take(2).All(line=>line.Contains("queued · 1 motor")),"history reports separate queued motor counts for simultaneous events");
+            Check(players.All(p=>p.Level(0)==0),"both overlapping cues stay bounded");
+            await Invoke(app,"DisarmScreen");
+            choices[0]["Kill"].IsChecked=true;choices[1]["Damage"].IsChecked=true;
+            await Ready();before=links.Select(l=>l.Positive.Count).ToArray();
+            await Feed(app,capture,"80",3,"8");await Task.Delay(450);
+            Check(links.Select((l,i)=>l.Positive.Skip(before[i]).Contains(profile.KillLevel)).All(x=>x),"kill feedback wins when damage and kill share a motor in the same frame");
+            var history=Get<TextBlock>(app,"screenHistory").Text.Split(Environment.NewLine).Take(2).ToArray();
+            Check(history.Any(line=>line.Contains("Kill · queued · 2 motors"))&&history.Any(line=>line.Contains("Damage")&&line.EndsWith("cooldown")),"history distinguishes the shared-motor kill cue from its suppressed damage event");
+            await Invoke(app,"DisarmScreen");await Ready();before=links.Select(l=>l.Positive.Count).ToArray();
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});await Task.Delay(80);
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});await Task.Delay(450);
+            Check(links.Select((l,i)=>l.Positive.Skip(before[i]).Contains(profile.KillLevel)&&l.Positive.Skip(before[i]).All(v=>v>=profile.KillLevel*3/4)).All(x=>x),"a lower-priority hit during a kill cue cannot interrupt its second pulse");
+        }finally {
+            await Invoke(app,"DisarmScreen");profile.Health=health;profile.Badge=badge;profile.BadgeMask=mask;
+            foreach(var route in choices)foreach(var choice in route.Values)choice.IsChecked=true;
+        }
     }
 
     static async Task AdvancedSliderCannotRetargetScreen(ConnectorApp app,Capture capture,Device device,Link link)

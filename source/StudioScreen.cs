@@ -16,7 +16,7 @@ namespace LovenseConnector
     internal sealed partial class ConnectorApp
     {
         sealed class ScreenRoute { public Device Device;public int Channel;public CheckBox Include;public Slider Ceiling;public readonly Dictionary<string,CheckBox> Events=new Dictionary<string,CheckBox>(); }
-        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling,Events;public Playback Player; }
+        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling,Events,Priority;public double LastCue=-10;public Playback Player; }
         sealed class ScreenSample { public IScreenCapture Source;public ScreenPixels Pixels; }
         sealed class ScreenStopAttempt
         {
@@ -46,7 +46,7 @@ namespace LovenseConnector
         DispatcherTimer screenTimer;
         bool screenFrozen,screenArmed,screenTickBusy,screenCueBusy,screenForegroundSeen;
         int screenGeneration,screenOperation,screenCaptureRequest;
-        double screenArmedAt,screenLastGood=-1,screenLastCue=-10,screenDeathUntil;
+        double screenArmedAt,screenLastGood=-1,screenDeathUntil;
         double screenNextStopRetry;
         string screenFailure;
         string ScreenProfilePath=>Path.Combine(dataDir??root,"screen-profile.json");
@@ -286,32 +286,40 @@ namespace LovenseConnector
             if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){await DisarmScreen();screenFilter.Reset();screenStatus.Text="Window resized · verify calibration before enabling output";}
             screenFrame=frame;if(screenPreview.IsVisible)screenPreview.Show(frame);var read=RefreshScreenReading();if(read?.Health.HasValue==true)screenLastGood=now;
             var events=screenFilter.Push(read,frame.Time);
-            foreach(var ev in events) {
+            foreach(var ev in events.OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {
                 string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind;
-                screenEvents.Enqueue(DateTime.Now.ToString("HH:mm:ss")+"  "+description+(screenArmed&&screenForegroundSeen?"":" · preview"));while(screenEvents.Count>8)screenEvents.Dequeue();screenHistory.Text=string.Join(Environment.NewLine,screenEvents.Reverse());
-                if(screenArmed&&screenForegroundSeen&&screenDeathUntil==0&&!screenCueBusy&&(ev.Kind=="Death"||now-screenLastCue>=.45))await SendScreenCue(ev);
+                string outcome="preview";
+                if(screenArmed&&screenForegroundSeen)outcome=screenDeathUntil>0?"output ending":screenCueBusy?"busy":await SendScreenCue(ev);
+                screenEvents.Enqueue(DateTime.Now.ToString("HH:mm:ss")+"  "+description+" · "+outcome);while(screenEvents.Count>8)screenEvents.Dequeue();screenHistory.Text=string.Join(Environment.NewLine,screenEvents.Reverse());
                 if(ev.Kind=="Death"&&screenArmed)screenDeathUntil=now+.4;
             }
             if(screenArmed&&screenForegroundSeen)screenStatus.Text="Following HUD · output enabled";
         }
-        async Task SendScreenCue(HudEvent ev)
+        async Task<string> SendScreenCue(HudEvent ev)
         {
             int generation=screenGeneration;screenCueBusy=true;
             try {
                 int high=ev.Kind=="Kill"?screenProfile.KillLevel:ev.Kind=="Death"?screenProfile.DeathLevel:Math.Max(1,(int)Math.Round(screenProfile.DamageLevel*(.35+.65*(100-ev.Health)/100.0)));
                 if(ev.Kind=="Damage"&&screenProfile.DamageLevel==0)high=0;
-                var clock=Stopwatch.StartNew();var starts=new List<Task>();
+                double now=ScreenCapture.Now;int priority=ScreenMotorFeedback.EventPriority(ev.Kind);
+                var clock=Stopwatch.StartNew();var starts=new List<Task>();int cooling=0;bool sourceChanged=false;
                 foreach(var t in screenOwned.ToArray()) {
                     if((t.Events&ScreenMotorFeedback.EventMask(ev.Kind))==0)continue;
                     bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture?.Foreground==true&&t.Device.Connected&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
-                    if(!Current())break;
+                    if(!Current()){sourceChanged=true;break;}
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;
+                    // Cooldowns belong to motors: one event must not silence a different route.
+                    // On a shared motor, a higher-priority event can replace the current cue.
+                    if(now-t.LastCue<.45&&priority<=t.Priority){cooling++;continue;}
                     var pattern=ev.Kind=="Kill"?new PatternSpec { mode="Custom",durationMs=450,periodMs=450,repeat=false,frames=new[]{new Frame { ms=0,level=Math.Max(1,level*3/4) },new Frame { ms=140,level=0 },new Frame { ms=250,level=level },new Frame { ms=450,level=0 }} }:new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=40 };
-                    if(starts.Count==0)screenLastCue=ScreenCapture.Now;
+                    t.LastCue=now;t.Priority=priority;
                     pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current));
                 }
                 await Task.WhenAll(starts);
-            }catch{await DisarmScreen();screenStatus.Text="Device command failed · output off";}finally{screenCueBusy=false;}
+                if(!screenArmed||generation!=screenGeneration||operatorGeneration!=screenOperation)return "cancelled";
+                if(sourceChanged)return "source changed";
+                return starts.Count>0?"queued · "+starts.Count+(starts.Count==1?" motor":" motors"):cooling>0?"cooldown":"muted";
+            }catch{await DisarmScreen();screenStatus.Text="Device command failed · output off";return "command failed";}finally{screenCueBusy=false;}
         }
     }
 }

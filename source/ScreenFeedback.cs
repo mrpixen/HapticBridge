@@ -16,6 +16,7 @@ namespace LovenseConnector
         public int Events { get; set; }=7;
         public bool Valid()=>Maximum>=0&&Maximum<=20&&Events>=0&&Events<=7;
         public static int EventMask(string kind)=>kind=="Damage"?1:kind=="Kill"?2:kind=="Death"?4:0;
+        public static int EventPriority(string kind)=>kind=="Death"?3:kind=="Kill"?2:kind=="Damage"?1:0;
     }
 
     internal sealed class ScreenFeedbackPreferences

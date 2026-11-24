@@ -22,11 +22,13 @@ For shield damage, turn on **Read shield damage** in Calibration, choose **Shiel
 - **Kill:** two short pulses, ending at the selected strength.
 - **Death:** a brief pulse when zero health is confirmed, then output disarms.
 
-Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Damage and kill events closer than 450 ms may be skipped; confirmed death takes priority over that cooldown. Muted or unassigned events do not consume it. Rapid badges that never disappear may count as one kill. Output is bounded to at most 450 ms per event, even if a device command is delayed.
+Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Each motor has a 450 ms cooldown: death takes priority over kills, and kills over damage. A higher-priority cue can replace a lower-priority one; repeated or lower-priority cues are skipped during cooldown. Events assigned to different motors can play together. Muted or unassigned events do not consume a cooldown. Rapid badges that never disappear may count as one kill. Output is bounded to at most 450 ms per event, even if a device command is delayed.
 
 Under each motor, choose **Damage**, **Kill** and **Death** independently. For example, one motor can follow damage while another handles kills. New motors start with all three choices selected. Changing a choice, strength or maximum turns output off; select **Enable output** again when ready.
 
 Event strengths, motor selection, maximums and event choices save automatically on this computer. They follow the same motor when discovery order changes. Calibration still uses **Save calibration**. Restoring preferences never starts capture or output.
+
+Event history shows **preview**, **muted**, **cooldown**, or how many motors a cue was queued for. **Queued** means playback was requested, not that Bluetooth delivery was confirmed. Cancellation and source or command failures appear separately.
 
 Leaving the selected window, losing a usable HUD signal, resizing it, changing the source or losing a selected device disarms output. Returning to the window does not re-enable it. **Stop capture** releases capture; **Stop all** also stops the other output sources. Escape invokes Stop all while HapticBridge has focus, not while the game has focus.
 
