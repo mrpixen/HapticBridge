@@ -44,7 +44,10 @@ namespace LovenseConnector
             string shortName = Regex.Replace(advertisedName ?? "", "^(LVS-|LOVE-)", "", RegexOptions.IgnoreCase);
             // Newer names end in two firmware digits, e.g. Edge204 = Edge2 + 04.
             string product = Regex.Replace(shortName, @"\d{2}$", "");
-            var named = models.Where(m => product.StartsWith(m.type, StringComparison.OrdinalIgnoreCase))
+            // A family may have a numeric generation suffix. Arbitrary trailing text
+            // is not a model match; use the symbol's common capabilities instead.
+            var named = models.Where(m => product.StartsWith(m.type, StringComparison.OrdinalIgnoreCase)&&
+                    product.Substring(m.type.Length).All(c=>c>='0'&&c<='9'))
                 .OrderByDescending(m => m.type.Length).FirstOrDefault();
             if (named != null)
             {

@@ -24,19 +24,25 @@ Control compatible Lovense devices from one Windows app. Shape vibration pattern
 
 ## Supported toys
 
-The current control system supports **vibration** on the following Lovense model families, based on the bundled [device catalog](source/models.json). Catalog support is not a claim that every model or firmware has been physically tested.
+Controls are selected from the device's model and firmware. The same outputs work in the curve editor, sound, screen/video sync and local API. New motion controls are **protocol-implemented and simulator-tested; physical compatibility is not yet verified**.
 
-| Vibration motors | Models |
+| Functions | Models |
 | :--- | :--- |
-| **1** | Ambi, Calor, Diamo, Domi, Exomoon, Ferri, Fizz, Flexer, Gravity, Gush, Hush, Hyphy |
-| **1** | Lush, Lush 2, Lush 3, Lush 4, Lush Mini, Lush Anal; Max, Max 2; Mission, Mission 2 |
-| **1** | Mini XMachine, Nora, Osci, Osci 2, Osci 3, Ridge, Spinel, Tenera, Tenera 2, Velvo, Vulse, XMachine |
-| **2, independently controlled** | Dolce, Edge family (including Edge 2), Gemini |
-| **3, independently controlled** | Lapis |
+| Vibration | Ambi, Calor, Diamo, Domi, Exomoon, Ferri, Gush, Hush, Lush / 2 / 3 / 4 / Mini / Anal, Mission / 2, Osci / 2, Vulse, C20 |
+| Independent vibration motors | Dolce, Edge family, Gemini, Hyphy, QA01; Lapis has three |
+| Vibration + rotation, with reverse | Nora, Ridge, Velvo |
+| Vibration + air pump | Max, Max 2 |
+| Two vibrations + flexing | Flexer, firmware 3+; older or unknown firmware has combined vibration control |
+| Vibration + thrusting | Gravity, Spinel |
+| Thrusting | XMachine, Mini XMachine |
+| Suction | Tenera, Tenera 2, Fizz |
+| Oscillation | Gush 2; Osci 3 also has independent vibration |
+| Thrusting + depth | Solace |
+| Thrusting + stroke range + position | Solace Pro |
 
-The catalog also contains the identifiers **C20** (one vibration motor) and **QA01** (two).
+**Motion settings** provides rotation reversal, depth, stroke endpoints and position where supported. Changing a setting stops current playback first. Stroke endpoints use 0–100%, with a minimum span of 20; position zero is an endpoint, not a stop command. **Stop all** sends the appropriate stop to every output.
 
-**Recognized only:** Gush 2, Solace and Solace Pro have no vibration channel in this build. Rotation, pumping, suction, flexing, thrusting, position/depth and oscillation controls are not implemented, even where the catalog identifies those capabilities. Generations with shared Bluetooth identifiers may appear as a family until the app can identify the model.
+Patterns use a common 0–20 scale. The air pump has three native nonzero levels, so intermediate pattern values map to those levels. API aliases that drive the same physical actuator appear only once. Shared Bluetooth identifiers can still limit generation identification. [Function details and protocol sources](docs/FUNCTIONS.md).
 
 ## Get started
 

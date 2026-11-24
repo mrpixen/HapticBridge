@@ -85,8 +85,8 @@ namespace LovenseConnector
         }
         object ApiDevices()
         {
-            return devices.Values.Select(d=>new { id=d.Address.ToString("X12"),name=d.Name,connected=d.Connected,firmware=d.Firmware,battery=d.Battery,
-                motors=d.Motors.Values.Select(m=>new { channel=m.Channel,min=0,max=20,step=1,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray();
+            return devices.Values.Select(d=>new { id=d.Address.ToString("X12"),name=d.Name,connected=d.Connected,firmware=d.Firmware,battery=d.Battery,functions=new { depth=d.Functions?.HasDepth??false,position=d.Functions?.HasPosition??false,stroke=d.Functions?.HasStroke??false,reverse=d.Functions?.HasRotation??false },
+                motors=d.Motors.Values.Select(m=>new { channel=m.Channel,function=d.Functions?.Outputs.FirstOrDefault(a=>a.Channel==m.Channel)?.Function??"vibration",label=d.ChannelLabel(m.Channel),nativeMax=d.Functions?.Outputs.FirstOrDefault(a=>a.Channel==m.Channel)?.NativeMaximum??20,min=0,max=20,step=1,acknowledgedLevel=d.Player==null?-1:d.Player.Level(m.Channel),active=d.Player!=null&&d.Player.Active(m.Channel) }).ToArray() }).ToArray();
         }
         async Task<object> HandleApi(ApiRequest request)
         {
@@ -99,7 +99,7 @@ namespace LovenseConnector
             {
                 if(request.Path=="/api/v1/devices") return new { devices=ApiDevices() };
                 if(request.Path=="/api/v1/status") return new { apiVersion=1,appVersion=AppVersion,enabled=apiEnabled,testing=sweep!=null,session=integration==null?null:new { id=integration.Id,name=integration.Name,ttlMs=integration.TtlMs },screenCaptureActive=screenCapture!=null,screenOutputEnabled=screenArmed,videoOutputEnabled=feelArmed,video=feelClient.Diagnostics,videoPresence=feelPresenceReport,videoReferencePresence=feelReferenceReport,devices=ApiDevices() };
-                if(request.Path=="/api/v1/capabilities") return new { apiVersion=1,range=new { min=0,max=20,step=1 },patterns=new[]{"Steady","Pulse","Wave","Ramp","Custom"},routes=new[]{"GET /status","GET /devices","POST /session","POST /heartbeat","POST /frame","POST /motor","POST /pattern","POST /release","POST /stop"},timing="Best effort; acknowledged levels are commanded outputs, not sensor readings." };
+                if(request.Path=="/api/v1/capabilities") return new { apiVersion=1,range=new { min=0,max=20,step=1 },patterns=new[]{"Steady","Pulse","Wave","Ramp","Custom"},routes=new[]{"GET /status","GET /devices","POST /session","POST /heartbeat","POST /frame","POST /motor","POST /pattern","POST /function","POST /release","POST /stop"},timing="Best effort; acknowledged levels are commanded outputs, not sensor readings." };
                 throw new ApiFault(404,"Route not found.");
             }
             if(request.Path=="/api/v1/stop") { bool stopped=await StopAll(); return new { stopped=stopped,integrationsPaused=true }; }
@@ -126,6 +126,17 @@ namespace LovenseConnector
             }
             if(request.Path=="/api/v1/heartbeat") { session.Touch(); return new { renewed=true,ttlMs=session.TtlMs }; }
             if(request.Path=="/api/v1/release") { await RevokeIntegration(false); return new { released=true }; }
+            if(request.Path=="/api/v1/function")
+            {
+                var d=ApiDevice(body);var player=d.Player;int generation=d.Generation;
+                string function=FieldString(body,"function");int value=FieldInt(body,"value",function=="reverse"?0:-1,0,100),high=FieldInt(body,"high",-1,0,100);
+                if(value<0||function=="stroke"&&high<0)throw new ApiFault(400,"value is required; stroke also requires high.");
+                try { player.ValidateFunction(function,value,high); }catch(NotSupportedException ex){throw new ApiFault(400,ex.Message);}
+                RequireTarget(d,player,generation);session.Touch();
+                foreach(int channel in d.Channels)session.Motors.Add(d.Address.ToString("X12")+"/"+channel);
+                await player.ApplyFunction(function,value,high,()=>CurrentTarget(d,player,generation));
+                RequireTarget(d,player,generation);return new { accepted=true,playbackStopped=true };
+            }
             if(request.Path=="/api/v1/motor"||request.Path=="/api/v1/frame")
             {
                 var outputs=new List<Dictionary<string,object>>();
@@ -139,7 +150,7 @@ namespace LovenseConnector
                 int transition=FieldInt(body,"transitionMs",0,0,10000);
                 var commands=new List<(Device Device,Playback Player,int Generation,int Channel,int Level)>(); var keys=new HashSet<string>();
                 foreach(var output in outputs) {
-                    var d=ApiDevice(output); int channel=FieldInt(output,"motor",-1,0,3); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
+                    var d=ApiDevice(output); int channel=FieldInt(output,"motor",-1,0,9); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                     int level=FieldInt(output,"level",-1,0,20); if(level<0) throw new ApiFault(400,"level is required.");
                     if(!keys.Add(d.Address.ToString("X12")+"/"+channel)) throw new ApiFault(400,"Duplicate motor in frame."); commands.Add((d,d.Player,d.Generation,channel,level));
                 }
@@ -156,7 +167,7 @@ namespace LovenseConnector
             }
             if(request.Path=="/api/v1/pattern")
             {
-                var d=ApiDevice(body); int channel=FieldInt(body,"motor",-1,0,3); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
+                var d=ApiDevice(body); int channel=FieldInt(body,"motor",-1,0,9); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                 object value; if(!body.TryGetValue("pattern",out value)) throw new ApiFault(400,"pattern is required."); var pattern=json.Deserialize<PatternSpec>(json.Serialize(value)); if(pattern==null) throw new ApiFault(400,"pattern is required."); pattern.Validate();
                 var player=d.Player;int generation=d.Generation;
                 RequireTarget(d,player,generation);session.Touch();session.Motors.Add(d.Address.ToString("X12")+"/"+channel);

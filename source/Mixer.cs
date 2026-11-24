@@ -15,6 +15,7 @@ namespace LovenseConnector
 {
     internal sealed class MixerMotor
     {
+        public bool Available=>Device.HasChannel(Channel);
         public Device Device; public int Channel; public CheckBox Include; public Slider Level; public TextBlock Status; public ProgressBar Meter; public Border Card; public LiveMotorTrace Trace;
     }
     public sealed class MixerPreset
@@ -48,14 +49,14 @@ namespace LovenseConnector
             mixerTimer.Tick+=async(s,e)=> { RefreshMixerMeters();await AudioTick();RefreshStudioDock(); };
             mixerTimer.Start();
         }
-        MixerMotor[] SelectedMixer() { return mixerRows.Values.Where(m=>m.Include.IsChecked==true&&m.Device.Connected&&m.Device.Player!=null).ToArray(); }
+        MixerMotor[] SelectedMixer() { return mixerRows.Values.Where(m=>m.Include.IsChecked==true&&m.Available&&m.Device.Player!=null).ToArray(); }
         void RefreshMixer() { RefreshStudioMotors(); }
         void RefreshMixerMeters()
         {
             foreach(var m in mixerRows.Values) {
                 int value=m.Device.Player==null?-1:m.Device.Player.Level(m.Channel);
                 m.Meter.Value=Math.Max(0,value);
-                m.Status.Text=!m.Device.Connected?"Disconnected":value<0?"Sent: unknown":"Sent: "+value+" / 20";
+                m.Status.Text=!m.Available?"Disconnected":value<0?"Sent: unknown":"Sent: "+value+" / 20";
                 m.Trace?.Push(value);
             }
             RefreshStudioPlaybackState();
@@ -68,7 +69,7 @@ namespace LovenseConnector
             await Task.WhenAll(devices.Values.Where(d=>d.Player!=null).Select(d=>d.Player.StopAll()));
             if(generation!=audioGeneration||operation!=operatorGeneration||closing||integration!=null)return;
             var capture=(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
-            audioTargets=mixerRows.Values.Where(m=>m.Device.Connected).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;audioLabel.Text="Listening · "+capture.OutputName;
+            audioTargets=mixerRows.Values.Where(m=>m.Available).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;audioLabel.Text="Listening · "+capture.OutputName;
         }
         AudioStopRetry[] UnconfirmedAudioStops()
         { return audioStopRetries=(audioStopRetries??Array.Empty<AudioStopRetry>()).Where(r=>r.Unconfirmed).ToArray(); }
@@ -107,7 +108,7 @@ namespace LovenseConnector
                 audioLabel.Text=audioCapture.OutputName+" · level "+level+" / 20";
                 foreach(var m in audioTargets) {
                     if(generation!=audioGeneration||audioCapture==null)return;
-                    if(!m.Device.Connected||m.Device.Player==null)throw new InvalidOperationException("A sound-sync motor disconnected.");
+                    if(!m.Available||m.Device.Player==null)throw new InvalidOperationException("A sound-sync motor disconnected.");
                     var player=m.Device.Player;int scaled=m.Include.IsChecked==true?(int)Math.Round(level*m.Level.Value/20.0):0;
                     if(scaled==0) { if(player.Active(m.Channel)||player.Level(m.Channel)!=0)await player.Stop(m.Channel); }
                     else if(!player.UpdateSteady(m.Channel,scaled,500,150))await player.Start(m.Channel,new PatternSpec { mode="Steady",high=scaled,durationMs=500,transitionMs=150 },20);

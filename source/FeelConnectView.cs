@@ -85,7 +85,7 @@ namespace LovenseConnector
 
             var routeBody=new StackPanel();
             var routeActions=new WrapPanel { Margin=new Thickness(0,12,0,0) };
-            routeActions.Children.Add(Action("Select all",()=> { foreach(var r in feelRoutes.Values.Where(r=>r.Device.Connected))r.Enabled.IsChecked=true;RefreshFeelRouteSummary();return Task.CompletedTask; }));
+            routeActions.Children.Add(Action("Select all",()=> { foreach(var r in feelRoutes.Values.Where(r=>r.Device.HasChannel(r.Channel)))r.Enabled.IsChecked=true;RefreshFeelRouteSummary();return Task.CompletedTask; }));
             routeActions.Children.Add(Action("Clear",()=> { foreach(var r in feelRoutes.Values)r.Enabled.IsChecked=false;RefreshFeelRouteSummary();return Task.CompletedTask; }));routeBody.Children.Add(routeActions);
             feelRouteEmpty=Text("Connect a device to choose motors.",14);feelRouteEmpty.Foreground=Color("#C4BAD7");routeBody.Children.Add(feelRouteEmpty);
             feelRoutePanel=new WrapPanel();routeBody.Children.Add(feelRoutePanel);
@@ -157,10 +157,10 @@ namespace LovenseConnector
             foreach(var route in feelRoutes.Values)
             {
                 var previous=Volatile.Read(ref route.OutputSettings);
-                var settings=new OrderedRouteSettings(route.Device.Connected&&route.Device.Player!=null&&route.Enabled.IsChecked==true,route.Gain.Value);
+                var settings=new OrderedRouteSettings(route.Device.HasChannel(route.Channel)&&route.Device.Player!=null&&route.Enabled.IsChecked==true,route.Gain.Value);
                 Volatile.Write(ref route.OutputSettings,settings);
                 if(previous.Enabled&&!settings.Enabled&&route.Device.Player!=null)ObserveFeelOrderedStop(feelOrdered.Suppress(route.Device.Player,route.Channel));
-                if(route.Device.Connected&&route.Device.Player!=null)
+                if(route.Device.HasChannel(route.Channel)&&route.Device.Player!=null)
                     targets.Add(new(route.Device.Player,new OrderedMotorRoute(route.Channel,()=>Volatile.Read(ref route.OutputSettings))));
             }
             feelOrdered.Publish(targets);
@@ -359,7 +359,7 @@ namespace LovenseConnector
         {
             if(feelArmed) { operatorGeneration++;await DisarmFeelConnect();return; }
             if(!feelConnected)throw new InvalidOperationException("Connect a video session first.");
-            if(!feelRoutes.Values.Any(r=>r.Enabled.IsChecked==true&&r.Device.Connected))throw new InvalidOperationException("Connect and select at least one motor.");
+            if(!feelRoutes.Values.Any(r=>r.Enabled.IsChecked==true&&r.Device.HasChannel(r.Channel)))throw new InvalidOperationException("Connect and select at least one motor.");
             if(sweep!=null)throw new InvalidOperationException("Stop the speed test first.");
             int smoothing=Number(feelSmoothing);if(smoothing<0||smoothing>2000)throw new ArgumentException("Smoothing must be 0–2000 ms.");
             int operation=++operatorGeneration;
@@ -399,7 +399,7 @@ namespace LovenseConnector
                 route.Card=new Border { Width=214,Padding=new Thickness(16),CornerRadius=new CornerRadius(20),Background=Color("#A0241935"),Margin=new Thickness(0,8,12,8),Child=panel };
                 var heading=new StackPanel { MaxWidth=152 };
                 heading.Children.Add(new TextBlock { Text=d.Name,TextWrapping=TextWrapping.Wrap,FontSize=16 });
-                heading.Children.Add(new TextBlock { Text=channel==0?"Motor":"Motor "+channel,FontSize=12,Margin=new Thickness(0,4,0,0),Foreground=Color("#C4BAD7") });
+                heading.Children.Add(new TextBlock { Text=d.ChannelLabel(channel),FontSize=12,Margin=new Thickness(0,4,0,0),Foreground=Color("#C4BAD7") });
                 route.Enabled=new CheckBox { Content=heading,IsChecked=true };panel.Children.Add(route.Enabled);
                 route.Enabled.Checked+=(s,e)=> { RefreshFeelRouteSummary();PublishFeelRoutes(); };route.Enabled.Unchecked+=(s,e)=> { RefreshFeelRouteSummary();PublishFeelRoutes(); };
                 System.Windows.Automation.AutomationProperties.SetName(route.Enabled,d.Name+" motor "+channel+" video routing");
@@ -409,7 +409,7 @@ namespace LovenseConnector
                 route.Gain.ValueChanged+=(s,e)=> { value.Text="Strength "+(int)route.Gain.Value+"%";PublishFeelRoutes(); };panel.Children.Add(route.Gain);
                 feelRoutes.Add(key,route);feelRoutePanel.Children.Add(route.Card);added=true;
             }
-            foreach(var route in feelRoutes.Values)route.Card.IsEnabled=route.Device.Connected&&!closing;
+            foreach(var route in feelRoutes.Values)route.Card.IsEnabled=route.Device.HasChannel(route.Channel)&&!closing;
             RefreshFeelRouteSummary();
             PublishFeelRoutes();
             RefreshFeelPairingActions();
@@ -418,7 +418,7 @@ namespace LovenseConnector
         void RefreshFeelRouteSummary()
         {
             if(feelRouteSummary==null)return;
-            int available=feelRoutes.Values.Count(r=>r.Device.Connected),selected=feelRoutes.Values.Count(r=>r.Device.Connected&&r.Enabled.IsChecked==true);
+            int available=feelRoutes.Values.Count(r=>r.Device.HasChannel(r.Channel)),selected=feelRoutes.Values.Count(r=>r.Device.HasChannel(r.Channel)&&r.Enabled.IsChecked==true);
             feelRouteSummary.Text=available==0?"Play targets · no motors connected":"Play targets · "+selected+" of "+available+" motors";
             if(feelRouteEmpty!=null)feelRouteEmpty.Visibility=available==0?Visibility.Visible:Visibility.Collapsed;
         }
@@ -434,7 +434,7 @@ namespace LovenseConnector
                     foreach(var pair in feelRoutes.ToArray()) {
                         if(!feelArmed||!feelConnected||generation!=feelGeneration||frame!=feelFrame||Volatile.Read(ref feelOrderedInput)==1)return;
                         var route=pair.Value;var player=route.Device.Player;
-                        if(!route.Device.Connected||player==null)continue;
+                        if(!route.Device.HasChannel(route.Channel)||player==null)continue;
                         int level=route.Enabled.IsChecked==true?Math.Clamp((int)Math.Round(feelPercent*route.Gain.Value/500.0,MidpointRounding.AwayFromZero),0,20):0;
                         if(level==0) { if(feelOwned.Remove(pair.Key))await player.CancelSampled(route.Channel); }
                         else {

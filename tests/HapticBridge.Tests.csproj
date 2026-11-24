@@ -12,7 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="*.cs" />
-    <Compile Include="../source/ApiServer.cs;../source/AudioMeter.cs;../source/Playback.cs;../source/Protocol.cs;../source/Catalog.cs;../source/JsonCompatibility.cs" />
+    <Compile Include="../source/ApiServer.cs;../source/AudioMeter.cs;../source/Playback.cs;../source/Actuators.cs;../source/Playback.Functions.cs;../source/Protocol.cs;../source/Catalog.cs;../source/JsonCompatibility.cs" />
     <Compile Include="../source/CurveDocument.cs" />
     <Compile Include="../source/GlobalStopHotkey.cs" />
     <Compile Include="../source/ScreenDetection.cs" />

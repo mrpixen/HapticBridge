@@ -20,9 +20,9 @@ POST requests also need `Content-Type: application/json` and a JSON object body.
 |---|---|
 | `GET /status` | API/app versions, whether integrations are enabled, test status, current session, devices, and video diagnostics |
 | `GET /devices` | `devices` array |
-| `GET /capabilities` | Native range, pattern names, and API routes |
+| `GET /capabilities` | Control range, pattern names, and API routes |
 
-Device objects include `id`, `name`, `connected`, `firmware`, `battery`, and `motors`. Motor objects include `channel`, `min`, `max`, `step`, `acknowledgedLevel`, and `active`. Discover IDs and channel numbers at runtime; never assume a particular model or connection order. An acknowledged level is the last accepted command, not measured motor speed. A level of `-1` means output is unconfirmed.
+Device objects include `id`, `name`, `connected`, `firmware`, `battery`, and `motors`. Output objects in `motors` include `channel`, `function`, `label`, `nativeMax`, `min`, `max`, `step`, `acknowledgedLevel`, and `active`. Device `functions` flags advertise `depth`, `position`, `stroke`, and `reverse`. Discover IDs and channel numbers at runtime; never assume a particular model or connection order. An acknowledged level is the last accepted command, not measured motor speed. A level of `-1` means output is unconfirmed.
 
 The status response's `video` object reports `phase`, `connected`, `playbackMode` (`timed` or `live`), `videoRooms`, `fecMessages`, `legacyMessages`, `candidateCues`, `acceptedCues`, `unrecognizedMessages`, `lastCueKind`, and `lastCueAt`. Its `transport` object contains aggregate received/filtered message counts for troubleshooting. `videoOutputEnabled` separately reports whether the user has enabled video output; `enabled` refers to app/game integrations. These are session counters and decoding status, not proof of physical output. They include no pairing credentials, payloads, or remote channel identifiers.
 
@@ -85,8 +85,8 @@ The response contains `accepted`, the number of `outputs`, and `ttlMs`.
 
 | Field | Accepted values |
 |---|---|
-| `level` | Required integer, native range 0–20; zero stops immediately |
-| `motor` | Required discovered channel, currently 0, 1, 2, or 3 |
+| `level` | Required integer, normalized range 0–20; zero stops immediately |
+| `motor` | Required discovered channel, currently 0–9; not every device exposes every channel |
 | `durationMs` | Integer 0–600000; default 1000; zero holds until replaced, stopped, or lease expiry |
 | `transitionMs` | Integer 0–10000; default 0; smooths nonzero steady changes |
 | `outputs` | 1–16 entries; no duplicate device/channel pair |
@@ -147,3 +147,16 @@ Errors use the HTTP status code and `{"error":"description"}`. Typical statuses:
 Connections close after one response. The server allows up to 16 clients and applies a five-second request timeout. Use bounded client timeouts. On errors, cancel queued output and release the session when possible; the lease is the final stop fallback if the client exits.
 
 The server deadline and server shutdown cancel requests still waiting to dispatch or start output. An admitted stop still finishes. Already accepted output keeps its requested duration and session lease. A caller timing out or disconnecting earlier does not prove its request was rejected; avoid blindly retrying an old event.
+
+## Motion settings
+
+`POST /function` requires the current `sessionId`, a discovered `deviceId`, and a `function`. It stops playback on that device before applying the setting. Other devices remain unchanged. Discover the device's `functions` flags first.
+
+| `function` | Fields | Behavior |
+|---|---|---|
+| `reverse` | No value | Toggles rotation direction; absolute direction is not reported by hardware |
+| `depth` | `value`: 0–3 | Sets Solace depth |
+| `stroke` | `value`: lower endpoint; `high`: upper endpoint | Solace Pro range, 0–100, at least 20 apart; applies on the next thrusting start |
+| `position` | `value`: 0–100 | Solace Pro point move; stops after the documented 300 ms movement interval |
+
+Successful responses contain `accepted: true` and `playbackStopped: true`. Zero position moves to an endpoint. Use `/stop` to stop motion. Point moves do not automatically resume speed patterns. The existing `/motor`, `/frame` and `/pattern` endpoints also control non-vibration outputs: use their discovered channel and the common 0–20 scale. `nativeMax` reports physical command resolution; pumping maps that scale to levels 0–3.

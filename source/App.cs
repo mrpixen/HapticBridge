@@ -31,6 +31,9 @@ namespace LovenseConnector
         public bool Connected, Busy, Supported;
         public int Generation;
         public int[] Channels=new int[0];
+        public ActuatorProfile Functions;
+        public bool HasChannel(int channel)=>Connected&&Player!=null&&Channels.Contains(channel);
+        public string ChannelLabel(int channel)=>Functions?.Outputs.FirstOrDefault(a=>a.Channel==channel)?.Label??(channel==0?"Vibration":"Vibration "+channel);
         public IDeviceLink Link;
         public Playback Player;
         public TabItem Tab;
@@ -187,7 +190,7 @@ namespace LovenseConnector
             {
                 int channel=channels[i]; var v=new MotorView { Channel=channel }; d.Motors[channel]=v;
                 var panel=new StackPanel(); var border=new Border { Background=Color("#9F241B35"),CornerRadius=new CornerRadius(20),Padding=new Thickness(18),Margin=new Thickness(i==0?0:8,10,i==0&&channels.Length>1?8:0,14),Child=panel }; Grid.SetColumn(border,i); motors.Children.Add(border);
-                panel.Children.Add(Text(channel==0?"Vibration motor":"Motor "+channel,21)); var display=Text("3 / 20",17); panel.Children.Add(display);
+                panel.Children.Add(Text(d.ChannelLabel(channel),21)); var display=Text("3 / 20",17); panel.Children.Add(display);
                 v.Level=new Slider { Minimum=0,Maximum=20,Value=3,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,TickPlacement=System.Windows.Controls.Primitives.TickPlacement.BottomRight,Margin=new Thickness(0,4,0,8) };
                 System.Windows.Automation.AutomationProperties.SetName(v.Level,d.Name+" motor "+channel+" speed");
                 v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed&&!screenArmed&&!OwnsStudio) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
@@ -201,13 +204,13 @@ namespace LovenseConnector
             }
             d.Controls.Children.Add(new Expander { Header="Individual controls",Content=motors,Margin=new Thickness(0,16,0,16) });
             var actions=new WrapPanel(); actions.Children.Add(Action("Stop this toy",()=>OperatorStop(()=>d.Player.StopAll()))); actions.Children.Add(Action("Refresh battery",()=>ReadBattery(d))); actions.Children.Add(Action("Flash indicator",()=>d.Link.Command("Flash;"))); d.Controls.Children.Add(actions);
-            BuildPatterns(d); BuildSettings(d);
+            BuildFunctionSettings(d); BuildPatterns(d); BuildSettings(d);
         }
         void BuildPatterns(Device d)
         {
             var body=new StackPanel { Margin=new Thickness(4,10,4,12) }; d.Controls.Children.Add(new Expander { Header="Custom pattern",Content=body,Margin=new Thickness(0,14,0,12) });
             var row=new WrapPanel(); var target=new ComboBox { Width=145,Margin=new Thickness(0,0,10,0) };
-            foreach(var v in d.Motors.Values) target.Items.Add(v.Channel==0?"Vibration motor":"Motor "+v.Channel);
+            foreach(var v in d.Motors.Values) target.Items.Add(d.ChannelLabel(v.Channel));
             if(d.Motors.Count>1) target.Items.Add("All motors"); target.SelectedIndex=0;
             var mode=new ComboBox { Width=130 }; foreach(var m in new[]{"Steady","Pulse","Wave","Ramp","Custom"}) mode.Items.Add(m); mode.SelectedIndex=1;
             var name=Input("My pattern",190); Field(row,"Target",target); Field(row,"Shape",mode); Field(row,"Pattern name",name); body.Children.Add(row);
@@ -240,6 +243,7 @@ namespace LovenseConnector
                     points.Text=String.Join(", ",(spec.frames??new Frame[0]).Select(f=>f.ms+":"+f.level));
                 }
             })); body.Children.Add(actions);
+            if(d.Functions!=null&&!d.Functions.SupportsPresets)return;
             var presetBody=new StackPanel { Margin=new Thickness(4,10,4,12) };
             var presetRow=new WrapPanel(); var slot=new ComboBox { Width=80 }; for(int i=1;i<=10;i++) slot.Items.Add(i); slot.SelectedIndex=0; var presetTime=Input("2000"); Field(presetRow,"Slot",slot); Field(presetRow,"Duration ms · 500–60000",presetTime);
             presetRow.Children.Add(Action("Play hardware preset",()=>ManualDevice(d,(player,current)=>player.HardwarePreset((int)slot.SelectedItem,Number(presetTime))))); presetBody.Children.Add(presetRow);
@@ -291,9 +295,9 @@ namespace LovenseConnector
                 if(closing||generation!=d.Generation||!Object.ReferenceEquals(d.Link,link)) { link.Dispose(); return; }
                 var parts=type.Split(':'); d.Symbol=parts[0].ToUpperInvariant(); d.Firmware=parts[1];
                 var model=catalog.Match(d.AdvertisedName,d.Symbol); d.Name=model.Name;
-                d.Channels=Catalog.VibrationChannels(model); d.Supported=d.Channels.Length>0;
+                d.Functions=ActuatorProfile.Create(model,d.Symbol,d.Firmware); d.Channels=d.Functions.Outputs.Select(a=>a.Channel).ToArray(); d.Supported=d.Channels.Length>0;
                 link.EdgeMotorEcho=d.Symbol=="P"&&d.Firmware=="204";
-                d.Player=d.Supported?new Playback(link,d.Channels):null; BuildControls(d);
+                d.Player=d.Supported?new Playback(link,d.Functions):null; BuildControls(d);
                 if(d.Player!=null)
                 {
                     var player=d.Player;
@@ -301,7 +305,7 @@ namespace LovenseConnector
                     player.Error+=message=>UI(()=> { if(!Object.ReferenceEquals(d.Player,player)) return; hint.Text=d.Name+": "+message; Log(hint.Text); if(!link.Connected) Lost(d); }); await player.StopAll();
                 }
                 if(closing||generation!=d.Generation||!Object.ReferenceEquals(d.Link,link)) { link.Dispose(); return; }
-                await ReadBattery(d); if(d.Supported&&generation==d.Generation) { try { await ReadSettings(d); } catch { Log("Device settings are not supported by this firmware."); } }
+                await ReadBattery(d); if(d.Supported&&d.Functions.SupportsPresets&&generation==d.Generation) { try { await ReadSettings(d); } catch { Log("Device settings are not supported by this firmware."); } }
                 if(closing||generation!=d.Generation||!Object.ReferenceEquals(d.Link,link)) { link.Dispose(); return; }
                 if(!link.Connected) throw new InvalidOperationException("Toy disconnected during setup.");
                 d.Connected=true; d.Status="Connected · ready"; hint.Text="Connected · ready"; Log(d.Name+" connected. Firmware "+d.Firmware+".");

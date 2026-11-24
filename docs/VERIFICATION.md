@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.17 — Lovense actuator functions — 2026-11-24
+
+Adds capability-based output lanes for rotation, pumping, flexing, thrusting, suction and oscillation; motion settings cover reverse, depth, stroke range and position. Continuous outputs share the existing curve, source-ownership and stop machinery. Local integrations discover function names and native resolution and can use the new `/function` endpoint.
+
+Offline checks cover all 43 catalog entries, model-specific command formats, firmware-gated Flexer channels, independent stops, attempting remaining stops after a failure, position zero versus stop, and withholding a revoked position move. Core tests passed: 18 suites including 164 screen-detection assertions. Native app tests passed: 325 Studio, 198 Screen sync, 21 audio and 17 legacy-import assertions. They use invisible controls and simulated transports; no live game, device output or normal app startup is used.
+
+New actuator compatibility, motion-setting UI appearance and ARM64 execution remain physically unverified. The vendor protocol and SDK are interoperability references, not a guarantee for every firmware or future product. No vendor DLL, device identifiers, recordings or private calibration data are bundled.
+
 ## 0.8.16 — Digit boundary fallback — 2026-11-24
 
 Bright pixels outside HUD digits can stretch their shared recognition bounds. Rejected readings now retry with separate vertical bounds for each digit. Existing successful health and shield readings, calibration masks, confidence thresholds and ambiguity checks are preserved.

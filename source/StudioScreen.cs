@@ -236,7 +236,7 @@ namespace LovenseConnector
             foreach(var d in devices.Values.Where(d=>d.Connected&&d.Player!=null))foreach(int channel in d.Motors.Keys) {
                 string key=MixerKey(d,channel);if(screenRoutes.ContainsKey(key))continue;
                 var saved=screenFeedback.Motors.TryGetValue(ScreenFeedbackKey(d,channel),out var preferences)?preferences:new ScreenMotorFeedback();
-                var route=new ScreenRoute { Device=d,Channel=channel,Include=new CheckBox { Content=d.Name+(channel==0?"":" · Motor "+channel),IsChecked=!screenArmed&&saved.Enabled,MinWidth=150,Margin=new Thickness(0,0,16,0) },Ceiling=new Slider { Minimum=0,Maximum=20,Value=saved.Maximum,Width=130,TickFrequency=1,IsSnapToTickEnabled=true } };
+                var route=new ScreenRoute { Device=d,Channel=channel,Include=new CheckBox { Content=d.Name+" · "+d.ChannelLabel(channel),IsChecked=!screenArmed&&saved.Enabled,MinWidth=150,Margin=new Thickness(0,0,16,0) },Ceiling=new Slider { Minimum=0,Maximum=20,Value=saved.Maximum,Width=130,TickFrequency=1,IsSnapToTickEnabled=true } };
                 Accessible(route.Include,d.Name+" screen sync motor "+channel);Accessible(route.Ceiling,d.Name+" screen sync motor "+channel+" maximum level");
                 var group=new StackPanel { Margin=new Thickness(0,8,0,12) };var row=new WrapPanel();row.Children.Add(route.Include);row.Children.Add(route.Ceiling);var value=Text(saved.Maximum+" / 20",13);value.Margin=new Thickness(12,0,0,0);row.Children.Add(value);group.Children.Add(row);
                 var events=new WrapPanel { Margin=new Thickness(0,6,0,0) };

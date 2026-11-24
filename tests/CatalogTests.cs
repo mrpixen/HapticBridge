@@ -26,6 +26,14 @@ class CatalogTests
         var unknown = catalog.Match("LVS-Unknown99", "xy");
         Require(unknown.Features.Length == 0, "Unknown models do not inherit actuator capabilities");
         Require(Catalog.VibrationChannels(unknown).Length == 0, "Unknown devices expose no motor channels");
+        var prefixOnly=catalog.Match("LVS-EdgePrototype99", "xy");
+        Require(prefixOnly.Ambiguous&&prefixOnly.Features.Length==0, "A model-name prefix alone cannot grant actuator capabilities");
+        var sharedPrefix=catalog.Match("LVS-Osci3Prototype99", "oc");
+        Require(sharedPrefix.Ambiguous&&!sharedPrefix.Features.Contains("Oscillation"), "An unrecognized suffix falls back to common symbol capabilities");
+        var mini=catalog.Match("LOVE-LushMini99", "s");
+        Require(!mini.Ambiguous&&mini.Name=="LushMini", "Known alphabetic model suffixes still match their complete catalog entry");
+        var lowercase=catalog.Match("lvs-edge299", "p");
+        Require(!lowercase.Ambiguous&&Catalog.VibrationChannels(lowercase).SequenceEqual(new[]{1,2}), "Numeric generations and case-insensitive names remain supported");
         Require(catalog.Count == 43, "Complete downloaded model catalog parses");
     }
 }

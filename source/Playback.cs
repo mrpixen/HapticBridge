@@ -98,6 +98,9 @@ namespace LovenseConnector
     {
         readonly ICommandLink link;
         readonly int[] channels;
+        readonly ActuatorProfile profile;
+        public string ChannelLabel(int channel)=>profile?.Get(channel).Label??(channel==0?"Vibration":"Vibration "+channel);
+        public ActuatorProfile Profile=>profile;
         readonly Dictionary<int,MotorJob> jobs=new Dictionary<int,MotorJob>();
         readonly Dictionary<int,int> sent=new Dictionary<int,int>();
         readonly object sync=new object();
@@ -108,11 +111,13 @@ namespace LovenseConnector
         public event Action<int,int,string> Changed;
         public event Action<string> Error;
         public Playback(ICommandLink link,int[] channels) { this.link=link; this.channels=channels; foreach(int c in channels) { sent[c]=0; revisions[c]=0; } }
+        public Playback(ICommandLink link,ActuatorProfile profile) : this(link,profile.Outputs.Select(a=>a.Channel).ToArray()) { this.profile=profile; }
         public bool Running { get { lock(sync) return jobs.Count>0 || orderedMotors.Count>0 || preset!=null; } }
         public string MotorCommand(int channel,int level)
         {
             if(!channels.Contains(channel)) throw new ArgumentException("This motor is not supported by the selected toy.");
             if(level<0 || level>20) throw new ArgumentOutOfRangeException("level");
+            if(profile!=null)return profile.Command(channel,level);
             return (channel==0 ? "Vibrate" : "Vibrate"+channel) + ":" + level + ";";
         }
         void Emit(int channel,int level,string state) { if(Changed!=null) Changed(channel,level,state); }
@@ -251,8 +256,9 @@ namespace LovenseConnector
         {
             // Preset zero terminates firmware playback; Vibrate zero clears all motor levels.
             Exception failure=null;
-            try { await link.Command("Preset:0;").ConfigureAwait(false); } catch(Exception ex) { failure=ex; }
-            try { await link.Command("Vibrate:0;").ConfigureAwait(false); } catch(Exception ex) { failure=ex; }
+            if(profile==null||profile.SupportsPresets)try { await link.Command("Preset:0;").ConfigureAwait(false); } catch(Exception ex) { failure=ex; }
+            foreach(string command in profile==null?new[]{"Vibrate:0;"}:channels.Select(c=>MotorCommand(c,0)).Distinct())
+                try { await link.Command(command).ConfigureAwait(false); } catch(Exception ex) { failure=ex; }
             foreach(var c in channels) { lock(sync) sent[c]=failure==null?0:-1; Emit(c,failure==null?0:-1,failure==null?"Stopped":"Stop unconfirmed"); }
             if(failure!=null) throw failure;
         }
@@ -263,6 +269,7 @@ namespace LovenseConnector
         }
         public async Task HardwarePreset(int index,int durationMs)
         {
+            if(profile!=null&&!profile.SupportsPresets)throw new NotSupportedException("Hardware vibration presets are unavailable for this device. Use custom patterns instead.");
             if(index<1||index>10||durationMs<500||durationMs>60000) throw new ArgumentException("Preset must be 1–10 and duration 0.5–60 seconds.");
             int generation; lock(sync) { if(stopping>0) return; CancelAll(); generation=epoch; }
             var cancel=new CancellationTokenSource();

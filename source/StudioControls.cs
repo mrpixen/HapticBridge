@@ -166,7 +166,7 @@ namespace LovenseConnector
             var linked=new WrapPanel { Margin=new Thickness(0,12,0,0) };linked.Children.Add(Text("Linked level",16));
             mixerHigh=new Slider { Minimum=0,Maximum=20,Value=12,TickFrequency=1,IsSnapToTickEnabled=true,Width=240,Margin=new Thickness(16,0,12,0) };Accessible(mixerHigh,"Linked motor level");
             var linkedValue=Text("12 / 20",16);linked.Children.Add(mixerHigh);linked.Children.Add(linkedValue);liveOptions.Children.Add(linked);
-            linked.Children.Add(Action("Select all",()=>{foreach(var motor in mixerRows.Values.Where(m=>m.Device.Connected))motor.Include.IsChecked=true;return Task.CompletedTask;}));
+            linked.Children.Add(Action("Select all",()=>{foreach(var motor in mixerRows.Values.Where(m=>m.Available))motor.Include.IsChecked=true;return Task.CompletedTask;}));
             mixerHigh.ValueChanged+=(s,e)=>{linkedValue.Text=(int)mixerHigh.Value+" / 20";if(!studioLoading)foreach(var m in SelectedMixer())m.Level.Value=mixerHigh.Value;};
             mixerDuration=Input("0",110);mixerTransition=Input("100",110);
             var timing=new WrapPanel();Field(timing,"Duration (ms, 0 = until stopped)",mixerDuration);Field(timing,"Transition (ms)",mixerTransition);
@@ -249,7 +249,7 @@ namespace LovenseConnector
             studioPatternMode=pattern;bool any=studioDocument?.Lanes.Count>0;studioLive.Visibility=!pattern&&any?Visibility.Visible:Visibility.Collapsed;studioPattern.Visibility=pattern&&any?Visibility.Visible:Visibility.Collapsed;
             studioPointButton.Visibility=pattern&&any?Visibility.Visible:Visibility.Collapsed;studioUndo.Visibility=studioRedo.Visibility=pattern&&any?Visibility.Visible:Visibility.Collapsed;if(studioEmpty!=null)studioEmpty.Visibility=any?Visibility.Collapsed:Visibility.Visible;LayoutStudioInspector();
             if(studioPreview!=null)studioPreview.Visibility=pattern&&any?Visibility.Visible:Visibility.Collapsed;
-            if(!pattern&&!mixerRows.Values.Any(m=>m.Device.Connected)){studioLive.Visibility=Visibility.Collapsed;studioEmpty.Visibility=Visibility.Visible;}
+            if(!pattern&&!mixerRows.Values.Any(m=>m.Available)){studioLive.Visibility=Visibility.Collapsed;studioEmpty.Visibility=Visibility.Visible;}
         }
         void LayoutStudioInspector()
         {
@@ -307,9 +307,9 @@ namespace LovenseConnector
             try {
                 foreach(var d in devices.Values)foreach(int channel in d.Motors.Keys){string key=MixerKey(d,channel);if(mixerRows.ContainsKey(key))continue;
                     if(studioDocument.IsEditing)continue; // Discovery must not split a point-drag transaction.
-                    studioDocument.AddLane(key,d.Name+(channel==0?"":" · Motor "+channel));
+                    studioDocument.AddLane(key,d.Name+" · "+d.ChannelLabel(channel));
                     var m=new MixerMotor { Device=d,Channel=channel };var panel=new Grid();panel.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(150) });panel.ColumnDefinitions.Add(new ColumnDefinition());panel.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(64) });
-                    var identity=new StackPanel();identity.Children.Add(new TextBlock { Text=d.Name,TextTrimming=TextTrimming.CharacterEllipsis,MaxWidth=118,FontSize=15 });identity.Children.Add(new TextBlock { Text=channel==0?"Motor":"Motor "+channel,Foreground=Color("#C4BAD7"),FontSize=13,Margin=new Thickness(0,2,0,0) });
+                    var identity=new StackPanel();identity.Children.Add(new TextBlock { Text=d.Name,TextTrimming=TextTrimming.CharacterEllipsis,MaxWidth=118,FontSize=15 });identity.Children.Add(new TextBlock { Text=d.ChannelLabel(channel),Foreground=Color("#C4BAD7"),FontSize=13,Margin=new Thickness(0,2,0,0) });
                     var labels=new StackPanel();m.Include=new CheckBox { Content=identity,IsChecked=!studioRunning&&audioCapture==null&&!feelArmed&&integration==null,Margin=new Thickness(0,0,0,8) };Accessible(m.Include,d.Name+" motor "+channel+" enabled");labels.Children.Add(m.Include);
                     var value=Text("12 / 20",19);labels.Children.Add(value);m.Status=Text("Sent: unknown",12);labels.Children.Add(m.Status);panel.Children.Add(labels);
                     m.Trace=new LiveMotorTrace { VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,16,0) };Grid.SetColumn(m.Trace,1);panel.Children.Add(m.Trace);
@@ -319,11 +319,11 @@ namespace LovenseConnector
                     m.Include.Checked+=async(s,e)=>await StudioTargetChanged(m);m.Include.Unchecked+=async(s,e)=>await StudioTargetChanged(m);
                     added=true;
                 }
-                foreach(var pair in mixerRows){var m=pair.Value;bool available=m.Device.Connected&&m.Device.Player!=null;var lane=studioDocument.GetLane(pair.Key);if(lane.IsAvailable&&!available)m.Include.IsChecked=false;if(studioOwned.TryGetValue(pair.Key,out var owned)&&(!available||!ReferenceEquals(owned.Item1,m.Device.Player)))studioOwned.Remove(pair.Key);m.Card.IsEnabled=available&&sweep==null&&!closing;studioDocument.SetLaneAvailable(pair.Key,available);studioDocument.RenameLane(pair.Key,m.Device.Name+(m.Channel==0?"":" · Motor "+m.Channel));}
+                foreach(var pair in mixerRows){var m=pair.Value;bool available=m.Available&&m.Device.Player!=null;var lane=studioDocument.GetLane(pair.Key);if(lane.IsAvailable&&!available)m.Include.IsChecked=false;if(studioOwned.TryGetValue(pair.Key,out var owned)&&(!available||!ReferenceEquals(owned.Item1,m.Device.Player)))studioOwned.Remove(pair.Key);m.Card.IsEnabled=available&&sweep==null&&!closing;studioDocument.SetLaneAvailable(pair.Key,available);studioDocument.RenameLane(pair.Key,m.Device.Name+" · "+m.Device.ChannelLabel(m.Channel));}
             } finally {studioLoading=priorLoading;}
             if(added){RebuildStudioSelectors();if(studioEditor.ActiveLaneId==null&&studioDocument.Lanes.Count>0)studioEditor.ActiveLaneId=studioDocument.Lanes[0].Id;}
-            mixerLabel.Visibility=mixerRows.Values.Any(m=>m.Device.Connected)?Visibility.Collapsed:Visibility.Visible;studioStart.IsEnabled=SelectedMixer().Length>0;studioLiveOptions.Visibility=mixerRows.Values.Any(m=>m.Device.Connected)?Visibility.Visible:Visibility.Collapsed;
-            if(audioCapture!=null)audioTargets=mixerRows.Values.Where(m=>m.Device.Connected).ToArray();SetStudioMode(studioPatternMode);studioEditor.Refresh();UpdateStudioInspector();UpdateStudioTargetCount();
+            mixerLabel.Visibility=mixerRows.Values.Any(m=>m.Available)?Visibility.Collapsed:Visibility.Visible;studioStart.IsEnabled=SelectedMixer().Length>0;studioLiveOptions.Visibility=mixerRows.Values.Any(m=>m.Available)?Visibility.Visible:Visibility.Collapsed;
+            if(audioCapture!=null)audioTargets=mixerRows.Values.Where(m=>m.Available).ToArray();SetStudioMode(studioPatternMode);studioEditor.Refresh();UpdateStudioInspector();UpdateStudioTargetCount();
             if(added)QueueStudioAppearance();
         }
         void RebuildStudioSelectors()
@@ -336,10 +336,10 @@ namespace LovenseConnector
                 choice.SetBinding(UIElement.IsEnabledProperty,new Binding("IsEnabled") { Source=m.Card });
                 var targetItem=new MenuItem { Header="Motor "+slot,ToolTip=m.Device.Name+" · "+m.Channel,IsCheckable=true,StaysOpenOnClick=true };
                 targetItem.SetBinding(MenuItem.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });targetItem.SetBinding(UIElement.IsEnabledProperty,new Binding("IsEnabled") { Source=m.Card });targetsMenu.Items.Add(targetItem);
-                if(studioAudioRoutes!=null){var p=new StackPanel();var route=new CheckBox { Content=m.Device.Name+" · Motor "+m.Channel };route.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });p.Children.Add(route);var gain=new Slider{Minimum=0,Maximum=20,Width=180,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,14,0,0)};gain.SetBinding(RangeBase.ValueProperty,new Binding("Value"){Source=m.Level,Mode=BindingMode.TwoWay});Accessible(gain,m.Device.Name+" sound maximum level");p.Children.Add(gain);var card=StudioPanel(p);card.Margin=new Thickness(0,0,12,12);studioAudioRoutes.Children.Add(card);}
+                if(studioAudioRoutes!=null){var p=new StackPanel();var route=new CheckBox { Content=m.Device.Name+" · "+m.Device.ChannelLabel(m.Channel) };route.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });p.Children.Add(route);var gain=new Slider{Minimum=0,Maximum=20,Width=180,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,14,0,0)};gain.SetBinding(RangeBase.ValueProperty,new Binding("Value"){Source=m.Level,Mode=BindingMode.TwoWay});Accessible(gain,m.Device.Name+" sound maximum level");p.Children.Add(gain);var card=StudioPanel(p);card.Margin=new Thickness(0,0,12,12);studioAudioRoutes.Children.Add(card);}
             }
             int draftIndex=0;foreach(var lane in studioDocument.Lanes){string key=lane.Id;string title=mixerRows.ContainsKey(key)?"Motor "+(mixerRows.Keys.ToList().IndexOf(key)+1):"Draft "+(++draftIndex);var laneButton=Action(title,()=>{studioEditor.ActiveLaneId=key;UpdateStudioInspector();QueueStudioAppearance();return Task.CompletedTask;});laneButton.ToolTip=lane.DisplayName;studioLaneTabs.Children.Add(laneButton);studioLaneButtons[key]=laneButton;}
-            targetsMenu.Items.Add(new Separator());var all=new MenuItem { Header="Select all" };all.Click+=(s,e)=>{foreach(var m in mixerRows.Values.Where(m=>m.Device.Connected))m.Include.IsChecked=true;};targetsMenu.Items.Add(all);
+            targetsMenu.Items.Add(new Separator());var all=new MenuItem { Header="Select all" };all.Click+=(s,e)=>{foreach(var m in mixerRows.Values.Where(m=>m.Available))m.Include.IsChecked=true;};targetsMenu.Items.Add(all);
             var clear=new MenuItem { Header="Clear" };clear.Click+=(s,e)=>{foreach(var m in mixerRows.Values)m.Include.IsChecked=false;};targetsMenu.Items.Add(clear);
             studioTargetPicker=Action("Play targets",()=>{targetsMenu.PlacementTarget=studioTargetPicker;targetsMenu.IsOpen=true;return Task.CompletedTask;});studioTargetPicker.ContextMenu=targetsMenu;studioLaneTabs.Children.Add(studioTargetPicker);
             targetsMenu.PreviewKeyDown+=async(s,e)=>{if(e.Key==Key.Escape){targetsMenu.IsOpen=false;e.Handled=true;await StopAll();}};
@@ -363,7 +363,7 @@ namespace LovenseConnector
                         if(!SelectedMixer().Any())ClearStudioOwnership();
                         await player.Stop(motor.Channel);
                     }
-                    else if(motor.Device.Connected)await JoinStudioMotor(motor,session,operation);
+                    else if(motor.Available)await JoinStudioMotor(motor,session,operation);
                 }
                 else if(audioCapture!=null&&motor.Include.IsChecked!=true&&player!=null)await player.Stop(motor.Channel);
             }
@@ -387,12 +387,12 @@ namespace LovenseConnector
             var targets=SelectedMixer();if(targets.Length==0)throw new ArgumentException("Connect and select at least one motor.");
             bool pattern=studioPatternMode;int operation=operatorGeneration,revision=studioCurveRevision;
             var players=targets.ToDictionary(m=>MixerKey(m.Device,m.Channel),m=>m.Device.Player);
-            var specs=mixerRows.Where(p=>p.Value.Device.Connected).ToDictionary(p=>p.Key,p=>pattern?StudioCurveSpec(p.Key):StudioLiveSpec(p.Value));foreach(var spec in specs.Values)spec.Validate();
+            var specs=mixerRows.Where(p=>p.Value.Available).ToDictionary(p=>p.Key,p=>pattern?StudioCurveSpec(p.Key):StudioLiveSpec(p.Value));foreach(var spec in specs.Values)spec.Validate();
             ClearStudioOwnership();if(!await StopPlayers())throw new InvalidOperationException("Output could not be stopped before starting.");if(operation!=operatorGeneration||closing)return;
             if(pattern&&revision!=studioCurveRevision){hint.Text="The curve changed while starting. Start again to play the edited curve.";return;}
             studioRunning=true;studioRunningPattern=pattern;studioOperation=operation;studioClock=Stopwatch.StartNew();studioRunSpecs.Clear();foreach(var pair in specs)studioRunSpecs[pair.Key]=pair.Value;
             int session=studioSession;studioPendingStarts++;
-            try{foreach(var m in targets){if(!OwnsStudio||session!=studioSession)return;string key=MixerKey(m.Device,m.Channel);if(m.Include.IsChecked==true&&m.Device.Connected&&ReferenceEquals(m.Device.Player,players[key]))await JoinStudioMotor(m,session,operation);}}
+            try{foreach(var m in targets){if(!OwnsStudio||session!=studioSession)return;string key=MixerKey(m.Device,m.Channel);if(m.Include.IsChecked==true&&m.Available&&ReferenceEquals(m.Device.Player,players[key]))await JoinStudioMotor(m,session,operation);}}
             catch{if(session==studioSession)await StopStudioMotors();throw;}
             finally{if(session==studioSession)studioPendingStarts--;}
             RefreshStudioPlaybackState();RefreshStudioDock();
@@ -401,7 +401,7 @@ namespace LovenseConnector
         {
             if(!OwnsStudio||session!=studioSession||operation!=operatorGeneration||studioClock==null)return;
             string key=MixerKey(motor.Device,motor.Channel);var player=motor.Device.Player;var clock=studioClock;
-            if(player==null||!motor.Device.Connected||motor.Include.IsChecked!=true)return;
+            if(player==null||!motor.Available||motor.Include.IsChecked!=true)return;
             var source=studioRunSpecs.GetValueOrDefault(key);
             if(source==null&&!studioRunningPattern)source=studioRunSpecs.Values.FirstOrDefault();
             if(source!=null&&!studioRunningPattern){source=StudioPresetRules.ForJoin(source,0);if(source!=null){source.high=(int)motor.Level.Value;source.low=0;}}
@@ -464,7 +464,7 @@ namespace LovenseConnector
             if(!await StopAll())return;var preset=ExportStudioMix();
             var dialog=new SaveFileDialog { Filter="HapticBridge mixes|*.mix.json",FileName="My mix.mix.json" };if(dialog.ShowDialog(window)==true)File.WriteAllText(dialog.FileName,json.Serialize(preset));
         }
-        string[] StudioMotorOrder()=>mixerRows.OrderByDescending(pair=>pair.Value.Device.Connected&&pair.Value.Device.Player!=null).Select(pair=>pair.Key).ToArray();
+        string[] StudioMotorOrder()=>mixerRows.OrderByDescending(pair=>pair.Value.Available&&pair.Value.Device.Player!=null).Select(pair=>pair.Key).ToArray();
         async Task LoadStudioMix()
         {
             if(!await StopAll())return;var dialog=new OpenFileDialog { Filter="HapticBridge mixes|*.mix.json;*.json" };if(dialog.ShowDialog(window)!=true)return;
@@ -483,7 +483,7 @@ namespace LovenseConnector
                 string name=i<keys.Length?studioDocument.GetLane(key).DisplayName:"Unassigned curve "+(i+1);
                 var lane=i<preset.lanes.Length?validated.Lanes[i]:null;
                 replacement.AddLane(key,name,lane?.Points,lane?.Interpolation??CurveInterpolation.Smooth);
-                if(i<keys.Length)replacement.SetLaneAvailable(key,mixerRows[key].Device.Connected&&mixerRows[key].Device.Player!=null);
+                if(i<keys.Length)replacement.SetLaneAvailable(key,mixerRows[key].Available&&mixerRows[key].Device.Player!=null);
                 else draftOptions[key]=new StudioLanePreset { level=preset.lanes[i].level,selected=preset.lanes[i].selected };
                 if(i<preset.lanes.Length)importedKeys.Add(key);
             }
@@ -499,7 +499,7 @@ namespace LovenseConnector
                 for(int i=0;i<keys.Length;i++)
                 {
                     var motor=mixerRows[keys[i]];
-                    if(i<preset.lanes.Length){var lane=preset.lanes[i];motor.Level.Value=lane.level;motor.Include.IsChecked=lane.selected&&motor.Device.Connected;}
+                    if(i<preset.lanes.Length){var lane=preset.lanes[i];motor.Level.Value=lane.level;motor.Include.IsChecked=lane.selected&&motor.Available;}
                     else {motor.Level.Value=0;motor.Include.IsChecked=false;}
                 }
                 mixerDuration.Text=preset.durationMs.ToString(CultureInfo.InvariantCulture);mixerTransition.Text=preset.transitionMs.ToString(CultureInfo.InvariantCulture);
