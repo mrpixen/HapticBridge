@@ -437,7 +437,9 @@ namespace LovenseConnector
                     // The detector already deduplicates kills. A distinct new kill can
                     // retrigger its reward, but cannot interrupt a higher-priority death.
                     if(now-t.LastCue<.45&&(priority<t.Priority||priority==t.Priority&&ev.Kind!="Kill")){cooling++;continue;}
-                    var pattern=ev.Kind=="Kill"?ScreenKillPattern(level,ev.Count):new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=40 };
+                    // Short hit pulses must begin above zero. A zero-valued ramp
+                    // sample plus a Bluetooth ACK can consume their whole deadline.
+                    var pattern=ev.Kind=="Kill"?ScreenKillPattern(level,ev.Count):new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=0 };
                     t.LastCue=now;t.Priority=priority;
                     pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current));
                 }
