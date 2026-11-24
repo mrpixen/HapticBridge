@@ -1,30 +1,34 @@
 # Release verification
 
-## Unreleased — Stroke configuration discovery — 2026-11-24
+## 0.8.18 — Motion control fixes — 2026-11-24
+
+Device summaries, tooltips and accessible controls now name the discovered actuator functions rather than assuming vibration.
+
+### Stroke configuration discovery
 
 Device discovery now includes the configured stroke endpoints so integrations can display the range used by subsequent thrusting commands. Both endpoints come from one immutable snapshot. Disconnected devices and devices without stroke control report null; the values are app configuration, not physical-position feedback.
 
 Passed: 334 native Studio assertions, including default range, accepted changes, disconnection and replacement by a model without stroke control. Windows build completed without warnings or errors; source privacy scan found no configured markers. Tests used offline simulated devices.
 
-## Unreleased — Position move status — 2026-11-24
+### Position move status — 2026-11-24
 
 Reproduced a position command reporting inactive output at level zero while still in flight. Position moves now participate in playback and channel activity, with an unknown speed rather than a fabricated zero. Confirmed cleanup restores level zero; failed cleanup keeps output unconfirmed while clearing the completed task.
 
 The active-status regression failed before the fix. All 18 core suites passed afterward, including successful and rejected stop cleanup. Windows build: zero warnings and errors. Source privacy: no findings. Testing used simulated transport only, with no GUI or hardware access.
 
-## Unreleased — Stop pending motion settings — 2026-11-24
+### Stop pending motion settings — 2026-11-24
 
 A channel stop could leave a previously queued position move eligible to start. Reproduced this with a blocked simulated transport: the position command was sent after the stop request. Channel stops now invalidate pending device-wide settings, checked both after the playback queue and before transport submission. This does not undo commands already transmitted.
 
 The regression failed before the change and passed afterward. All 18 core suites passed; the Windows build completed with no warnings or errors. Source privacy checks reported no findings. No physical devices or GUI were used.
 
-## Unreleased — Integration session cleanup — 2026-11-24
+### Integration session cleanup — 2026-11-24
 
 Reproduced an old integration session sending stop commands to a replacement device connection at the same address. Session ownership now retains the original playback instance and channel; cleanup skips connections that have been replaced. A session that explicitly commands the replacement still stops it normally.
 
 The new regression failed before the fix. All 18 core suites and 330 native Studio assertions passed afterward, using simulated connections with no visible windows or physical output. Source privacy checks passed with no findings. Hardware reconnection behavior remains unverified.
 
-## Unreleased — Binary command diagnostics — 2026-11-24
+### Binary command diagnostics — 2026-11-24
 
 A valid Solace Pro stroke packet with speed 13 and range 10–59 produced multiple activity-log lines because its payload contains raw control bytes. Command traces and transport errors now render numeric stroke fields; other non-printing command characters are escaped. Bluetooth payload bytes and reply matching are unchanged. Passed: 18 core suites, including the binary-payload regression, and a Windows x64 build with zero warnings. Source privacy checks found no configured private markers. No hardware or normal app startup was used.
 
