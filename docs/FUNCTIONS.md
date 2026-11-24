@@ -17,6 +17,8 @@ Every continuous output gets its own lane in Controls and its own route in Sound
 | 8 | Suction | 0–20 |
 | 9 | Oscillation | 0–20 |
 
+For the air pump, pattern levels **1–9 → native 1**, **10–16 → native 2**, and **17–20 → native 3**. Zero stops it. Intermediate slider positions within one band send the same native level; they do not create extra hardware resolution. Integrations can inspect `nativeMax` in `/devices` before generating a pattern.
+
 Zero stops a continuous output. It does not reset position or depth. Stop all attempts every actuator even if another stop fails; failures remain unconfirmed. Device presets are offered for vibration-only profiles; custom patterns work with all continuous outputs.
 
 Motion settings stop current playback before changing depth, stroke range or rotation direction. Position is a bounded point move, followed by a motion stop. Stroke range is retained for the current connection and used on the next thrusting start. These settings are also available through [`POST /function`](API.md#motion-settings).
