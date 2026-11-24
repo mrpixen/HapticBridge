@@ -109,12 +109,13 @@ namespace LovenseConnector
         int epoch, stopping;
         // Per-channel stops must also invalidate pending device-wide settings.
         int functionRevision;
+        bool positionMoving;
         CancellationTokenSource preset;
         public event Action<int,int,string> Changed;
         public event Action<string> Error;
         public Playback(ICommandLink link,int[] channels) { this.link=link; this.channels=channels; foreach(int c in channels) { sent[c]=0; revisions[c]=0; } }
         public Playback(ICommandLink link,ActuatorProfile profile) : this(link,profile.Outputs.Select(a=>a.Channel).ToArray()) { this.profile=profile; }
-        public bool Running { get { lock(sync) return jobs.Count>0 || orderedMotors.Count>0 || preset!=null; } }
+        public bool Running { get { lock(sync) return jobs.Count>0 || orderedMotors.Count>0 || preset!=null || positionMoving; } }
         public string MotorCommand(int channel,int level)
         {
             if(!channels.Contains(channel)) throw new ArgumentException("This motor is not supported by the selected toy.");
@@ -124,7 +125,7 @@ namespace LovenseConnector
         }
         void Emit(int channel,int level,string state) { if(Changed!=null) Changed(channel,level,state); }
         public int Level(int channel) { lock(sync) return sent.ContainsKey(channel)?sent[channel]:0; }
-        public bool Active(int channel) { lock(sync) return jobs.ContainsKey(channel)||orderedMotors.ContainsKey(channel); }
+        public bool Active(int channel) { lock(sync) return jobs.ContainsKey(channel)||orderedMotors.ContainsKey(channel)||(channel==7&&positionMoving); }
         public bool UpdateSteady(int channel,int level,int durationMs,int transitionMs=0,Func<bool> isCurrent=null)
         {
             MotorCommand(channel,level); if(durationMs<0||durationMs>3600000) throw new ArgumentOutOfRangeException("durationMs");

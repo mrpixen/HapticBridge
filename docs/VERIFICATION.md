@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased — Position move status — 2026-11-24
+
+Reproduced a position command reporting inactive output at level zero while still in flight. Position moves now participate in playback and channel activity, with an unknown speed rather than a fabricated zero. Confirmed cleanup restores level zero; failed cleanup keeps output unconfirmed while clearing the completed task.
+
+The active-status regression failed before the fix. All 18 core suites passed afterward, including successful and rejected stop cleanup. Windows build: zero warnings and errors. Source privacy: no findings. Testing used simulated transport only, with no GUI or hardware access.
+
 ## Unreleased — Stop pending motion settings — 2026-11-24
 
 A channel stop could leave a previously queued position move eligible to start. Reproduced this with a blocked simulated transport: the position command was sent after the stop request. Channel stops now invalidate pending device-wide settings, checked both after the playback queue and before transport submission. This does not undo commands already transmitted.

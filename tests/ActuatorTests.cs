@@ -52,6 +52,18 @@ internal static class ActuatorTests
         link=new FakeLink { DelayMs=1 };player=new Playback(link,pro);
         await player.ApplyFunction("position",0);
         Check(link.Snapshot().Contains("FSetSite:0;")&&link.Snapshot().Last()=="Mply:0:20;","point move to zero ends in a real motion stop");
+        link=new FakeLink { DelayMs=1,Block="FSetSite:50;" };player=new Playback(link,pro);
+        var moving=player.ApplyFunction("position",50);await link.Entered.Task;
+        bool reported=player.Running&&player.Active(7)&&player.Level(7)==-1;
+        link.Release.SetResult(true);await moving;
+        Check(reported,"position move reports active output with unknown speed while in flight");
+        Check(!player.Running&&!player.Active(7)&&player.Level(7)==0,"completed position move reports confirmed stop");
+        link=new FakeLink { DelayMs=1,Block="FSetSite:50;" };player=new Playback(link,pro);
+        moving=player.ApplyFunction("position",50);await link.Entered.Task;
+        link.Fail="Mply:0:20;";link.Release.SetResult(true);
+        bool stopFailed=false;try { await moving; }catch(InvalidOperationException){stopFailed=true;}
+        Check(stopFailed&&!player.Running&&!player.Active(7)&&player.Level(7)==-1,"failed position stop clears the task but preserves unconfirmed output");
+
         link=new FakeLink { DelayMs=1,Block="Mply:0:20;" };player=new Playback(link,pro);bool current=true;
         var move=player.ApplyFunction("position",50,isCurrent:()=>current);await link.Entered.Task;current=false;link.Release.SetResult(true);await move;
         Check(!link.Snapshot().Any(c=>c.StartsWith("FSetSite:")),"revoked source cannot submit a queued position move");

@@ -32,7 +32,13 @@ namespace LovenseConnector
                 if(function=="stroke") { profile.SetStroke(value,high);return; }
                 string command=function=="position"?profile.PositionCommand(value):function=="depth"?profile.DepthCommand(value):"RotateChange;";
                 // Recheck after the transport queue as well as the playback queue.
-                Func<string> sample=()=> { lock(sync)return epoch==expected&&functionRevision==revision&&(isCurrent==null||isCurrent())?command:null; };
+                Func<string> sample=()=> {
+                    lock(sync) {
+                        if(epoch!=expected||functionRevision!=revision||isCurrent!=null&&!isCurrent())return null;
+                        if(function=="position") { positionMoving=true;sent[7]=-1;Emit(7,-1,"Position move"); }
+                        return command;
+                    }
+                };
                 var latest=link as ILatestCommandLink;
                 try {
                     if(latest!=null)await latest.CommandLatest(sample,System.Threading.CancellationToken.None).ConfigureAwait(false);
@@ -41,7 +47,10 @@ namespace LovenseConnector
                 }
                 finally {
                     // Position zero is a real endpoint, never a stop command.
-                    if(function=="position")await ZeroAll().ConfigureAwait(false);
+                    if(function=="position") {
+                        try { await ZeroAll().ConfigureAwait(false); }
+                        finally { lock(sync)positionMoving=false; }
+                    }
                 }
             }
             finally { controls.Release(); }

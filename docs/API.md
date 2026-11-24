@@ -54,6 +54,8 @@ Valid output requests also renew the session. Keep a heartbeat running during lo
 
 Ownership belongs to the connection that received each command. After a device reconnects, releasing or expiring an old session will not stop the replacement connection unless that session has explicitly commanded it.
 
+While a position move is in flight, its thrust channel reports `active: true` and `acknowledgedLevel: -1`: a position target does not specify a speed. After its stop is acknowledged, the channel returns to inactive at level zero. If that stop fails, the level stays unconfirmed.
+
 ## Set motor levels
 
 `POST /motor` controls one motor:
