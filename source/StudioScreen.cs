@@ -370,12 +370,16 @@ namespace LovenseConnector
                 if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!ScreenChannelAvailable(t.Device,t.Channel)||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
                 else if(screenCapture.Foreground){if(!screenForegroundSeen){ResetScreenDetection();screenLastGood=now;}screenForegroundSeen=true;}
                 else if(screenForegroundSeen||now-screenArmedAt>8){if(!await StopForTick("Window inactive · output off"))return;}
-                if(screenArmed&&screenForegroundSeen&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await StopForTick("HUD signal lost · output off"))return;}
+                if(screenArmed&&screenForegroundSeen&&(screenFrozen||frame==null||now-frame.Time>.5)&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await StopForTick("HUD signal lost · output off"))return;}
             }
             if(screenFrozen||frame==null)return;
             if(now-frame.Time>.5){ResetScreenDetection();return;}
             if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){if(!await StopForTick("Window resized · verify calibration before enabling output"))return;ResetScreenDetection();}
             screenFrame=frame;if(screenPreview.IsVisible)screenPreview.Show(frame);var read=RefreshScreenReading();if(read?.Health.HasValue==true)screenLastGood=now;
+            // Evaluate a fresh pending sample before expiring the previous HUD reading.
+            // Unknown health still expires on schedule; a newly readable sample can recover.
+            if(screenArmed&&screenForegroundSeen&&screenLastGood>=0&&now-screenLastGood>1)
+                {if(!await StopForTick("HUD signal lost · output off"))return;}
             bool spectator=screenSpectatorFilter.Push(read?.SpectatorScore??0,frame.Time);
             if(spectator) {
                 screenFilter.Reset();screenDeathMarkerFilter.Reset();

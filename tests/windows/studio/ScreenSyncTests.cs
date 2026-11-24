@@ -126,6 +126,14 @@ internal static partial class ScreenSyncTests
             Check(links.All(l=>!l.Positive.IsEmpty),"same damage event reaches both selected motors");Check(players.All(p=>p.Level(0)==0&&!p.Active(0)),"bounded damage automatically stops all motors");
             capture.Foreground=false;await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"focus loss disarms");capture.Foreground=true;await Feed(app,capture,"40",3);Check(!Get<bool>(app,"screenArmed"),"returning to window never rearms output");
             await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"stale capture disarms");
+            await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);
+            Set(app,"screenLastGood",ScreenCapture.Now-2);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));
+            int recoveryCommands=links.Sum(l=>l.Commands);
+            await Feed(app,capture,"40",1);
+            Check(Get<bool>(app,"screenArmed")&&links.Sum(l=>l.Commands)==recoveryCommands,"fresh readable pending frame recovers before stale previous HUD expires without sending output");
+            Set(app,"screenLastGood",ScreenCapture.Now-2);await Feed(app,capture,"",1);
+            Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"fresh unreadable pending frame still expires lost health and stops output");
+            await Feed(app,capture,"40",1);Check(!Get<bool>(app,"screenArmed"),"health recovery after confirmed signal loss does not rearm output");
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"death cue ends and disarms before spectating");
             await OutputChangesAndPendingArm(app,capture,links,players);
             await RapidDamageThenDeath(app,capture,links,players);
