@@ -1,10 +1,28 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using LovenseConnector;
 internal static partial class ScreenSyncTests
 {
+    static void SelectedRegionsRemainVisible(ConnectorApp app)
+    {
+        var preview=Get<HudPreview>(app,"screenPreview");var previous=preview.Profile;
+        var picker=Get<ComboBox>(app,"screenRegion");int selected=picker.SelectedIndex;
+        try {
+            preview.Profile=new ScreenProfile {Shield=new HudRegion {X=.2,Y=.4,Width=.1,Height=.1},Spectator=new HudRegion {X=.4,Y=.4,Width=.1,Height=.1},DeathMarker=new HudRegion {X=.7,Y=.4,Width=.1,Height=.1}};
+            preview.Show(new ScreenPixels(new byte[640*360*4],640,360,0));
+            byte[] Render(){preview.Measure(new Size(640,360));preview.Arrange(new Rect(0,0,640,360));preview.UpdateLayout();var bitmap=new RenderTargetBitmap(640,360,96,96,PixelFormats.Pbgra32);bitmap.Render(preview);var pixels=new byte[640*360*4];bitmap.CopyPixels(pixels,640*4,0);return pixels;}
+            picker.SelectedIndex=0;var baseline=Render();
+            foreach(int choice in new[]{2,3,4}) {
+                picker.SelectedIndex=choice;Check(!Render().SequenceEqual(baseline),"selected optional region is drawn before learning: "+choice);
+                picker.SelectedIndex=0;Check(Render().SequenceEqual(baseline),"unlearned region hides after changing selection: "+choice);
+            }
+        }finally{picker.SelectedIndex=selected;preview.Profile=previous;preview.Show(Get<ScreenPixels>(app,"screenFrame"));}
+    }
     static async Task DeathTextFeedback(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
     {
         var profile=Get<ScreenProfile>(app,"screenProfile");var saved=ScreenCalibrationData.Capture(profile).Snapshot();

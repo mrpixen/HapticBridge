@@ -181,6 +181,7 @@ internal static partial class ScreenSyncTests
             Call(app,"SaveScreenProfile");var restored=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>(File.ReadAllText(Path.Combine(temp,"screen-profile.json")));
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
             await SpectatorSuppression(app,capture,links,players);
+            SelectedRegionsRemainVisible(app);
             await DeathTextFeedback(app,capture,links,players);
             await BadgeLearning(app);
             await CalibrationFiles(app,capture,temp,links,players);
