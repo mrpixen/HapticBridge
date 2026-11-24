@@ -5,8 +5,8 @@ Client-only Fabric mod for Minecraft **26.3**, Fabric Loader **0.20.1+**, matchi
 ## Play
 
 1. Open HapticBridge, connect your devices, and enable integrations.
-2. Install this mod and the matching Fabric API in your Minecraft instance.
-3. Put the gateway connection JSON in the location named by `gatewayConnectionFile` in `config/minecraft-immersion.json`.
+2. Download the mod JAR from [Minecraft Immersion releases](https://github.com/mrpixen/HapticBridge/releases/tag/minecraft-v0.2.1). Put it and the matching Fabric API in your Minecraft instance’s `mods` folder. Remove older Immersion JARs.
+3. In HapticBridge, use **Integrations → Copy connection**. Save the copied JSON as `config/lovense-gateway.json` inside your Minecraft instance. If you changed `gatewayConnectionFile` in `config/minecraft-immersion.json`, use that path instead.
 4. Enter a world. **F8** toggles feedback; **F9** shows status. Stop all in HapticBridge pauses integrations until you enable them again.
 
 ## Default feedback
