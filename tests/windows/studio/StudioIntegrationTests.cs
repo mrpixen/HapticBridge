@@ -59,6 +59,7 @@ internal static partial class StudioIntegrationTests
         await TimedOutApiQueueCannotStartOutput();
         await CancelledApiHandoffCannotAcquireSession();
         await FunctionChannelsThroughNativeApp();
+        await CancelledApiMotionDoesNotApplySettings();
         await CancelledApiFrameStopsBeforeNextMotor();
         await CancelledApiStartCannotEscapePlaybackWaits();
         await AcceptedApiOutputKeepsItsLease();

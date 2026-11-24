@@ -19,9 +19,32 @@ internal static partial class StudioIntegrationTests
     sealed class FunctionLink : ICommandLink,ILatestCommandLink
     {
         public readonly ConcurrentQueue<string> Sent=new();
+        public bool PauseNextCommand;
+        public readonly TaskCompletionSource<bool> Entered=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource<bool> Resume=new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<string> Command(string command)=>Command(command,CancellationToken.None);
-        public Task<string> Command(string command,CancellationToken cancel) { cancel.ThrowIfCancellationRequested();Sent.Enqueue(command);return Task.FromResult("OK"); }
+        public async Task<string> Command(string command,CancellationToken cancel) {
+            cancel.ThrowIfCancellationRequested();
+            if(PauseNextCommand) { PauseNextCommand=false;Entered.TrySetResult(true);await Resume.Task; }
+            Sent.Enqueue(command);return "OK";
+        }
         public Task<string> CommandLatest(Func<string> sample,CancellationToken cancel) { cancel.ThrowIfCancellationRequested();var command=sample();return command==null?Task.FromResult(""):Command(command,cancel); }
+    }
+    static async Task CancelledApiMotionDoesNotApplySettings()
+    {
+        foreach(string function in new[]{"stroke","position"}) {
+            await using var f=new Fixture(false);var link=new FunctionLink { PauseNextCommand=true };
+            var profile=ActuatorProfile.Create(new ModelMatch { Features=new[]{"Thrusting","Position"} },"BA","1");
+            var d=new Device { Address=3,Name="Synthetic machine",Connected=true,Supported=true,Functions=profile,Channels=new[]{7},Player=new Playback(link,profile),Controls=new StackPanel(),State=new TextBlock(),Details=new TextBlock(),ConnectButton=new Button(),Tab=new TabItem() };
+            Get<Dictionary<ulong,Device>>(f.App,"devices").Add(d.Address,d);Call(f.App,"BuildControls",d);
+            var session=SyntheticApiSession(f);using var cancellation=new CancellationTokenSource();
+            var request=NativeApi(f,"function",new() { ["sessionId"]=session.Id,["deviceId"]="000000000003",["function"]=function,["value"]=20,["high"]=75 },cancellation.Token);
+            try { await Until(()=>link.Entered.Task.IsCompleted,"motion request reaches its initial stop"); }
+            finally { cancellation.Cancel();link.Resume.TrySetResult(true); }
+            bool rejected=false;try { await request; }catch(OperationCanceledException) { rejected=true; }
+            Check(rejected,"cancelled "+function+" request is not acknowledged as accepted");
+            Check(profile.StrokeLow==0&&profile.StrokeHigh==100&&!link.Sent.Any(c=>c.StartsWith("FSetSite:")),"cancelled "+function+" request leaves range unchanged and sends no point move");
+        }
     }
     static async Task FunctionChannelsThroughNativeApp()
     {
