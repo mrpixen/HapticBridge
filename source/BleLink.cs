@@ -138,25 +138,26 @@ namespace LovenseConnector
                 if(latest!=null) { command=latest();if(command==null)return "";match=value=>Replies.CommandMatches(command,value,EdgeMotorEcho); }
                 var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
                 lock(sync) { reply = pending; accepts = match; }
+                string description=ProtocolDiagnostics.Command(command);
                 var timer = System.Diagnostics.Stopwatch.StartNew();
-                if(Trace!=null) Trace("TX " + command);
+                if(Trace!=null) Trace("TX " + description);
                 using(var writer = new DataWriter())
                 {
                     writer.WriteBytes(Encoding.ASCII.GetBytes(command));
                     var write = WinAsync.Task(tx.WriteValueAsync(writer.DetachBuffer(), (tx.CharacteristicProperties & GattCharacteristicProperties.Write) != 0 ? GattWriteOption.WriteWithResponse : GattWriteOption.WriteWithoutResponse));
                     if(await System.Threading.Tasks.Task.WhenAny(write,System.Threading.Tasks.Task.Delay(3000)).ConfigureAwait(false) != write)
-                    { Dispose(); throw new TimeoutException("Bluetooth write timed out for " + command + " Connection released."); }
+                    { Dispose(); throw new TimeoutException("Bluetooth write timed out for " + description + " Connection released."); }
                     var status = await write.ConfigureAwait(false);
-                    if(status != GattCommunicationStatus.Success) { Dispose(); throw new InvalidOperationException("Bluetooth write: " + status + " for " + command); }
+                    if(status != GattCommunicationStatus.Success) { Dispose(); throw new InvalidOperationException("Bluetooth write: " + status + " for " + description); }
                 }
                 // Once a command is written, consume its reply before allowing the next command.
                 // Cancellation is checked BEFORE the write, so ACKs cannot slip to another request.
                 if(await System.Threading.Tasks.Task.WhenAny(pending.Task,System.Threading.Tasks.Task.Delay(1200)).ConfigureAwait(false) != pending.Task)
-                { Dispose(); throw new TimeoutException("Toy did not acknowledge " + command + " Connection released."); }
+                { Dispose(); throw new TimeoutException("Toy did not acknowledge " + description + " Connection released."); }
                 string response = await pending.Task.ConfigureAwait(false);
                 LastRoundTripMs = timer.Elapsed.TotalMilliseconds;
-                if(Trace != null) Trace(command + " → " + response + " (" + Math.Round(LastRoundTripMs) + " ms)");
-                if(IsError(response)) throw new NotSupportedException("Toy rejected " + command + ": " + response);
+                if(Trace != null) Trace(description + " → " + response + " (" + Math.Round(LastRoundTripMs) + " ms)");
+                if(IsError(response)) throw new NotSupportedException("Toy rejected " + description + ": " + response);
                 return response;
             }
             finally { lock(sync) { reply = null; accepts = null; } gate.Release(); }

@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased — Binary command diagnostics — 2026-11-24
+
+A valid Solace Pro stroke packet with speed 13 and range 10–59 produced multiple activity-log lines because its payload contains raw control bytes. Command traces and transport errors now render numeric stroke fields; other non-printing command characters are escaped. Bluetooth payload bytes and reply matching are unchanged. Passed: 18 core suites, including the binary-payload regression, and a Windows x64 build with zero warnings. Source privacy checks found no configured private markers. No hardware or normal app startup was used.
+
 ## 0.8.17 — Lovense actuator functions — 2026-11-24
 
 Adds capability-based output lanes for rotation, pumping, flexing, thrusting, suction and oscillation; motion settings cover reverse, depth, stroke range and position. Continuous outputs share the existing curve, source-ownership and stop machinery. Local integrations discover function names and native resolution and can use the new `/function` endpoint.

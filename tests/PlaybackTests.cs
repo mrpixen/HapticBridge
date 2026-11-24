@@ -37,6 +37,11 @@ namespace LovenseConnector
         static async Task Run()
         {
             var frames=new ReplyFramer();
+            string binary="FLVS:"+(char)13+(char)10+(char)59+";";
+            Check(ProtocolDiagnostics.Command(binary)=="FLVS [speed=13, start=10, end=59]","binary stroke trace distinguishes payload bytes from framing and newlines");
+            Check(binary[5]==13&&binary[6]==10&&binary[7]==59&&binary.Length==9,"formatting leaves original wire command unchanged");
+            Check(ProtocolDiagnostics.Command("Vibrate2:20;")=="Vibrate2:20;","ordinary command diagnostics stay unchanged");
+            Check(!ProtocolDiagnostics.Command("FLVS:"+(char)10).Contains('\n'),"truncated binary command remains a single readable diagnostic line");
             var smooth=new LevelTransition(0);smooth.Sample(20,300,0);
             int first=smooth.Sample(18,300,100);Check(first>0,"retarget advances the previous envelope");
             Check(smooth.Sample(16,300,200)>first,"repeated changing targets keep moving");

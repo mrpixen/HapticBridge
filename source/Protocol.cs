@@ -5,6 +5,20 @@ using System.Text.RegularExpressions;
 
 namespace LovenseConnector
 {
+    internal static class ProtocolDiagnostics
+    {
+        // Display only: transport and reply matching must retain the original bytes.
+        public static string Command(string command)
+        {
+            if(command==null)return "(none)";
+            if(command.Length==9&&command.StartsWith("FLVS:",StringComparison.Ordinal)&&command[8]==';')
+                return "FLVS [speed="+(int)command[5]+", start="+(int)command[6]+", end="+(int)command[7]+"]";
+            var text=new StringBuilder();
+            foreach(char c in command)
+                if(c>=32&&c<=126)text.Append(c);else text.Append("\\u").Append(((int)c).ToString("X4"));
+            return text.ToString();
+        }
+    }
     internal static class Replies
     {
         public static bool IsError(string value) { return value.StartsWith("ERR",StringComparison.OrdinalIgnoreCase)||value.StartsWith("unk",StringComparison.OrdinalIgnoreCase); }
