@@ -1,6 +1,8 @@
 # Release verification
 
-## Unreleased — Death-text calibration size guidance
+## 0.8.23 — Calibration guidance — 2026-11-24
+
+Unreadable HUD image files now give a clear PNG, JPEG or BMP error instead of a raw decoder exception.
 
 Newly learned death-text templates retain their source image dimensions in local and portable setups. A different preview size shows a relearning notice. Clear/reset removes the size metadata, and Undo restores it. Existing setups without dimensions remain valid. This is advisory and does not change recognition thresholds or detect HUD-scale changes at the same resolution. Passed 236 offline Screen sync assertions, including import, export, mismatch guidance, clear and undo. No live game or physical output was used.
 
