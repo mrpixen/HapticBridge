@@ -46,9 +46,9 @@ namespace LovenseConnector
         CheckBox screenReadShield,screenReadKillFeed;
         bool screenCalibrationRefreshing;
         DispatcherTimer screenTimer;
-        bool screenFrozen,screenArmed,screenTickBusy,screenCueBusy,screenForegroundSeen;
-        int screenGeneration,screenOperation,screenCaptureRequest;
-        double screenArmedAt,screenLastGood=-1,screenDeathUntil;
+        bool screenFrozen,screenArmed,screenTickBusy,screenCueBusy,screenWaiting;
+        int screenGeneration,screenOperation,screenCaptureRequest,screenResumeFrames;
+        double screenLastGood=-1,screenDeathUntil;
         double screenNextStopRetry;
         string screenFailure;
         string ScreenProfilePath=>Path.Combine(dataDir??root,"screen-profile.json");
@@ -89,7 +89,7 @@ namespace LovenseConnector
             screenFeedbackStatus=Text("Saved feedback could not be read. Using defaults.",13);screenFeedbackStatus.Visibility=screenFeedbackLoadFailed?Visibility.Visible:Visibility.Collapsed;feedback.Children.Add(screenFeedbackStatus);
             feedback.Children.Add(Text("Motors · maximum level",14));screenNoMotors=Text("Connect a device to enable feedback. Preview works without one.",13);feedback.Children.Add(screenNoMotors);screenMotorPanel=new StackPanel();feedback.Children.Add(screenMotorPanel);
             screenOutput=Action("Enable output",async()=>{if(screenArmed)await DisarmScreen();else await ArmScreen();});feedback.Children.Add(screenOutput);
-            feedback.Children.Add(Text("Return to the selected window within 8 seconds. Leaving it turns output off.",13));body.Children.Add(StudioPanel(feedback));
+            feedback.Children.Add(Text("Follows the selected window even while Alt+Tabbed. Disable output to stop feedback.",13));body.Children.Add(StudioPanel(feedback));
             screenHistory=Text("Events will appear here. Preview never sends device output.",14);body.Children.Add(screenHistory);
             body.Children.Add(Text("Use your own live HUD. Spectating, replays, overlays, HDR and healing/decay can confuse recognition. Screen capture is not Riot approval.",12));
             var tab=new TabItem { Header="Screen sync",Content=new ScrollViewer { Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled } };tabs.Items.Insert(Math.Min(3,tabs.Items.Count),tab);
@@ -300,17 +300,21 @@ namespace LovenseConnector
                 if(current?.Health==null||current.Health<=0){SetScreenStatus("HUD changed · verify health before enabling output");return;}
                 if(current.SpectatorScore>=.85){SetScreenStatus("Spectator marker visible · output off");return;}
                 screenOwned.Clear();screenOwned.AddRange(selected);
-                screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenArmedAt=ScreenCapture.Now;screenForegroundSeen=false;screenLastGood=ScreenCapture.Now;ResetScreenDetection();screenOutput.Content="Disable output";SetScreenStatus("Armed · return to the selected window within 8 seconds");
+                screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenWaiting=false;screenResumeFrames=0;screenLastGood=ScreenCapture.Now;ResetScreenDetection();screenOutput.Content="Disable output";SetScreenStatus("Following HUD · output enabled (including background)");
             },()=>screenGeneration);
         }
         async Task DisarmScreen()
         {
             bool wasArmed=screenArmed;
-            screenArmed=false;screenGeneration++;
+            screenArmed=false;screenWaiting=false;screenResumeFrames=0;screenGeneration++;
             if(screenOutput!=null)screenOutput.Content="Enable output";
             // Capture exact playback instances before awaiting; never stop a replacement device.
             var targets=screenOwned?.ToArray()??Array.Empty<ScreenTarget>();screenOwned?.Clear();
             if(screenStatus!=null&&(wasArmed||targets.Length>0))screenStatus.Text="Stopping output…";
+            await StopScreenTargets(targets);
+        }
+        async Task StopScreenTargets(ScreenTarget[] targets)
+        {
             await Task.WhenAll(targets.Select(async t=>{
                 var attempt=new ScreenStopAttempt { Target=t,Pending=true };screenStopRetries.Add(attempt);
                 try{var task=t.Player.StopTracked(t.Channel,out var revision);attempt.Revision=revision;await task;}
@@ -321,18 +325,18 @@ namespace LovenseConnector
         }
         void RefreshScreenStopStatus()
         {
-            if(screenArmed||screenStatus==null||screenStopRetries.Any(a=>a.Pending))return;
+            if(screenArmed&&!screenWaiting||screenStatus==null||screenStopRetries.Any(a=>a.Pending))return;
             if(screenStopRetries.Any(a=>a.Current)){screenStatus.Text="Output stop unconfirmed · retrying";return;}
             // A newer calibration or capture message must survive a late stop.
             if(screenStatus.Text=="Stopping output…"||screenStatus.Text.StartsWith("Output stop unconfirmed",StringComparison.Ordinal))
-                screenStatus.Text=screenCapture==null?"Capture off · output off":screenFrozen?"Frozen · output off":"Preview only · output off";
+                screenStatus.Text=screenWaiting?"Waiting for live HUD · output remains enabled":screenCapture==null?"Capture off · output off":screenFrozen?"Frozen · output off":"Preview only · output off";
         }
         void SetScreenStatus(string message)
         {
             if(screenStatus==null)return;
             screenStatus.Text=message;
             // A capture or calibration message must not conceal an outstanding stop.
-            if(!screenArmed&&screenStopRetries.Any(a=>a.Pending))screenStatus.Text="Stopping output…";
+            if((!screenArmed||screenWaiting)&&screenStopRetries.Any(a=>a.Pending))screenStatus.Text="Stopping output…";
             else RefreshScreenStopStatus();
         }
         async Task RetryScreenStops(double now)
@@ -364,41 +368,56 @@ namespace LovenseConnector
                 if(captureRequest!=screenCaptureRequest||generation!=screenGeneration||closing)return false;
                 SetScreenStatus(message);return true;
             }
+            async Task<bool> WaitForTick(string message)
+            {
+                if(!screenArmed)return true;
+                if(!screenWaiting) {
+                    screenWaiting=true;screenResumeFrames=0;screenGeneration++;ResetScreenDetection();
+                    int generation=screenGeneration;
+                    await StopScreenTargets(screenOwned.ToArray());
+                    if(captureRequest!=screenCaptureRequest||generation!=screenGeneration||closing)return false;
+                }
+                SetScreenStatus(message);return true;
+            }
             var sample=Interlocked.Exchange(ref screenPending,null);var frame=sample!=null&&ReferenceEquals(sample.Source,screenCapture)?sample.Pixels:null;
             if(screenArmed) {
-                if(screenDeathUntil>0&&now>=screenDeathUntil){if(!await StopForTick("Death detected · output off until enabled again"))return;}
-                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!ScreenChannelAvailable(t.Device,t.Channel)||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
-                else if(screenCapture.Foreground){if(!screenForegroundSeen){ResetScreenDetection();screenLastGood=now;}screenForegroundSeen=true;}
-                else if(screenForegroundSeen||now-screenArmedAt>8){if(!await StopForTick("Window inactive · output off"))return;}
-                if(screenArmed&&screenForegroundSeen&&(screenFrozen||frame==null||now-frame.Time>.5)&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await StopForTick("HUD signal lost · output off"))return;}
+                if(screenDeathUntil>0&&now>=screenDeathUntil){screenDeathUntil=0;if(!await WaitForTick("Waiting for respawn · output remains enabled"))return;}
+                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!ScreenChannelAvailable(t.Device,t.Channel)||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!screenWaiting&&!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
+                if(screenArmed&&(screenFrozen||frame==null||now-frame.Time>.5)&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await WaitForTick("Waiting for live HUD · output remains enabled"))return;}
             }
             if(screenFrozen||frame==null)return;
             if(now-frame.Time>.5){ResetScreenDetection();return;}
-            if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){if(!await StopForTick("Window resized · verify calibration before enabling output"))return;ResetScreenDetection();}
+            if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){if(!await WaitForTick("Window resized · waiting for live HUD"))return;ResetScreenDetection();}
             screenFrame=frame;if(screenPreview.IsVisible)screenPreview.Show(frame);var read=RefreshScreenReading();if(read?.Health.HasValue==true)screenLastGood=now;
             // Evaluate a fresh pending sample before expiring the previous HUD reading.
             // Unknown health still expires on schedule; a newly readable sample can recover.
-            if(screenArmed&&screenForegroundSeen&&screenLastGood>=0&&now-screenLastGood>1)
-                {if(!await StopForTick("HUD signal lost · output off"))return;}
+            if(screenArmed&&screenLastGood>=0&&now-screenLastGood>1)
+                {if(!await WaitForTick("Waiting for live HUD · output remains enabled"))return;}
             bool spectator=screenSpectatorFilter.Push(read?.SpectatorScore??0,frame.Time);
             if(spectator) {
                 screenFilter.Reset();screenDeathMarkerFilter.Reset();
-                if(!await StopForTick("Spectating detected · output off until enabled again"))return;
+                if(!await WaitForTick("Spectating detected · waiting for your HUD"))return;
                 return;
             }
             // Do not queue a new cue while a spectator marker is being confirmed.
-            if(read?.SpectatorScore>=.85){screenFilter.Reset();screenDeathMarkerFilter.Reset();return;}
+            if(read?.SpectatorScore>=.85){screenResumeFrames=0;screenFilter.Reset();screenDeathMarkerFilter.Reset();return;}
+            if(screenWaiting) {
+                bool ready=read?.Health>0&&read.Confidence>=.82&&read.SpectatorScore<.85&&read.DeathMarkerScore<.85;
+                screenResumeFrames=ready?screenResumeFrames+1:0;
+                if(screenResumeFrames<3||screenStopRetries.Any(a=>a.Pending||a.Current))return;
+                screenWaiting=false;screenResumeFrames=0;screenLastGood=now;ResetScreenDetection();
+            }
             var events=screenFilter.Push(read,frame.Time).ToList();
             if(screenDeathMarkerFilter.Push(read,read?.DeathMarkerScore??0,frame.Time)&&!events.Any(e=>e.Kind=="Death"))
                 {screenFilter.Reset();events.Add(new HudEvent {Kind="Death",Health=0});}
             foreach(var ev in HudEvent.CombineKills(events).OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {
                 string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind=="Kill"&&ev.Count>1?"Kill × "+ev.Count:ev.Kind;
                 string outcome="preview";
-                if(screenArmed&&screenForegroundSeen)outcome=screenDeathUntil>0?"output ending":screenCueBusy?"busy":await SendScreenCue(ev);
+                if(screenArmed&&!screenWaiting)outcome=screenDeathUntil>0?"output ending":screenCueBusy?"busy":await SendScreenCue(ev);
                 screenEvents.Enqueue(DateTime.Now.ToString("HH:mm:ss")+"  "+description+" · "+outcome);while(screenEvents.Count>8)screenEvents.Dequeue();screenHistory.Text=string.Join(Environment.NewLine,screenEvents.Reverse());
                 if(ev.Kind=="Death"&&screenArmed)screenDeathUntil=now+.4;
             }
-            if(screenArmed&&screenForegroundSeen)SetScreenStatus("Following HUD · output enabled");
+            if(screenArmed&&!screenWaiting)SetScreenStatus("Following HUD · output enabled");
         }
         async Task<string> SendScreenCue(HudEvent ev)
         {
@@ -410,7 +429,7 @@ namespace LovenseConnector
                 var clock=Stopwatch.StartNew();var starts=new List<Task>();int cooling=0;bool sourceChanged=false;
                 foreach(var t in screenOwned.ToArray()) {
                     if((t.Events&ScreenMotorFeedback.EventMask(ev.Kind))==0)continue;
-                    bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture?.Foreground==true&&ScreenChannelAvailable(t.Device,t.Channel)&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
+                    bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture!=null&&!screenWaiting&&ScreenChannelAvailable(t.Device,t.Channel)&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
                     if(!Current()){sourceChanged=true;break;}
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;
                     // Cooldowns belong to motors: one event must not silence a different route.

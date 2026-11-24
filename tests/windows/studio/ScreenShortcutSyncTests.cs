@@ -51,7 +51,8 @@ internal static partial class ScreenSyncTests
             await Feed(app,capture,"100",3,"25");await Feed(app,capture,"80",3,"25");await Task.Delay(350);
             Check(Positive()>positive&&players.All(p=>p.Level(0)==0),"feedback enabled by the shortcut follows a later damage event and stops its pulse");
             await Feed(app,capture,"0",3,"25");await Task.Delay(450);await Invoke(app,"ScreenTick");
-            Check(!Get<bool>(app,"screenArmed")&&Get<object>(app,"screenCapture")!=null,"death ends feedback while retaining the preview for an explicit later enable");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>p.Level(0)==0),"shortcut-enabled feedback waits for respawn with motors stopped");
+            await Invoke(app,"DisarmScreen");
             await Feed(app,capture,"100",3,"25");Press("screenShortcut");await WaitScreenShortcut(app);
             Check(Get<bool>(app,"screenArmed"),"a fresh positive HUD can be explicitly re-enabled after death without switching windows");await Invoke(app,"DisarmScreen");
             foreach(string cancel in new[]{"focus","binding","Stop all"}) {

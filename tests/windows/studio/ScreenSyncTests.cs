@@ -124,17 +124,17 @@ internal static partial class ScreenSyncTests
             Get<StackPanel>(app,"screenMotorPanel").Children.Remove(obsoleteGroup);routeMap.Remove(obsoleteKey);
             await Feed(app,capture,"80",3);await Feed(app,capture,"60",3);await Task.Delay(350);
             Check(links.All(l=>!l.Positive.IsEmpty),"same damage event reaches both selected motors");Check(players.All(p=>p.Level(0)==0&&!p.Active(0)),"bounded damage automatically stops all motors");
-            capture.Foreground=false;await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"focus loss disarms");capture.Foreground=true;await Feed(app,capture,"40",3);Check(!Get<bool>(app,"screenArmed"),"returning to window never rearms output");
-            await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"stale capture disarms");
+            capture.Foreground=false;await Invoke(app,"ScreenTick");Check(Get<bool>(app,"screenArmed"),"focus loss keeps output enabled");int backgroundBefore=links.Sum(l=>l.Positive.Count);await Feed(app,capture,"40",3);await Task.Delay(350);Check(Get<bool>(app,"screenArmed")&&links.Sum(l=>l.Positive.Count)>backgroundBefore,"damage reaches motors while game is in the background");capture.Foreground=true;
+            await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting"),"stale capture waits without disabling output");
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);
             Set(app,"screenLastGood",ScreenCapture.Now-2);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));
             int recoveryCommands=links.Sum(l=>l.Commands);
             await Feed(app,capture,"40",1);
             Check(Get<bool>(app,"screenArmed")&&links.Sum(l=>l.Commands)==recoveryCommands,"fresh readable pending frame recovers before stale previous HUD expires without sending output");
             Set(app,"screenLastGood",ScreenCapture.Now-2);await Feed(app,capture,"",1);
-            Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"fresh unreadable pending frame still expires lost health and stops output");
-            await Feed(app,capture,"40",1);Check(!Get<bool>(app,"screenArmed"),"health recovery after confirmed signal loss does not rearm output");
-            await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"death cue ends and disarms before spectating");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>p.Level(0)==0),"lost health stops motors while retaining enabled state");
+            await Feed(app,capture,"40",1);Check(Get<bool>(app,"screenWaiting"),"single recovery frame does not resume feedback");await Feed(app,capture,"40",2);Check(Get<bool>(app,"screenArmed")&&!Get<bool>(app,"screenWaiting"),"stable health automatically resumes feedback");await Invoke(app,"DisarmScreen");await Feed(app,capture,"40",3);Check(!Get<bool>(app,"screenArmed"),"explicit disable never automatically rearms");
+            await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);await Feed(app,capture,"0",3);await Task.Delay(450);await Invoke(app,"ScreenTick");Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>p.Level(0)==0),"death cue ends and waits for respawn");
             await OutputChangesAndPendingArm(app,capture,links,players);
             await RapidDamageThenDeath(app,capture,links,players);
             await SimultaneousCombatEvents(app,capture,links,players);
@@ -218,7 +218,7 @@ internal static partial class ScreenSyncTests
 
     static async Task<Capture> CaptureStopFailures(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
     {
-        foreach(string reason in new[]{"stop","delayed stop","capture failure","focus loss"}) {
+        foreach(string reason in new[]{"stop","delayed stop","capture failure","HUD loss"}) {
             Set(app,"screenCapture",capture);capture.Foreground=true;
             await Feed(app,capture,"100",3,"25");await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3,"25");
             Check(Get<bool>(app,"screenArmed"),reason+" fixture starts armed with a current synthetic HUD");
@@ -234,10 +234,10 @@ internal static partial class ScreenSyncTests
             else if(reason=="stop")await Invoke(app,"StopScreenCapture");
             else {
                 if(reason=="capture failure")Set(app,"screenFailure","Capture interrupted · restart preview");
-                else capture.Foreground=false;
+                else {Set(app,"screenLastGood",ScreenCapture.Now-2);Set(app,"screenFrame",new ScreenPixels(Pixels("100").Bgra,180,80,ScreenCapture.Now-2));}
                 await Invoke(app,"ScreenTick");
             }
-            Check(!Get<bool>(app,"screenArmed")&&players[0].Level(0)<0&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),reason+" retains the failed device-stop warning");
+            Check((reason=="HUD loss"?Get<bool>(app,"screenWaiting"):!Get<bool>(app,"screenArmed"))&&players[0].Level(0)<0&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),reason+" retains the failed device-stop warning");
             await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);
             Check(players[0].Level(0)==0&&!Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),reason+" clears the warning only after a confirmed retry");
             await Invoke(app,"StopScreenCapture");capture=new Capture();
@@ -250,15 +250,17 @@ internal static partial class ScreenSyncTests
         Set(app,"screenCapture",capture);capture.Foreground=true;
         await Feed(app,capture,"100",3,"25");await Invoke(app,"ArmScreen");await Feed(app,capture,"100",2,"25");
         links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
-        capture.Foreground=false;
-        var tick=Feed(app,capture,"75",1,"25");
+        Set(app,"screenLastGood",ScreenCapture.Now-2);
+        var tick=Feed(app,capture,"",1,"25");
         try {
             await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            await Invoke(app,"StopScreenCapture");
+            var stop=Invoke(app,"StopScreenCapture");
+            links[0].Block.TrySetResult(true);
+            await stop.WaitAsync(TimeSpan.FromSeconds(2));
         }finally {links[0].Block.TrySetResult(true);await tick;links[0].Block=null;}
         Check(Get<ScreenPixels>(app,"screenFrame")==null,"a pending recognition tick cannot restore a frame after Stop capture");
         Check(Get<TextBlock>(app,"screenReading").Text=="Health —    Badge —","stopped capture keeps its cleared HUD reading");
-        Check(Get<TextBlock>(app,"screenStatus").Text=="Capture off · output off","a late focus-loss stop cannot overwrite the newer capture status");
+        Check(Get<TextBlock>(app,"screenStatus").Text=="Capture off · output off","a late HUD-loss stop cannot overwrite the newer capture status");
         capture=new Capture();Set(app,"screenCapture",capture);return capture;
     }
 
@@ -345,7 +347,7 @@ internal static partial class ScreenSyncTests
             foreach(var target in ((IEnumerable)Get<object>(app,"screenOwned")).Cast<object>())Set(target,"LastCue",ScreenCapture.Now);
             await Feed(app,capture,"0",1);await Task.Delay(450);await Invoke(app,"ScreenTick");
             Check(links.Select((l,i)=>l.Positive.Skip(markers[i]).Contains(19)).All(x=>x),"confirmed death after rapid damage still delivers its separate configured pulse");
-            Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0),"priority death still ends output and disarms before spectating");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>p.Level(0)==0),"priority death ends its cue and waits for respawn");
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");
             profile.DamageLevel=0;double[] prior=CueTimes(app);int[] counts=links.Select(l=>l.Positive.Count).ToArray();
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});
