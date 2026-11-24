@@ -232,7 +232,7 @@ namespace LovenseConnector
         Border BuildStudioInspector()
         {
             var panel=new StackPanel();studioEditing=Text("Select a motor",18);panel.Children.Add(studioEditing);studioPointStatus=Text("",13);panel.Children.Add(studioPointStatus);
-            studioTime=Input("0",150);studioLevel=Input("0",150);Accessible(studioTime,"Point time in milliseconds");Accessible(studioLevel,"Point vibration level from zero to twenty");
+            studioTime=Input("0",150);studioLevel=Input("0",150);Accessible(studioTime,"Point time in milliseconds");Accessible(studioLevel,"Point output level from zero to twenty");
             Field(panel,"Time (ms)",studioTime);Field(panel,"Level / 20",studioLevel);
             studioApplyPoint=Action("Apply point",()=>{if(studioEditor.ActiveLaneId!=null&&studioEditor.SelectedPointIndex>=0)studioDocument.MovePoint(studioEditor.ActiveLaneId,studioEditor.SelectedPointIndex,Number(studioTime),Number(studioLevel));return Task.CompletedTask;});panel.Children.Add(studioApplyPoint);
             studioInterpolation=new ComboBox { Width=150 };foreach(var item in Enum.GetValues<CurveInterpolation>())studioInterpolation.Items.Add(item);Field(panel,"Curve",studioInterpolation);
@@ -310,10 +310,10 @@ namespace LovenseConnector
                     studioDocument.AddLane(key,d.Name+" · "+d.ChannelLabel(channel));
                     var m=new MixerMotor { Device=d,Channel=channel };var panel=new Grid();panel.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(150) });panel.ColumnDefinitions.Add(new ColumnDefinition());panel.ColumnDefinitions.Add(new ColumnDefinition { Width=new GridLength(64) });
                     var identity=new StackPanel();identity.Children.Add(new TextBlock { Text=d.Name,TextTrimming=TextTrimming.CharacterEllipsis,MaxWidth=118,FontSize=15 });identity.Children.Add(new TextBlock { Text=d.ChannelLabel(channel),Foreground=Color("#C4BAD7"),FontSize=13,Margin=new Thickness(0,2,0,0) });
-                    var labels=new StackPanel();m.Include=new CheckBox { Content=identity,IsChecked=!studioRunning&&audioCapture==null&&!feelArmed&&integration==null,Margin=new Thickness(0,0,0,8) };Accessible(m.Include,d.Name+" motor "+channel+" enabled");labels.Children.Add(m.Include);
+                    var labels=new StackPanel();m.Include=new CheckBox { Content=identity,IsChecked=!studioRunning&&audioCapture==null&&!feelArmed&&integration==null,Margin=new Thickness(0,0,0,8) };Accessible(m.Include,d.Name+" "+d.ChannelLabel(channel)+" enabled");labels.Children.Add(m.Include);
                     var value=Text("12 / 20",19);labels.Children.Add(value);m.Status=Text("Sent: unknown",12);labels.Children.Add(m.Status);panel.Children.Add(labels);
                     m.Trace=new LiveMotorTrace { VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,16,0) };Grid.SetColumn(m.Trace,1);panel.Children.Add(m.Trace);
-                    m.Level=new Slider { Orientation=Orientation.Vertical,Height=100,Minimum=0,Maximum=20,Value=12,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,VerticalAlignment=VerticalAlignment.Center };Accessible(m.Level,d.Name+" motor "+channel+" live level");Grid.SetColumn(m.Level,2);panel.Children.Add(m.Level);
+                    m.Level=new Slider { Orientation=Orientation.Vertical,Height=100,Minimum=0,Maximum=20,Value=12,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,VerticalAlignment=VerticalAlignment.Center };Accessible(m.Level,d.Name+" "+d.ChannelLabel(channel)+" live level");Grid.SetColumn(m.Level,2);panel.Children.Add(m.Level);
                     m.Meter=new ProgressBar { Minimum=0,Maximum=20,Visibility=Visibility.Collapsed };m.Card=StudioPanel(panel,16);m.Card.Margin=new Thickness(0,0,0,12);mixerRows.Add(key,m);mixerMotors.Children.Add(m.Card);
                     m.Level.ValueChanged+=(s,e)=>{value.Text=(int)m.Level.Value+" / 20";QueueStudioDraftSave();if(!studioLoading&&OwnsStudio&&!studioRunningPattern&&m.Include.IsChecked==true)m.Device.Player?.LiveLevel(m.Channel,(int)m.Level.Value);};
                     m.Include.Checked+=async(s,e)=>await StudioTargetChanged(m);m.Include.Unchecked+=async(s,e)=>await StudioTargetChanged(m);
@@ -331,10 +331,10 @@ namespace LovenseConnector
             studioTargets.Children.Clear();studioTargets.Children.Add(studioTargetCount);studioLaneTabs.Children.Clear();studioAudioRoutes?.Children.Clear();studioTargetChecks.Clear();studioLaneButtons.Clear();studioHighlightedLane=null;
             var targetsMenu=new ContextMenu();
             int index=0;foreach(var pair in mixerRows){var m=pair.Value;string key=pair.Key;int slot=++index;
-                var choice=new CheckBox { Content="Motor "+slot,ToolTip=m.Device.Name+" · "+m.Channel,Margin=new Thickness(12,8,4,8),VerticalAlignment=VerticalAlignment.Center };
+                var choice=new CheckBox { Content="Motor "+slot,ToolTip=m.Device.Name+" · "+m.Device.ChannelLabel(m.Channel),Margin=new Thickness(12,8,4,8),VerticalAlignment=VerticalAlignment.Center };
                 choice.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });studioTargets.Children.Add(choice);studioTargetChecks[key]=choice;
                 choice.SetBinding(UIElement.IsEnabledProperty,new Binding("IsEnabled") { Source=m.Card });
-                var targetItem=new MenuItem { Header="Motor "+slot,ToolTip=m.Device.Name+" · "+m.Channel,IsCheckable=true,StaysOpenOnClick=true };
+                var targetItem=new MenuItem { Header="Motor "+slot,ToolTip=m.Device.Name+" · "+m.Device.ChannelLabel(m.Channel),IsCheckable=true,StaysOpenOnClick=true };
                 targetItem.SetBinding(MenuItem.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });targetItem.SetBinding(UIElement.IsEnabledProperty,new Binding("IsEnabled") { Source=m.Card });targetsMenu.Items.Add(targetItem);
                 if(studioAudioRoutes!=null){var p=new StackPanel();var route=new CheckBox { Content=m.Device.Name+" · "+m.Device.ChannelLabel(m.Channel) };route.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsChecked") { Source=m.Include,Mode=BindingMode.TwoWay });p.Children.Add(route);var gain=new Slider{Minimum=0,Maximum=20,Width=180,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,14,0,0)};gain.SetBinding(RangeBase.ValueProperty,new Binding("Value"){Source=m.Level,Mode=BindingMode.TwoWay});Accessible(gain,m.Device.Name+" sound maximum level");p.Children.Add(gain);var card=StudioPanel(p);card.Margin=new Thickness(0,0,12,12);studioAudioRoutes.Children.Add(card);}
             }

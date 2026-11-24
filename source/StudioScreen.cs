@@ -87,7 +87,7 @@ namespace LovenseConnector
             feedback.Children.Add(Text("Motors · maximum level",14));screenNoMotors=Text("Connect a device to enable feedback. Preview works without one.",13);feedback.Children.Add(screenNoMotors);screenMotorPanel=new StackPanel();feedback.Children.Add(screenMotorPanel);
             screenOutput=Action("Enable output",async()=>{if(screenArmed)await DisarmScreen();else await ArmScreen();});feedback.Children.Add(screenOutput);
             feedback.Children.Add(Text("Return to the selected window within 8 seconds. Leaving it turns output off.",13));body.Children.Add(StudioPanel(feedback));
-            screenHistory=Text("Events will appear here. Preview never sends vibrations.",14);body.Children.Add(screenHistory);
+            screenHistory=Text("Events will appear here. Preview never sends device output.",14);body.Children.Add(screenHistory);
             body.Children.Add(Text("Use your own live HUD. Spectating, replays, overlays, HDR and healing/decay can confuse recognition. Screen capture is not Riot approval.",12));
             var tab=new TabItem { Header="Screen sync",Content=new ScrollViewer { Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled } };tabs.Items.Insert(Math.Min(3,tabs.Items.Count),tab);
             body.Loaded+=(s,e)=>{if(screenWindows.Items.Count==0)RefreshScreenWindows();};
@@ -237,12 +237,12 @@ namespace LovenseConnector
                 string key=MixerKey(d,channel);if(screenRoutes.ContainsKey(key))continue;
                 var saved=screenFeedback.Motors.TryGetValue(ScreenFeedbackKey(d,channel),out var preferences)?preferences:new ScreenMotorFeedback();
                 var route=new ScreenRoute { Device=d,Channel=channel,Include=new CheckBox { Content=d.Name+" · "+d.ChannelLabel(channel),IsChecked=!screenArmed&&saved.Enabled,MinWidth=150,Margin=new Thickness(0,0,16,0) },Ceiling=new Slider { Minimum=0,Maximum=20,Value=saved.Maximum,Width=130,TickFrequency=1,IsSnapToTickEnabled=true } };
-                Accessible(route.Include,d.Name+" screen sync motor "+channel);Accessible(route.Ceiling,d.Name+" screen sync motor "+channel+" maximum level");
+                Accessible(route.Include,d.Name+" screen sync "+d.ChannelLabel(channel));Accessible(route.Ceiling,d.Name+" screen sync "+d.ChannelLabel(channel)+" maximum level");
                 var group=new StackPanel { Margin=new Thickness(0,8,0,12) };var row=new WrapPanel();row.Children.Add(route.Include);row.Children.Add(route.Ceiling);var value=Text(saved.Maximum+" / 20",13);value.Margin=new Thickness(12,0,0,0);row.Children.Add(value);group.Children.Add(row);
                 var events=new WrapPanel { Margin=new Thickness(0,6,0,0) };
                 foreach(string kind in new[]{"Damage","Kill","Death"}) {
                     var choice=new CheckBox { Content=kind,IsChecked=(saved.Events&ScreenMotorFeedback.EventMask(kind))!=0,Margin=new Thickness(0,0,20,6),MinHeight=28,VerticalContentAlignment=VerticalAlignment.Center };
-                    Accessible(choice,d.Name+" screen sync motor "+channel+" "+kind.ToLowerInvariant()+" feedback");route.Events.Add(kind,choice);events.Children.Add(choice);
+                    Accessible(choice,d.Name+" screen sync "+d.ChannelLabel(channel)+" "+kind.ToLowerInvariant()+" feedback");route.Events.Add(kind,choice);events.Children.Add(choice);
                     choice.Checked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};choice.Unchecked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};
                 }
                 group.Children.Add(events);screenMotorPanel.Children.Add(group);screenRoutes[key]=route;

@@ -97,7 +97,7 @@ namespace LovenseConnector
                 if(d.ConnectButton!=null)d.ConnectButton.Content=d.Connected?"Disconnect":d.Busy?"Connecting…":"Connect";
                 if(studioDeviceCapabilities.TryGetValue(d,out var label))
                 {
-                    string capabilities=d.Channels.Length>0?d.Channels.Length+" vibration motor"+(d.Channels.Length==1?"":"s"):d.Connected?"No supported vibration controls":"Capabilities available after connecting";
+                    string capabilities=d.Channels.Length>0?string.Join(" · ",d.Channels.Select(d.ChannelLabel)):d.Connected?"No supported controls":"Capabilities available after connecting";
                     string status=d.Connected?"Connected":d.Busy?"Connecting…":d.Status;
                     label.Text=status+" · "+capabilities+(d.Battery.HasValue?" · Battery "+d.Battery.Value+"%":"");
                 }

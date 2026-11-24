@@ -192,7 +192,7 @@ namespace LovenseConnector
                 var panel=new StackPanel(); var border=new Border { Background=Color("#9F241B35"),CornerRadius=new CornerRadius(20),Padding=new Thickness(18),Margin=new Thickness(i==0?0:8,10,i==0&&channels.Length>1?8:0,14),Child=panel }; Grid.SetColumn(border,i); motors.Children.Add(border);
                 panel.Children.Add(Text(d.ChannelLabel(channel),21)); var display=Text("3 / 20",17); panel.Children.Add(display);
                 v.Level=new Slider { Minimum=0,Maximum=20,Value=3,TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=1,TickPlacement=System.Windows.Controls.Primitives.TickPlacement.BottomRight,Margin=new Thickness(0,4,0,8) };
-                System.Windows.Automation.AutomationProperties.SetName(v.Level,d.Name+" motor "+channel+" speed");
+                System.Windows.Automation.AutomationProperties.SetName(v.Level,d.Name+" "+d.ChannelLabel(channel)+" level");
                 v.Level.ValueChanged+=(s,e)=> { display.Text=""+(int)v.Level.Value+" / 20"; if(d.Player!=null&&sweep==null&&integration==null&&audioCapture==null&&!feelArmed&&!screenArmed&&!OwnsStudio) d.Player.LiveLevel(channel,(int)v.Level.Value); }; panel.Children.Add(v.Level);
                 var nudges=Row(); nudges.Children.Add(Action("−1",()=> { v.Level.Value--; return Task.FromResult(0); })); nudges.Children.Add(Action("+1",()=> { v.Level.Value++; return Task.FromResult(0); })); panel.Children.Add(nudges);
                 var time=Row(); v.Duration=Input("10000"); v.Duration.ToolTip="duration in milliseconds"; Field(time,"Duration (ms)",v.Duration); panel.Children.Add(time);
