@@ -8,8 +8,28 @@ internal static class ScreenDetectionTests
     static void Check(bool ok,string name){checks++;if(!ok)throw new Exception("Screen detection: "+name);}
     static HudReading Read(int? health,double badge=0,double confidence=1)=>new HudReading { Health=health,BadgeScore=badge,Confidence=confidence };
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
+    static void DeathMarkerConfirmation()
+    {
+        var filter=new HudDeathMarkerFilter();
+        void Baseline(double start) { for(int i=0;i<3;i++)Check(!filter.Push(Read(100),0,start+i*.1),"death marker establishes positive HUD and absent text"); }
+        Baseline(0);
+        Check(!filter.Push(Read(null),1,.3)&&!filter.Push(Read(null),1,.4)&&filter.Push(Read(null),1,.5),"new death text and lost HUD confirm once");
+        Check(!filter.Push(Read(null),1,.6),"persistent death text does not repeat");
+        for(int i=0;i<3;i++)Check(!filter.Push(Read(100),1,.7+i*.1),"respawn while death report remains visible emits nothing");
+        for(int i=0;i<3;i++)Check(!filter.Push(Read(null),1,1+i*.1),"old matching report plus later HUD loss is not a new death");
+        filter.Reset();Baseline(0);for(int i=3;i<15;i++)Check(!filter.Push(Read(null),0,i*.1),"lost HUD alone emits no death");
+        for(int i=15;i<19;i++)Check(!filter.Push(Read(null),1,i*.1),"late report cannot revive an expired HUD baseline");
+        filter.Reset();for(int i=0;i<8;i++)Check(!filter.Push(Read(null),1,i*.1),"report at startup has no own-player baseline");
+        filter.Reset();Baseline(0);for(int i=3;i<6;i++)Check(!filter.Push(Read(0),1,i*.1),"confirmed-zero path does not also infer marker death");
+        filter.Reset();Baseline(0);Check(!filter.Push(Read(null),1,2),"capture gap resets death-marker context");
+        filter.Reset();Baseline(0);Check(!filter.Push(Read(null),1,double.NaN),"invalid death-marker time ignored");
+        Check(!filter.Push(Read(null),1,.1),"out-of-order death-marker frame ignored");
+        filter.Reset();Baseline(0);var spectator=Read(null);spectator.SpectatorScore=1;
+        for(int i=3;i<7;i++)Check(!filter.Push(spectator,1,i*.1),"spectator marker vetoes inferred death");
+    }
     static int Main()
     {
+        DeathMarkerConfirmation();
         ContinuousHealing();
         ShieldDamage();
         NumberColorMask();

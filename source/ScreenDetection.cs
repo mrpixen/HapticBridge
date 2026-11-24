@@ -72,6 +72,41 @@ namespace LovenseConnector
             return matches>=3;
         }
     }
+    // Optional calibrated death text: requires a new marker plus recent loss of
+    // an established positive HUD. Never interprets HUD disappearance alone.
+    internal sealed class HudDeathMarkerFilter
+    {
+        double lastTime=-1,lastPositive=-100,lastAbsent=-100;
+        int? candidate;
+        int repeats,missing,strong,absent;
+        bool positive,latched;
+        public void Reset() { lastTime=-1;lastPositive=lastAbsent=-100;candidate=null;repeats=missing=strong=absent=0;positive=latched=false; }
+        public bool Push(HudReading read,double score,double time)
+        {
+            if(!double.IsFinite(time)||time<=lastTime)return false;
+            if(lastTime>=0&&time-lastTime>.75)Reset();
+            lastTime=time;
+            if(read!=null&&double.IsFinite(read.SpectatorScore)&&read.SpectatorScore>=.85) { positive=false;candidate=null;repeats=missing=strong=absent=0;return false; }
+            bool readable=read!=null&&double.IsFinite(read.Confidence)&&read.Confidence>=.82&&read.Health.HasValue&&read.Health>=0&&read.Health<=100;
+            if(readable) {
+                missing=0;
+                if(read.Health==0) { positive=false;candidate=null;repeats=0; }
+                else {
+                    repeats=candidate==read.Health?Math.Min(3,repeats+1):1;candidate=read.Health;
+                    if(repeats>=3)positive=true;
+                    lastPositive=time;
+                }
+            } else { missing++;candidate=null;repeats=0; }
+            if(!double.IsFinite(score)) { strong=absent=0;return false; }
+            if(score<.7) {
+                strong=0;absent=Math.Min(3,absent+1);
+                if(absent>=3) { lastAbsent=time;latched=false; }
+            } else { absent=0;strong=score>=.9?Math.Min(3,strong+1):0; }
+            if(time-lastPositive>=1)positive=false;
+            if(latched||!positive||missing<2||strong<3||time-lastPositive>=1||time-lastAbsent>=1)return false;
+            latched=true;positive=false;return true;
+        }
+    }
     internal sealed class HudEventFilter
     {
         int? health,candidate,shield,shieldCandidate,healingCandidate;
