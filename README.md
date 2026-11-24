@@ -22,6 +22,22 @@ Control compatible Lovense devices from one Windows app. Shape vibration pattern
 | **Video sync** | Pair FeelConnect sessions by code or QR image, including an image pasted from the clipboard. |
 | **Game & app integrations** | Send commands through the local HTTP API. Discover motors and their capabilities at runtime. |
 
+## Supported toys
+
+The current control system supports **vibration** on the following Lovense model families, based on the bundled [device catalog](source/models.json). Catalog support is not a claim that every model or firmware has been physically tested.
+
+| Vibration motors | Models |
+| :--- | :--- |
+| **1** | Ambi, Calor, Diamo, Domi, Exomoon, Ferri, Fizz, Flexer, Gravity, Gush, Hush, Hyphy |
+| **1** | Lush, Lush 2, Lush 3, Lush 4, Lush Mini, Lush Anal; Max, Max 2; Mission, Mission 2 |
+| **1** | Mini XMachine, Nora, Osci, Osci 2, Osci 3, Ridge, Spinel, Tenera, Tenera 2, Velvo, Vulse, XMachine |
+| **2, independently controlled** | Dolce, Edge family (including Edge 2), Gemini |
+| **3, independently controlled** | Lapis |
+
+The catalog also contains the identifiers **C20** (one vibration motor) and **QA01** (two).
+
+**Recognized only:** Gush 2, Solace and Solace Pro have no vibration channel in this build. Rotation, pumping, suction, flexing, thrusting, position/depth and oscillation controls are not implemented, even where the catalog identifies those capabilities. Generations with shared Bluetooth identifiers may appear as a family until the app can identify the model.
+
 ## Get started
 
 **Requirements:** Windows 10 version 2004 or newer, or Windows 11; Bluetooth Low Energy for device connections. The .NET runtime is included. FeelConnect sessions require internet access.
