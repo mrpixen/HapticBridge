@@ -223,9 +223,16 @@ namespace LovenseConnector
                     for(int dx=0;dx<portrait;dx++)if(Gold(start+dx,y+h)||Gold(start+dx,y+h+1)||Gold(start+dx,y+h-1))bottom++;
                     if(vertical<h*.75||bottom<portrait*.65)continue;
                     int gx=start+portrait+(int)(12*s),gy=y+h/2;
-                    for(int dx=0;dx<(int)(90*s)&&gx+dx<right;dx++) {
-                        int p=(gy*frame.Width+gx+dx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
-                        if(g>r*1.15&&b>r*1.05&&g>90)green++;
+                    // Weapon silhouettes can cover the middle scanline, especially
+                    // after downsampling. Require the same amount of team background
+                    // on one of three interior lines; never infer ownership from white ink.
+                    for(int line=1;line<=3;line++) {
+                        int lineGreen=0,scanY=y+h*line/4;
+                        for(int dx=0;dx<(int)(90*s)&&gx+dx<right;dx++) {
+                            int p=(scanY*frame.Width+gx+dx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                            if(g>r*1.15&&b>r*1.05&&g>90)lineGreen++;
+                        }
+                        green=Math.Max(green,lineGreen);
                     }
                     if(green<25*s)continue;
                     // Fingerprint the victim text only. Weapon icons are identical across

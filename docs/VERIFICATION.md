@@ -2,6 +2,8 @@
 
 ## Unreleased - VALORANT kill feed
 
+Resolution follow-up: a recorded row was missed after resizing to 720p because its weapon icon covered the single color-check line. Three interior scanlines now check the friendly background while retaining the same gold-border and color requirements. All three recorded frames preserve their row counts at 720p, 900p, 1080p, 1440p and 2160p (15 resampled inputs). A 20-second production replay resized to 720p also retains all four personal kills; the original three 1080p replays retain eight with no extra kill events. All 18 core suites pass, including 291 screen-detection assertions. These rescaled frames do not prove native HUD scaling or live capture at those resolutions.
+
 Optional kill-feed mode reads gold personal killer outlines and friendly row color, then tracks victim-text fingerprints locally. Existing rows at startup are silent. Confirmed identities survive fading and row movement; brief unreadable health can hold a fresh event for up to half a second. Feed and badge modes are mutually exclusive.
 
 Production-reader replay of three private 1080p SDR recordings (20 seconds each, 10 frames/second) detected eight visually confirmed personal kills: four, three, and one. This includes a rapid double kill and a segment where the unchanged badge templates detected none. These are limited offline checks, not a general accuracy estimate. Automated validation passed 18 core suites (289 screen-detection assertions), 238 Screen sync assertions and 350 Studio assertions using synthetic inputs and transport. The recordings, names and derived masks are not distributed. Other layouts, color settings, HDR and live capture remain unverified.

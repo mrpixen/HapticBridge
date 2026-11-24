@@ -28,16 +28,19 @@ internal static class ScreenDetectionTests
         var faded=new HudKillFeedRow {Mask=c.Mask,Y=a.Y,Height=a.Height};f.Push(new[]{faded},.3,true);
         var moved=new HudKillFeedRow {Mask=a.Mask,Y=a.Y-40,Height=a.Height};
         Check(f.Push(new[]{moved},.4,true)==0,"fading before row movement preserves confirmed identity");
-        ScreenPixels Image(bool gold,bool friendly,bool rightSide) {
+        ScreenPixels Image(bool gold,bool friendly,bool rightSide,bool covered=false) {
             var pixels=new byte[1920*1080*4];int left=rightSide?1820:1500;
             void Pixel(int x,int y,int r,int g,int b){int p=(y*1920+x)*4;pixels[p]=(byte)b;pixels[p+1]=(byte)g;pixels[p+2]=(byte)r;pixels[p+3]=255;}
             if(gold){for(int x=left;x<left+58;x++){Pixel(x,96,225,225,100);Pixel(x,128,225,225,100);}for(int y=96;y<=128;y++)Pixel(left,y,225,225,100);}
             for(int y=97;y<128;y++)for(int x=1560;x<1760;x++)Pixel(x,y,friendly?80:230,friendly?170:80,145);
             for(int y=97;y<128;y++)for(int x=1760;x<1833;x++)Pixel(x,y,240,80,70);
             for(int y=105;y<120;y++)for(int x=1770;x<1825;x++)if(x%8<3||y==106)Pixel(x,y,250,250,250);
+            if(covered)for(int x=1570;x<1660;x++)for(int y=109;y<=115;y++)Pixel(x,y,255,255,255);
             return new ScreenPixels(pixels,1920,1080,0);
         }
         Check(HudKillFeedVision.Read(Image(true,true,false)).Length==1,"gold killer outline plus friendly row recognized");
+        Check(HudKillFeedVision.Read(Image(true,true,false,true)).Length==1,"weapon covering center scanline does not hide friendly background");
+        Check(HudKillFeedVision.Read(Image(true,false,false,true)).Length==0,"white weapon cannot turn hostile background into friendly team evidence");
         Check(HudKillFeedVision.Read(Image(false,true,false)).Length==0,"teammate green row without personal outline ignored");
         Check(HudKillFeedVision.Read(Image(true,false,false)).Length==0,"hostile killer row ignored");
         Check(HudKillFeedVision.Read(Image(true,true,true)).Length==0,"victim-side personal outline is not a kill");
