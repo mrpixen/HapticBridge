@@ -42,10 +42,13 @@ class Gateway:
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
         headers = {"Authorization": "Bearer " + self.token}
         encoded = None
-        if body is not None:
-            encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
-            headers["Content-Type"] = "application/json"
         try:
+            if body is not None:
+                try:
+                    encoded = json.dumps(body, separators=(",", ":"), allow_nan=False).encode("utf-8")
+                except (TypeError, ValueError):
+                    raise GatewayError("The request contains values that cannot be encoded as JSON.") from None
+                headers["Content-Type"] = "application/json"
             connection.request("GET" if body is None else "POST",
                                "/api/v1" + route, body=encoded, headers=headers)
             response = connection.getresponse()

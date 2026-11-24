@@ -131,5 +131,43 @@ class ClientTests(unittest.TestCase):
             session.function("synthetic", "position", 0)
         self.assertEqual(session.gateway.requests, [])
 
+    def test_invalid_output_json_closes_active_session(self):
+        circular = []
+        circular.append(circular)
+        for invalid in (object(), circular, float("nan"), float("inf")):
+            for route in ("/frame", "/function"):
+                with self.subTest(value=type(invalid).__name__, route=route):
+                    requests = []
+                    closed = []
+                    class Connection:
+                        def __init__(self, *args, **kwargs):
+                            self.path = None
+                        def request(self, method, path, **kwargs):
+                            self.path = path
+                            requests.append(path)
+                        def getresponse(self):
+                            return self
+                        status = 200
+                        def read(self, limit):
+                            return b'{"sessionId":"synthetic","heartbeatMs":100000}' if self.path.endswith("/session") else b'{"accepted":true}'
+                        def close(self):
+                            closed.append(self.path)
+                    gateway = client.Gateway.__new__(client.Gateway)
+                    gateway.port, gateway.token = 12345, "0" * 64
+                    with patch.object(client.http.client, "HTTPConnection", Connection):
+                        with gateway.session() as session:
+                            session.frame([], duration_ms=0)
+                            before = len(requests)
+                            with self.assertRaises(client.GatewayError):
+                                if route == "/frame":
+                                    session.frame(invalid, duration_ms=0)
+                                else:
+                                    session.function("synthetic", "position", invalid)
+                            self.assertEqual(requests[before:], ["/api/v1/release"])
+                            self.assertTrue(session.finished.is_set())
+                            self.assertFalse(session.thread.is_alive())
+                            self.assertIn(None, closed, "Encoding failure did not close its connection object")
+                        self.assertEqual(requests.count("/api/v1/release"), 1)
+
 if __name__ == "__main__":
     unittest.main()
