@@ -86,6 +86,44 @@ class ClientTests(unittest.TestCase):
                     self.assertEqual(len(fake.requests), count)
                 self.assertEqual(sum(path == "/release" for path, _ in fake.requests), 1)
 
+    def test_invalid_response_encoding_closes_active_session(self):
+        for route in ("/frame", "/function"):
+            with self.subTest(route=route):
+                requests = []
+                class Response:
+                    status = 200
+                    def __init__(self, path):
+                        self.path = path
+                    def read(self, limit):
+                        if self.path.endswith(route):
+                            return b"\xff"
+                        if self.path.endswith("/session"):
+                            return b'{"sessionId":"synthetic","heartbeatMs":100000}'
+                        return b'{"accepted":true}'
+                class Connection:
+                    def __init__(self, *args, **kwargs):
+                        pass
+                    def request(self, method, path, **kwargs):
+                        self.path = path
+                        requests.append(path)
+                    def getresponse(self):
+                        return Response(self.path)
+                    def close(self):
+                        pass
+                gateway = client.Gateway.__new__(client.Gateway)
+                gateway.port, gateway.token = 12345, "0" * 64
+                with patch.object(client.http.client, "HTTPConnection", Connection):
+                    with gateway.session() as session:
+                        with self.assertRaises(client.GatewayError):
+                            if route == "/frame":
+                                session.frame([], duration_ms=0)
+                            else:
+                                session.function("synthetic", "reverse")
+                        self.assertTrue(session.finished.is_set())
+                        self.assertFalse(session.thread.is_alive())
+                        self.assertEqual(requests[-1], "/api/v1/release")
+                    self.assertEqual(requests.count("/api/v1/release"), 1)
+
     def test_revoked_session_rejects_function(self):
         session = client.Session(FakeGateway(), "test", 3000)
         session.finished.set()

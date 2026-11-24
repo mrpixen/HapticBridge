@@ -57,7 +57,7 @@ class Gateway:
                 # Report status only: a remote error must not echo credentials.
                 raise GatewayError(f"Gateway returned HTTP {response.status}; check its controls and activity.")
             return result
-        except (OSError, http.client.HTTPException, json.JSONDecodeError):
+        except (OSError, http.client.HTTPException, json.JSONDecodeError, UnicodeDecodeError):
             raise GatewayError("Cannot read the local gateway response.") from None
         finally:
             connection.close()
