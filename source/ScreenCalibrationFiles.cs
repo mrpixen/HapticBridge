@@ -20,12 +20,15 @@ namespace LovenseConnector
         public byte[] SpectatorMask { get; set; }
         public HudRegion DeathMarker { get; set; }=new ScreenProfile().DeathMarker;
         public byte[] DeathMarkerMask { get; set; }
+        // Optional advisory metadata; older version-four setups omit both dimensions.
+        public int DeathMarkerFrameWidth { get; set; }
+        public int DeathMarkerFrameHeight { get; set; }
         public byte[] BadgeMask { get; set; }
         public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }
 
         public bool Valid()=>Format=="hapticbridge-hud"&&(Version>=1&&Version<=4)&&BadgeVariants!=null&&(Version>=2||BadgeVariants.Count==0)&&(Version>=3||SpectatorMask==null)&&(Version>=4||DeathMarkerMask==null)&&new ScreenProfile {
-            Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits
+            Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits
         }.Validate();
         static HudRegion Copy(HudRegion r)=>new HudRegion {X=r.X,Y=r.Y,Width=r.Width,Height=r.Height};
         public static ScreenCalibrationData Capture(ScreenProfile profile)
@@ -33,7 +36,7 @@ namespace LovenseConnector
             if(profile==null||!profile.Validate())throw new ArgumentException("Invalid HUD calibration.");
             return new ScreenCalibrationData {
                 Format="hapticbridge-hud",Version=4,Health=Copy(profile.Health),Shield=Copy(profile.Shield),ReadShield=profile.ReadShield,
-                Badge=Copy(profile.Badge),Spectator=Copy(profile.Spectator),SpectatorMask=profile.SpectatorMask?.ToArray(),DeathMarker=Copy(profile.DeathMarker),DeathMarkerMask=profile.DeathMarkerMask?.ToArray(),BadgeMask=profile.BadgeMask?.ToArray(),
+                Badge=Copy(profile.Badge),Spectator=Copy(profile.Spectator),SpectatorMask=profile.SpectatorMask?.ToArray(),DeathMarker=Copy(profile.DeathMarker),DeathMarkerMask=profile.DeathMarkerMask?.ToArray(),DeathMarkerFrameWidth=profile.DeathMarkerFrameWidth,DeathMarkerFrameHeight=profile.DeathMarkerFrameHeight,BadgeMask=profile.BadgeMask?.ToArray(),
                 BadgeVariants=profile.BadgeVariants.Select(m=>m.ToArray()).ToList(),
                 Digits=profile.Digits.Select(d=>new HudGlyph {Digit=d.Digit,Aspect=d.Aspect,Mask=d.Mask.ToArray()}).ToList()
             };
@@ -41,8 +44,8 @@ namespace LovenseConnector
         public ScreenProfile Snapshot()
         {
             if(!Valid())throw new ArgumentException("This is not a valid HapticBridge HUD setup.");
-            var copy=Capture(new ScreenProfile {Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits});
-            return new ScreenProfile {Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,Badge=copy.Badge,Spectator=copy.Spectator,SpectatorMask=copy.SpectatorMask,DeathMarker=copy.DeathMarker,DeathMarkerMask=copy.DeathMarkerMask,BadgeMask=copy.BadgeMask,BadgeVariants=copy.BadgeVariants,Digits=copy.Digits};
+            var copy=Capture(new ScreenProfile {Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits});
+            return new ScreenProfile {Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,Badge=copy.Badge,Spectator=copy.Spectator,SpectatorMask=copy.SpectatorMask,DeathMarker=copy.DeathMarker,DeathMarkerMask=copy.DeathMarkerMask,DeathMarkerFrameWidth=copy.DeathMarkerFrameWidth,DeathMarkerFrameHeight=copy.DeathMarkerFrameHeight,BadgeMask=copy.BadgeMask,BadgeVariants=copy.BadgeVariants,Digits=copy.Digits};
         }
     }
 

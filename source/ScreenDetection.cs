@@ -30,6 +30,8 @@ namespace LovenseConnector
         public byte[] SpectatorMask { get; set; }
         public HudRegion DeathMarker { get; set; }=new HudRegion {X=.953125,Y=.487037,Width=.034375,Height=.013889};
         public byte[] DeathMarkerMask { get; set; }
+        public int DeathMarkerFrameWidth { get; set; }
+        public int DeathMarkerFrameHeight { get; set; }
         public byte[] BadgeMask { get; set; }
         public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }=new List<HudGlyph>();
@@ -39,6 +41,7 @@ namespace LovenseConnector
         public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
             Spectator!=null&&Spectator.Valid&&(SpectatorMask==null||SpectatorMask.Length==4096&&SpectatorMask.All(x=>x<=1))&&
             DeathMarker!=null&&DeathMarker.Valid&&(DeathMarkerMask==null||DeathMarkerMask.Length==4096&&DeathMarkerMask.All(x=>x<=1))&&
+            (DeathMarkerFrameWidth==0&&DeathMarkerFrameHeight==0||DeathMarkerFrameWidth>=8&&DeathMarkerFrameWidth<=8192&&DeathMarkerFrameHeight>=8&&DeathMarkerFrameHeight<=4320)&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
             BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&

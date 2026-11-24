@@ -31,7 +31,20 @@ internal static partial class ScreenSyncTests
             profile.Health=new HudRegion {Width=.5,Height=1};profile.DeathMarker=new HudRegion {X=.5,Width=.5,Height=1};
             Set(app,"screenFrame",ShieldPixels("","80"));Set(app,"screenFrozen",true);await Invoke(app,"LearnScreenDeathMarker");Set(app,"screenFrozen",false);
             Check(profile.DeathMarkerMask?.Length==4096&&HudVision.Read(ShieldPixels("","80"),profile,HudDefaultGlyphs.Create()).DeathMarkerScore>.99,"learned death text reaches the image reader");
+            var learnedFrame=Get<ScreenPixels>(app,"screenFrame");
+            Check(profile.DeathMarkerFrameWidth==learnedFrame.Width&&profile.DeathMarkerFrameHeight==learnedFrame.Height,"death text remembers the learning image dimensions");
+            profile.DeathMarkerFrameWidth++;
+            Call(app,"RefreshScreenReading");
+            Check(Get<TextBlock>(app,"screenReading").Text.Contains("Death text relearn for"),"different capture dimensions show a relearning notice");
+            profile.DeathMarkerFrameWidth--;
+            Call(app,"RefreshScreenReading");
+            Check(!Get<TextBlock>(app,"screenReading").Text.Contains("relearn for"),"matching capture dimensions retain the normal match readout");
             var data=ScreenCalibrationFiles.Decode(ScreenCalibrationFiles.Encode(profile));var copy=data.Snapshot();data.DeathMarkerMask[0]^=1;
+            Check(copy.DeathMarkerFrameWidth==learnedFrame.Width&&copy.DeathMarkerFrameHeight==learnedFrame.Height,"portable death text setup preserves learning dimensions");
+            var legacyCopy=ScreenCalibrationFiles.Decode(ScreenCalibrationFiles.Encode(profile));legacyCopy.DeathMarkerFrameWidth=0;legacyCopy.DeathMarkerFrameHeight=0;
+            Check(legacyCopy.Valid(),"older setup without learning dimensions remains valid");
+            legacyCopy.DeathMarkerFrameWidth=100;
+            Check(!legacyCopy.Valid(),"incomplete learning dimensions are rejected");
             Check(copy.DeathMarkerMask[0]!=data.DeathMarkerMask[0],"death text setup is independently copied");
             data.Version=3;Check(!data.Valid(),"old setup version cannot silently accept death text");
             data.DeathMarkerMask=null;Check(data.Valid(),"version three setup remains valid without death text");
@@ -49,15 +62,20 @@ internal static partial class ScreenSyncTests
             await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3,"80");before=links.Sum(l=>l.Positive.Count);
             await Feed(app,capture,"",3,"80");
             Check(links.Sum(l=>l.Positive.Count)==before,"persisting old death text plus missing HUD does not trigger another cue");
-            await Invoke(app,"ClearScreenDeathMarker");Check(profile.DeathMarkerMask==null&&!Get<bool>(app,"screenArmed"),"clearing death text disables output and removes template");
+            await Invoke(app,"ClearScreenDeathMarker");Check(profile.DeathMarkerMask==null&&profile.DeathMarkerFrameWidth==0&&profile.DeathMarkerFrameHeight==0&&!Get<bool>(app,"screenArmed"),"clearing death text disables output and removes template");
             await Invoke(app,"UndoScreenCalibration");Check(profile.DeathMarkerMask?.Length==4096&&!Get<bool>(app,"screenArmed"),"undo restores death text without rearming");
             Get<ComboBox>(app,"screenRegion").SelectedIndex=4;Call(app,"SetScreenRegion",new HudRegion {X=.5,Width=.49,Height=1});
             Check(profile.DeathMarkerMask==null&&profile.DeathMarker.Width==.49,"changing death region invalidates its learned template");
-            await Invoke(app,"UndoScreenCalibration");Check(profile.DeathMarkerMask?.Length==4096,"region undo restores death template");
+            await Invoke(app,"UndoScreenCalibration");Check(profile.DeathMarkerMask?.Length==4096&&profile.DeathMarkerFrameWidth==learnedFrame.Width&&profile.DeathMarkerFrameHeight==learnedFrame.Height,"region undo restores death template and learning dimensions");
+            var imported=ScreenCalibrationData.Capture(profile);imported.DeathMarkerFrameWidth=1920;imported.DeathMarkerFrameHeight=1080;
+            await Invoke(app,"ApplyScreenCalibration",imported);
+            Check(profile.DeathMarkerFrameWidth==1920&&profile.DeathMarkerFrameHeight==1080&&Get<TextBlock>(app,"screenReading").Text.Contains("Death text relearn for"),"imported dimensions trigger guidance against the current preview");
+            await Invoke(app,"UndoScreenCalibration");
+            Check(profile.DeathMarkerFrameWidth==learnedFrame.Width&&profile.DeathMarkerFrameHeight==learnedFrame.Height&&!Get<TextBlock>(app,"screenReading").Text.Contains("relearn for"),"undoing imported setup restores matching dimensions and readout");
         } finally {
             await Invoke(app,"DisarmScreen");Set(app,"screenFrozen",false);Get<ComboBox>(app,"screenRegion").SelectedIndex=0;
             profile.Health=saved.Health;profile.ReadShield=saved.ReadShield;profile.SpectatorMask=saved.SpectatorMask;
-            profile.DeathMarker=saved.DeathMarker;profile.DeathMarkerMask=saved.DeathMarkerMask;Call(app,"RefreshScreenCalibration");
+            profile.DeathMarker=saved.DeathMarker;profile.DeathMarkerMask=saved.DeathMarkerMask;profile.DeathMarkerFrameWidth=saved.DeathMarkerFrameWidth;profile.DeathMarkerFrameHeight=saved.DeathMarkerFrameHeight;Call(app,"RefreshScreenCalibration");
         }
     }
 }

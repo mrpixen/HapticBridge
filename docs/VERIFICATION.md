@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased — Death-text calibration size guidance
+
+Newly learned death-text templates retain their source image dimensions in local and portable setups. A different preview size shows a relearning notice. Clear/reset removes the size metadata, and Undo restores it. Existing setups without dimensions remain valid. This is advisory and does not change recognition thresholds or detect HUD-scale changes at the same resolution. Passed 236 offline Screen sync assertions, including import, export, mismatch guidance, clear and undo. No live game or physical output was used.
+
 ## 0.8.22 — HUD image calibration — 2026-11-24
 
 Calibration can open a saved PNG, JPEG or BMP. It stops capture and output, freezes the image for learning, and cannot enable gameplay feedback from that image. A newer Stop cancels an import waiting on an earlier output stop. Files are released after decoding; saved setups retain templates and regions, not the screenshot.

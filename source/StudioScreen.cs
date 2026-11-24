@@ -172,13 +172,13 @@ namespace LovenseConnector
             RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.DeathMarker,false),128,32);
             int ink=mask?.Count(x=>x>0)??0;
             if(ink<48||ink>3000)throw new ArgumentException("Select only the KILLED YOU text on the right, with a little surrounding background.");
-            RememberScreenCalibration();screenProfile.DeathMarkerMask=mask;RefreshScreenCalibration();
+            RememberScreenCalibration();screenProfile.DeathMarkerMask=mask;screenProfile.DeathMarkerFrameWidth=screenFrame.Width;screenProfile.DeathMarkerFrameHeight=screenFrame.Height;RefreshScreenCalibration();
             SetScreenStatus("Death text learned. Save calibration to keep it");return Task.CompletedTask;
         }
         Task ClearScreenDeathMarker()
         {
             var stopped=DisarmScreen();
-            if(screenProfile.DeathMarkerMask!=null){RememberScreenCalibration();screenProfile.DeathMarkerMask=null;RefreshScreenCalibration();}
+            if(screenProfile.DeathMarkerMask!=null){RememberScreenCalibration();screenProfile.DeathMarkerMask=null;screenProfile.DeathMarkerFrameWidth=0;screenProfile.DeathMarkerFrameHeight=0;RefreshScreenCalibration();}
             SetScreenStatus("Death text cleared");return stopped;
         }
         HudRegion SelectedScreenRegion=>screenRegion.SelectedIndex==0?screenProfile.Health:screenRegion.SelectedIndex==2?screenProfile.Shield:screenRegion.SelectedIndex==3?screenProfile.Spectator:screenRegion.SelectedIndex==4?screenProfile.DeathMarker:screenProfile.Badge;
@@ -215,7 +215,7 @@ namespace LovenseConnector
             if(screenRegion.SelectedIndex==0)screenProfile.Health=region;
             else if(screenRegion.SelectedIndex==2)screenProfile.Shield=region;
             else if(screenRegion.SelectedIndex==3){screenProfile.Spectator=region;screenProfile.SpectatorMask=null;}
-            else if(screenRegion.SelectedIndex==4){screenProfile.DeathMarker=region;screenProfile.DeathMarkerMask=null;}
+            else if(screenRegion.SelectedIndex==4){screenProfile.DeathMarker=region;screenProfile.DeathMarkerMask=null;screenProfile.DeathMarkerFrameWidth=0;screenProfile.DeathMarkerFrameHeight=0;}
             else {screenProfile.Badge=region;screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();}
             RefreshScreenCalibration();
             SetScreenStatus("Region changed · Save calibration to keep it");
@@ -224,7 +224,7 @@ namespace LovenseConnector
         {
             var stopped=DisarmScreen();RememberScreenCalibration();
             screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.Shield=new ScreenProfile().Shield;screenProfile.ReadShield=false;
-            screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();screenProfile.Spectator=new ScreenProfile().Spectator;screenProfile.SpectatorMask=null;screenProfile.DeathMarker=new ScreenProfile().DeathMarker;screenProfile.DeathMarkerMask=null;
+            screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();screenProfile.Spectator=new ScreenProfile().Spectator;screenProfile.SpectatorMask=null;screenProfile.DeathMarker=new ScreenProfile().DeathMarker;screenProfile.DeathMarkerMask=null;screenProfile.DeathMarkerFrameWidth=0;screenProfile.DeathMarkerFrameHeight=0;
             SaveScreenProfile();RefreshScreenCalibration();SetScreenStatus("Calibration reset · Undo restores the previous setup");
             return stopped;
         }
@@ -236,7 +236,7 @@ namespace LovenseConnector
             // Feedback levels are independent settings, not part of calibration undo.
             screenProfile.Health=previous.Health;screenProfile.Badge=previous.Badge;
             screenProfile.Shield=previous.Shield;screenProfile.ReadShield=previous.ReadShield;
-            screenProfile.Spectator=previous.Spectator;screenProfile.SpectatorMask=previous.SpectatorMask;screenProfile.DeathMarker=previous.DeathMarker;screenProfile.DeathMarkerMask=previous.DeathMarkerMask;
+            screenProfile.Spectator=previous.Spectator;screenProfile.SpectatorMask=previous.SpectatorMask;screenProfile.DeathMarker=previous.DeathMarker;screenProfile.DeathMarkerMask=previous.DeathMarkerMask;screenProfile.DeathMarkerFrameWidth=previous.DeathMarkerFrameWidth;screenProfile.DeathMarkerFrameHeight=previous.DeathMarkerFrameHeight;
             screenProfile.BadgeMask=previous.BadgeMask;screenProfile.BadgeVariants=previous.BadgeVariants;screenProfile.Digits=previous.Digits;
             RefreshScreenCalibration();SetScreenStatus("Calibration restored · Save calibration to keep it");
             return stopped;
@@ -245,7 +245,7 @@ namespace LovenseConnector
         HudReading RefreshScreenReading()
         {
             if(screenFrame==null)return null;var read=HudVision.Read(screenFrame,screenProfile,screenGlyphs);
-            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned")+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+Math.Round(read.DeathMarkerScore*100)+"% match");return read;
+            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned")+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+(screenProfile.DeathMarkerFrameWidth>0&&(screenProfile.DeathMarkerFrameWidth!=screenFrame.Width||screenProfile.DeathMarkerFrameHeight!=screenFrame.Height)?"relearn for "+screenFrame.Width+" × "+screenFrame.Height:Math.Round(read.DeathMarkerScore*100)+"% match"));return read;
         }
         void RefreshScreenRoutes()
         {

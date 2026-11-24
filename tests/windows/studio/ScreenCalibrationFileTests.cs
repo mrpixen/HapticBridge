@@ -16,7 +16,7 @@ internal static partial class ScreenSyncTests
         string path=Path.Combine(folder,"Synthetic HUD.hud.json");ScreenCalibrationFiles.Save(path,original);
         using(var document=JsonDocument.Parse(original)) {
             var names=document.RootElement.EnumerateObject().Select(p=>p.Name).OrderBy(s=>s).ToArray();
-            Check(names.SequenceEqual(new[]{"Format","Version","Health","Shield","ReadShield","Badge","BadgeMask","BadgeVariants","Spectator","SpectatorMask","DeathMarker","DeathMarkerMask","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
+            Check(names.SequenceEqual(new[]{"Format","Version","Health","Shield","ReadShield","Badge","BadgeMask","BadgeVariants","Spectator","SpectatorMask","DeathMarker","DeathMarkerMask","DeathMarkerFrameWidth","DeathMarkerFrameHeight","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
         }
         var legacy=ScreenCalibrationFiles.Decode(original);legacy.Version=1;
         Check(legacy.Valid(),"version one calibration remains readable with no additional badges");
