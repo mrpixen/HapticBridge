@@ -167,6 +167,8 @@ The server deadline and server shutdown cancel requests still waiting to dispatc
 
 Successful responses contain `accepted: true` and `playbackStopped: true`. Zero position moves to an endpoint. Use `/stop` to stop motion. Point moves do not automatically resume speed patterns. The existing `/motor`, `/frame` and `/pattern` endpoints also control non-vibration outputs: use their discovered channel and the common 0–20 scale. `nativeMax` reports physical command resolution; pumping maps that scale to levels 0–3.
 
+Invalid values and unsupported functions return HTTP 400 before changing playback or settings. The Python helper below additionally releases its session after an output error; a rejected request does not mean the helper will keep earlier output running.
+
 ## Python client
 
 The dependency-free [example client](../examples/gateway_client.py) lists devices when run without arguments. Use the returned device ID, actuator channel and function flags. Commands below produce output or change motion settings on a compatible device:
@@ -182,4 +184,6 @@ python examples/gateway_client.py --function reverse --device DEVICE_ID
 
 `--motor` accepts discovered channels 0–9. Motion commands stop playback on the selected device; stroke settings apply to subsequent thrusting. Reverse toggles direction. Position zero moves to an endpoint. Each invocation releases its session when finished.
 
-For programmatic use, `Session.frame(...)` controls continuous outputs and `Session.function(device_id, function, value=None, high=None)` applies motion settings inside `with gateway.session() as session:`. Both reject an inactive session. A failed output request ends the client session, stops heartbeat renewal and attempts release, even if your code catches the exception. Open a new session deliberately after resolving the error; failed events are not replayed. Run the offline client checks with `python -m unittest discover -s tests -p test_gateway_client.py`.
+For programmatic use, `Session.frame(...)` controls continuous outputs and `Session.function(device_id, function, value=None, high=None)` applies motion settings inside `with gateway.session() as session:`. Each session object is single-use: do not nest or reopen it. Create a new `gateway.session()` for the next connection. Both output methods reject an inactive session.
+
+A failed output request ends the client session, stops heartbeat renewal and attempts release, even if your code catches the exception. Open a new session deliberately after resolving the error; failed events are not replayed. Run the offline client checks with `python -m unittest discover -s tests -p test_gateway_client.py`.
