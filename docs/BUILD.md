@@ -15,9 +15,11 @@ The publish script checks that its output directory contains exactly one executa
 
 **Settings → Browser helper → Save helper…** exports the bundled helper ZIP. The app remains one executable; using the optional browser workaround requires loading that extension separately. The export includes setup instructions and does not install anything in a browser.
 
-Before publishing, run the privacy checker against the source and each release file:
+Before publishing, commit the release changes and build from that clean checkout. Check that the executable embeds the same version and Git revision, then scan it:
+
 
 ```powershell
+./tools/check_release_build.ps1 -Executable dist/win-x64/HapticBridge.exe -Commit (git rev-parse HEAD)
 python tools/privacy_check.py --artifact dist/win-x64/HapticBridge.exe
 ```
 
