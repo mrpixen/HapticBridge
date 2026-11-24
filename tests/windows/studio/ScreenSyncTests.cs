@@ -185,6 +185,7 @@ internal static partial class ScreenSyncTests
             await DeathTextFeedback(app,capture,links,players);
             await BadgeLearning(app);
             await CalibrationFiles(app,capture,temp,links,players);
+            capture=await ImageCalibration(app,capture,temp,links,players);
             capture=await CaptureStopFailures(app,capture,links,players);
             capture=await StoppedCaptureDiscardsPendingTick(app,capture,links);
             capture=await ScreenShortcutGameplay(app,capture,links,players);

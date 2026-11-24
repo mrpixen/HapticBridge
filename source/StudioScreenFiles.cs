@@ -16,8 +16,24 @@ namespace LovenseConnector
                 var item=new MenuItem {Header=title};
                 item.Click+=async(s,e)=>{try{await action();}catch(Exception ex){Report(ex);}};menu.Items.Add(item);
             }
-            Item("Save setup…",ExportScreenCalibration);Item("Open setup…",OpenScreenCalibration);Item("Clear learned badges",ClearScreenBadges);Item("Clear spectator marker",ClearScreenSpectator);Item("Clear death text",ClearScreenDeathMarker);
+            Item("Open HUD image…",OpenScreenImage);Item("Save setup…",ExportScreenCalibration);Item("Open setup…",OpenScreenCalibration);Item("Clear learned badges",ClearScreenBadges);Item("Clear spectator marker",ClearScreenSpectator);Item("Clear death text",ClearScreenDeathMarker);
             button.ContextMenu=menu;button.Click+=(s,e)=>{menu.PlacementTarget=button;menu.IsOpen=true;};return button;
+        }
+        async Task OpenScreenImage()
+        {
+            var stopped=StopAll();int operation=operatorGeneration;
+            if(!await stopped||closing||operation!=operatorGeneration)return;
+            var dialog=new OpenFileDialog {Filter="HUD images|*.png;*.jpg;*.jpeg;*.bmp",Title="Open HUD image"};
+            if(dialog.ShowDialog(window)!=true||closing||operation!=operatorGeneration)return;
+            await ApplyScreenImage(ScreenCalibrationImage.Load(dialog.FileName));
+        }
+        async Task ApplyScreenImage(ScreenPixels image)
+        {
+            if(image==null||!image.Valid)throw new ArgumentException("Choose a valid HUD image.");
+            var stopped=StopScreenCapture();int request=screenCaptureRequest,operation=operatorGeneration;await stopped;
+            if(closing||request!=screenCaptureRequest||operation!=operatorGeneration)return;
+            screenFrame=image;screenFrozen=true;screenPreview.CanSelect=true;screenPreview.Show(image);screenFreeze.Content="Frozen image";screenFreeze.IsEnabled=false;
+            ResetScreenDetection();RefreshScreenReading();SetScreenStatus("Image ready · select a region and learn · output off");
         }
         async Task ExportScreenCalibration()
         {

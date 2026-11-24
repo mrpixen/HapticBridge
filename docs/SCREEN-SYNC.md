@@ -24,6 +24,8 @@ Depleted armor can display a dim zero. When normal shield matching fails, the re
 
 **Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
 
+To calibrate from a screenshot, use **Calibration → More → Open HUD image** and choose a PNG, JPEG or BMP. Capture and output stop, and the image opens frozen for region selection and learning. Use a full-window screenshot at your game resolution. The image stays in memory and is not copied into saved setups; only learned templates and regions are saved. Start a live preview again before enabling output.
+
 Under **Calibration → More**, **Save setup** exports a `.hud.json` file; **Open setup** loads one. Use separate files for different HUD layouts or move a setup to another computer. Files contain recognition regions, learned templates and the shield-reading choice, without motor assignments or strengths. Opening stops output and replaces calibration as one undoable edit. Check the preview, then **Save calibration** to keep it across launches. Loading never starts capture or output. These files contain your calibration data; keep them out of public bug reports.
 
 ## Feedback

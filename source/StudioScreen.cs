@@ -116,7 +116,7 @@ namespace LovenseConnector
         }
         async Task StopScreenCapture()
         {
-            screenCaptureRequest++;screenFrozen=false;if(screenFreeze!=null)screenFreeze.Content="Freeze";if(screenPreview!=null)screenPreview.CanSelect=false;
+            screenCaptureRequest++;screenFrozen=false;if(screenFreeze!=null){screenFreeze.Content="Freeze";screenFreeze.IsEnabled=true;}if(screenPreview!=null)screenPreview.CanSelect=false;
             var stopped=DisarmScreen();var capture=screenCapture;screenCapture=null;capture?.Dispose();Interlocked.Exchange(ref screenPending,null);screenFrame=null;screenPreview?.Show(null);screenFilter?.Reset();screenSpectatorFilter?.Reset();screenDeathMarkerFilter?.Reset();
             if(screenReading!=null)screenReading.Text="Health —    Badge —";
             if(screenStatus!=null)SetScreenStatus("Capture off · output off");await stopped;
@@ -129,7 +129,7 @@ namespace LovenseConnector
             screenFrozen=!screenFrozen;ResetScreenDetection();screenFreeze.Content=screenFrozen?"Resume preview":"Freeze";screenPreview.CanSelect=screenFrozen;
             SetScreenStatus(screenFrozen?"Frozen · drag around the selected HUD element":"Preview only · output off");
         }
-        void RequireFrozen(){if(!screenFrozen||screenFrame==null)throw new ArgumentException("Start preview, then Freeze on the HUD you want to learn.");}
+        void RequireFrozen(){if(!screenFrozen||screenFrame==null)throw new ArgumentException("Freeze a live preview or open a HUD image before learning.");}
         Task LearnScreenBadge()
         {
             RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Badge),32,32);

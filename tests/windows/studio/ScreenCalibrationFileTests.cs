@@ -30,7 +30,7 @@ internal static partial class ScreenSyncTests
         var loaded=ScreenCalibrationFiles.Load(path);
         Check(loaded.Valid()&&ScreenCalibrationFiles.Encode(loaded.Snapshot())==original,"setup file round-trip preserves regions, shield mode and learned templates");
         var menu=Descendants(Get<TabControl>(app,"tabs")).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="More calibration actions").ContextMenu;
-        Check(menu.Items.OfType<MenuItem>().Select(m=>(string)m.Header).SequenceEqual(new[]{"Save setup…","Open setup…","Clear learned badges","Clear spectator marker","Clear death text"}),"portable setup actions are available in the calibration menu without opening any dialog");
+        Check(menu.Items.OfType<MenuItem>().Select(m=>(string)m.Header).SequenceEqual(new[]{"Open HUD image…","Save setup…","Open setup…","Clear learned badges","Clear spectator marker","Clear death text"}),"portable setup actions are available in the calibration menu without opening any dialog");
         string other=original.Replace("hapticbridge-hud","another-format");bool rejected=false;
         try{ScreenCalibrationFiles.Decode(other);}catch(ArgumentException){rejected=true;}
         Check(rejected,"a different JSON format is rejected");
