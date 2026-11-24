@@ -308,7 +308,12 @@ internal static partial class ScreenSyncTests
         profile.DamageLevel=4;profile.DeathLevel=19;
         try {
             await Feed(app,capture,"100",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);
-            int[] before=links.Select(l=>l.Positive.Count).ToArray();await Feed(app,capture,"80",3);int[] markers=links.Select(l=>l.Positive.Count).ToArray();
+            int[] before=links.Select(l=>l.Positive.Count).ToArray();await Feed(app,capture,"80",3);
+            // Playback samples asynchronously every 100 ms. Feed's 110 ms delay is
+            // not an acknowledgement, particularly on a busy CI host.
+            var received=System.Diagnostics.Stopwatch.StartNew();
+            while(links.Select((l,i)=>l.Positive.Count<=before[i]).Any(x=>x)&&received.ElapsedMilliseconds<500)await Task.Delay(10);
+            int[] markers=links.Select(l=>l.Positive.Count).ToArray();
             Check(markers.Select((n,i)=>n>before[i]).All(x=>x),"rapid sequence has already delivered damage feedback");
             await Feed(app,capture,"0",2);
             // Keep the cooldown active at the confirming frame even on a slow CI host.
