@@ -153,7 +153,12 @@ public final class ImmersionClient implements ClientModInitializer {
             miningTarget=target;previousMiningProgress=progress;
             var state=target==null?null:client.level.getBlockState(target);
             boolean valid=state!=null&&!state.isAir()&&state.getDestroySpeed(client.level,target)>=0;
-            engine.sustain("mining",valid,HapticEngine.miningProgressScale(progress),now);
+            int material=valid?HapticEngine.miningLevel(state.is(BlockTags.MINEABLE_WITH_SHOVEL),
+                state.is(BlockTags.MINEABLE_WITH_PICKAXE),
+                state.is(ConventionalBlockTags.ORES)||state.is(BlockTags.ORES),
+                state.is(ConventionalBlockTags.OBSIDIANS)||state.is(Blocks.OBSIDIAN)||state.is(Blocks.CRYING_OBSIDIAN),
+                state.getDestroySpeed(client.level,target)):0;
+            engine.sustain("mining",valid,HapticEngine.miningProgressScale(progress,material),now);
         } else { engine.sustain("mining",false,0,now);miningTarget=null;previousMiningProgress=0; }
         if(p.experienceLevel>xpLevel)engine.reward(HapticEngine.crossedMilestone(xpLevel,p.experienceLevel)?"level_milestone":"level_up",1,now);
         else if(p.experienceProgress>xpProgress+0.001)fire("experience",1,now);
