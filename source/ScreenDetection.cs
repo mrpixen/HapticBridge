@@ -28,6 +28,8 @@ namespace LovenseConnector
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public HudRegion Spectator { get; set; }=new HudRegion {X=.065625,Y=.785185,Width=.104167,Height=.02963};
         public byte[] SpectatorMask { get; set; }
+        public HudRegion DeathMarker { get; set; }=new HudRegion {X=.953125,Y=.487037,Width=.034375,Height=.013889};
+        public byte[] DeathMarkerMask { get; set; }
         public byte[] BadgeMask { get; set; }
         public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }=new List<HudGlyph>();
@@ -36,6 +38,7 @@ namespace LovenseConnector
         public int DeathLevel { get; set; }=16;
         public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
             Spectator!=null&&Spectator.Valid&&(SpectatorMask==null||SpectatorMask.Length==4096&&SpectatorMask.All(x=>x<=1))&&
+            DeathMarker!=null&&DeathMarker.Valid&&(DeathMarkerMask==null||DeathMarkerMask.Length==4096&&DeathMarkerMask.All(x=>x<=1))&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
             BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
@@ -53,7 +56,7 @@ namespace LovenseConnector
     {
         public int? Health;
         public int? Shield;
-        public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore;
+        public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore, DeathMarkerScore;
     }
     internal sealed class HudEvent
     {
@@ -194,6 +197,10 @@ namespace LovenseConnector
             int x=(int)(region.X*frame.Width),y=(int)(region.Y*frame.Height);
             int w=Math.Min(frame.Width-x,Math.Max(1,(int)(region.Width*frame.Width))),h=Math.Min(frame.Height-y,Math.Max(1,(int)(region.Height*frame.Height)));
             if(w*h>1000000)return null;
+            return ExtractPixels(frame,x,y,w,h,includeTeal);
+        }
+        static Mask ExtractPixels(ScreenPixels frame,int x,int y,int w,int h,bool includeTeal)
+        {
             var result=new Mask { Width=w,Height=h,Pixels=new byte[w*h] };
             for(int j=0;j<h;j++)for(int i=0;i<w;i++) {
                 int p=((j+y)*frame.Width+i+x)*4;int b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
@@ -201,6 +208,35 @@ namespace LovenseConnector
                 result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
             }
             return result;
+        }
+        public static double MatchVerticalText(ScreenPixels frame,HudRegion region,byte[] template)
+        {
+            if(frame==null||!frame.Valid||region==null||!region.Valid||template==null||template.Length!=4096||template.Any(v=>v>1))return 0;
+            int ink=template.Sum(v=>(int)v);if(ink<12)return 0;
+            int x=(int)(region.X*frame.Width),center=(int)(region.Y*frame.Height);
+            int width=Math.Min(frame.Width-x,Math.Max(1,(int)(region.Width*frame.Width)));
+            int height=Math.Min(frame.Height-center,Math.Max(1,(int)(region.Height*frame.Height)));
+            int radius=(int)(frame.Height*.12),top=Math.Max(0,center-radius),bottom=Math.Min(frame.Height-height,center+radius);
+            int bandHeight=bottom-top+height;if((long)width*bandHeight>1000000)return 0;
+            // Extract once, then score normalized windows without allocating one
+            // image and normalized mask for every candidate vertical position.
+            var band=ExtractPixels(frame,x,top,width,bandHeight,false);
+            var columns=new int[128];var rows=new int[32];
+            for(int i=0;i<128;i++)columns[i]=Math.Min(width-1,(int)((i+.5)*width/128));
+            for(int i=0;i<32;i++)rows[i]=Math.Min(height-1,(int)((i+.5)*height/32));
+            double best=0;
+            for(int offset=0;offset<=bottom-top;offset++) {
+                int total=ink,intersection=0,index=0;
+                for(int row=0;row<32;row++) {
+                    int at=(offset+rows[row])*width;
+                    for(int column=0;column<128;column++,index++) {
+                        byte pixel=band.Pixels[at+columns[column]];total+=pixel;
+                        if(pixel>0&&template[index]>0)intersection++;
+                    }
+                }
+                best=Math.Max(best,2.0*intersection/total);
+            }
+            return best;
         }
         public static Mask[] Segment(Mask input,bool trimDigits=false)
         {
@@ -272,6 +308,7 @@ namespace LovenseConnector
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true,true);
                 result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;
             }
+            result.DeathMarkerScore=profile.DeathMarkerMask==null?0:MatchVerticalText(frame,profile.DeathMarker,profile.DeathMarkerMask);
             result.SpectatorScore=profile.SpectatorMask==null?0:Similarity(Normalize(Extract(frame,profile.Spectator,false),128,32),profile.SpectatorMask);
             var badge=Normalize(Extract(frame,profile.Badge),32,32);
             result.BadgeScore=Similarity(badge,profile.BadgeMask);

@@ -30,6 +30,7 @@ namespace LovenseConnector
         HudGlyph[] screenGlyphs;
         readonly HudEventFilter screenFilter=new HudEventFilter();
         readonly HudSpectatorFilter screenSpectatorFilter=new HudSpectatorFilter();
+        readonly HudDeathMarkerFilter screenDeathMarkerFilter=new HudDeathMarkerFilter();
         readonly Dictionary<string,ScreenRoute> screenRoutes=new Dictionary<string,ScreenRoute>();
         readonly List<ScreenTarget> screenOwned=new List<ScreenTarget>();
         readonly List<ScreenStopAttempt> screenStopRetries=new List<ScreenStopAttempt>();
@@ -65,16 +66,16 @@ namespace LovenseConnector
             var captureButtons=new WrapPanel();captureButtons.Children.Add(Action("Start preview",StartScreenPreview));captureButtons.Children.Add(Action("Stop capture",StopScreenCapture));
             screenFreeze=Action("Freeze",ToggleScreenFreeze);captureButtons.Children.Add(screenFreeze);source.Children.Add(captureButtons);
             screenStatus=Text("Capture off · output off",14);source.Children.Add(screenStatus);body.Children.Add(StudioPanel(source));
-            screenPreview=new HudPreview { Profile=screenProfile,Margin=new Thickness(0,12,0,4) };Accessible(screenPreview,"HUD preview. Freeze, choose Health, Shield, Kill badge or Spectator marker, and drag a region. Numeric coordinates are also available below.");body.Children.Add(screenPreview);
+            screenPreview=new HudPreview { Profile=screenProfile,Margin=new Thickness(0,12,0,4) };Accessible(screenPreview,"HUD preview. Freeze, choose Health, Shield, Kill badge, Spectator marker or Death text, and drag a region. Numeric coordinates are also available below.");body.Children.Add(screenPreview);
             screenReading=Text("Health —    Badge —",14);body.Children.Add(screenReading);
             var calibration=new StackPanel();
-            var selection=new WrapPanel();screenRegion=new ComboBox { Width=140,Margin=new Thickness(0,0,10,8) };screenRegion.Items.Add("Health");screenRegion.Items.Add("Kill badge");screenRegion.Items.Add("Shield");screenRegion.Items.Add("Spectator marker");screenRegion.SelectedIndex=0;Accessible(screenRegion,"HUD element to select");selection.Children.Add(screenRegion);selection.Children.Add(Text("Freeze, then drag around the digits, badge or spectator marker.",13));calibration.Children.Add(selection);
+            var selection=new WrapPanel();screenRegion=new ComboBox { Width=140,Margin=new Thickness(0,0,10,8) };screenRegion.Items.Add("Health");screenRegion.Items.Add("Kill badge");screenRegion.Items.Add("Shield");screenRegion.Items.Add("Spectator marker");screenRegion.Items.Add("Death text");screenRegion.SelectedIndex=0;Accessible(screenRegion,"HUD element to select");selection.Children.Add(screenRegion);selection.Children.Add(Text("Freeze, then drag around the digits, badge or text marker.",13));calibration.Children.Add(selection);
             screenReadShield=new CheckBox { Content="Read shield damage",IsChecked=screenProfile.ReadShield,Margin=new Thickness(0,0,0,10) };Accessible(screenReadShield,"Read shield damage from the calibrated shield number");calibration.Children.Add(screenReadShield);
             screenReadShield.Checked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenShieldEnabled(true);};screenReadShield.Unchecked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenShieldEnabled(false);};
             screenPreview.Selected+=SetScreenRegion;
             var learning=new WrapPanel();screenHealthText=Input("100",75);Accessible(screenHealthText,"Selected health or shield number visible in frozen preview");learning.Children.Add(screenHealthText);
             learning.Children.Add(Action("Learn digits",LearnScreenDigits));
-            learning.Children.Add(Action("Learn kill badge",LearnScreenBadge));learning.Children.Add(Action("Learn spectator marker",LearnScreenSpectator));calibration.Children.Add(learning);
+            learning.Children.Add(Action("Learn kill badge",LearnScreenBadge));learning.Children.Add(Action("Learn spectator marker",LearnScreenSpectator));learning.Children.Add(Action("Learn death text",LearnScreenDeathMarker));calibration.Children.Add(learning);
             var savedButtons=new WrapPanel();savedButtons.Children.Add(Action("Save calibration",()=>{SaveScreenProfile();SetScreenStatus("Calibration saved on this computer");return Task.CompletedTask;}));
             screenUndoCalibration=Action("Undo calibration",UndoScreenCalibration,()=>screenCalibrationUndo.Count>0);screenUndoCalibration.IsEnabled=false;savedButtons.Children.Add(screenUndoCalibration);
             savedButtons.Children.Add(Action("Reset calibration",ResetScreenCalibration));savedButtons.Children.Add(ScreenCalibrationFileMenu());calibration.Children.Add(savedButtons);
@@ -116,7 +117,7 @@ namespace LovenseConnector
         async Task StopScreenCapture()
         {
             screenCaptureRequest++;screenFrozen=false;if(screenFreeze!=null)screenFreeze.Content="Freeze";if(screenPreview!=null)screenPreview.CanSelect=false;
-            var stopped=DisarmScreen();var capture=screenCapture;screenCapture=null;capture?.Dispose();Interlocked.Exchange(ref screenPending,null);screenFrame=null;screenPreview?.Show(null);screenFilter?.Reset();screenSpectatorFilter?.Reset();
+            var stopped=DisarmScreen();var capture=screenCapture;screenCapture=null;capture?.Dispose();Interlocked.Exchange(ref screenPending,null);screenFrame=null;screenPreview?.Show(null);screenFilter?.Reset();screenSpectatorFilter?.Reset();screenDeathMarkerFilter?.Reset();
             if(screenReading!=null)screenReading.Text="Health —    Badge —";
             if(screenStatus!=null)SetScreenStatus("Capture off · output off");await stopped;
         }
@@ -151,7 +152,7 @@ namespace LovenseConnector
             RememberScreenCalibration();screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();RefreshScreenReading();
             SetScreenStatus("Learned badges cleared. Undo restores them");return stopped;
         }
-        void ResetScreenDetection(){screenFilter.Reset();screenSpectatorFilter.Reset();}
+        void ResetScreenDetection(){screenFilter.Reset();screenSpectatorFilter.Reset();screenDeathMarkerFilter.Reset();}
         Task LearnScreenSpectator()
         {
             RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Spectator,false),128,32);
@@ -166,7 +167,21 @@ namespace LovenseConnector
             if(screenProfile.SpectatorMask!=null){RememberScreenCalibration();screenProfile.SpectatorMask=null;RefreshScreenCalibration();}
             SetScreenStatus("Spectator marker cleared");return stopped;
         }
-        HudRegion SelectedScreenRegion=>screenRegion.SelectedIndex==0?screenProfile.Health:screenRegion.SelectedIndex==2?screenProfile.Shield:screenRegion.SelectedIndex==3?screenProfile.Spectator:screenProfile.Badge;
+        Task LearnScreenDeathMarker()
+        {
+            RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.DeathMarker,false),128,32);
+            int ink=mask?.Count(x=>x>0)??0;
+            if(ink<48||ink>3000)throw new ArgumentException("Select only the KILLED YOU text on the right, with a little surrounding background.");
+            RememberScreenCalibration();screenProfile.DeathMarkerMask=mask;RefreshScreenCalibration();
+            SetScreenStatus("Death text learned. Save calibration to keep it");return Task.CompletedTask;
+        }
+        Task ClearScreenDeathMarker()
+        {
+            var stopped=DisarmScreen();
+            if(screenProfile.DeathMarkerMask!=null){RememberScreenCalibration();screenProfile.DeathMarkerMask=null;RefreshScreenCalibration();}
+            SetScreenStatus("Death text cleared");return stopped;
+        }
+        HudRegion SelectedScreenRegion=>screenRegion.SelectedIndex==0?screenProfile.Health:screenRegion.SelectedIndex==2?screenProfile.Shield:screenRegion.SelectedIndex==3?screenProfile.Spectator:screenRegion.SelectedIndex==4?screenProfile.DeathMarker:screenProfile.Badge;
         Task LearnScreenDigits()
         {
             RequireFrozen();if(screenRegion.SelectedIndex!=0&&screenRegion.SelectedIndex!=2)throw new ArgumentException("Choose Health or Shield before learning digits.");
@@ -200,6 +215,7 @@ namespace LovenseConnector
             if(screenRegion.SelectedIndex==0)screenProfile.Health=region;
             else if(screenRegion.SelectedIndex==2)screenProfile.Shield=region;
             else if(screenRegion.SelectedIndex==3){screenProfile.Spectator=region;screenProfile.SpectatorMask=null;}
+            else if(screenRegion.SelectedIndex==4){screenProfile.DeathMarker=region;screenProfile.DeathMarkerMask=null;}
             else {screenProfile.Badge=region;screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();}
             RefreshScreenCalibration();
             SetScreenStatus("Region changed · Save calibration to keep it");
@@ -208,7 +224,7 @@ namespace LovenseConnector
         {
             var stopped=DisarmScreen();RememberScreenCalibration();
             screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.Shield=new ScreenProfile().Shield;screenProfile.ReadShield=false;
-            screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();screenProfile.Spectator=new ScreenProfile().Spectator;screenProfile.SpectatorMask=null;
+            screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();screenProfile.Spectator=new ScreenProfile().Spectator;screenProfile.SpectatorMask=null;screenProfile.DeathMarker=new ScreenProfile().DeathMarker;screenProfile.DeathMarkerMask=null;
             SaveScreenProfile();RefreshScreenCalibration();SetScreenStatus("Calibration reset · Undo restores the previous setup");
             return stopped;
         }
@@ -220,7 +236,7 @@ namespace LovenseConnector
             // Feedback levels are independent settings, not part of calibration undo.
             screenProfile.Health=previous.Health;screenProfile.Badge=previous.Badge;
             screenProfile.Shield=previous.Shield;screenProfile.ReadShield=previous.ReadShield;
-            screenProfile.Spectator=previous.Spectator;screenProfile.SpectatorMask=previous.SpectatorMask;
+            screenProfile.Spectator=previous.Spectator;screenProfile.SpectatorMask=previous.SpectatorMask;screenProfile.DeathMarker=previous.DeathMarker;screenProfile.DeathMarkerMask=previous.DeathMarkerMask;
             screenProfile.BadgeMask=previous.BadgeMask;screenProfile.BadgeVariants=previous.BadgeVariants;screenProfile.Digits=previous.Digits;
             RefreshScreenCalibration();SetScreenStatus("Calibration restored · Save calibration to keep it");
             return stopped;
@@ -229,7 +245,7 @@ namespace LovenseConnector
         HudReading RefreshScreenReading()
         {
             if(screenFrame==null)return null;var read=HudVision.Read(screenFrame,screenProfile,screenGlyphs);
-            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned")+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match");return read;
+            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned")+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+Math.Round(read.DeathMarkerScore*100)+"% match");return read;
         }
         void RefreshScreenRoutes()
         {
@@ -353,13 +369,15 @@ namespace LovenseConnector
             screenFrame=frame;if(screenPreview.IsVisible)screenPreview.Show(frame);var read=RefreshScreenReading();if(read?.Health.HasValue==true)screenLastGood=now;
             bool spectator=screenSpectatorFilter.Push(read?.SpectatorScore??0,frame.Time);
             if(spectator) {
-                screenFilter.Reset();
+                screenFilter.Reset();screenDeathMarkerFilter.Reset();
                 if(!await StopForTick("Spectating detected · output off until enabled again"))return;
                 return;
             }
             // Do not queue a new cue while a spectator marker is being confirmed.
-            if(read?.SpectatorScore>=.85){screenFilter.Reset();return;}
-            var events=screenFilter.Push(read,frame.Time);
+            if(read?.SpectatorScore>=.85){screenFilter.Reset();screenDeathMarkerFilter.Reset();return;}
+            var events=screenFilter.Push(read,frame.Time).ToList();
+            if(screenDeathMarkerFilter.Push(read,read?.DeathMarkerScore??0,frame.Time)&&!events.Any(e=>e.Kind=="Death"))
+                {screenFilter.Reset();events.Add(new HudEvent {Kind="Death",Health=0});}
             foreach(var ev in events.OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {
                 string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind;
                 string outcome="preview";

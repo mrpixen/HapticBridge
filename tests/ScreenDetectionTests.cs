@@ -8,6 +8,31 @@ internal static class ScreenDetectionTests
     static void Check(bool ok,string name){checks++;if(!ok)throw new Exception("Screen detection: "+name);}
     static HudReading Read(int? health,double badge=0,double confidence=1)=>new HudReading { Health=health,BadgeScore=badge,Confidence=confidence };
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
+    static void VerticalDeathText()
+    {
+        ScreenPixels Frame(int top,int left=80) {
+            var bytes=new byte[128*128*4];
+            for(int y=0;y<10;y++)for(int x=0;x<24;x++)if(y==1||x==3||x==17&&y>3||y==8&&x>10) {
+                int p=((top+y)*128+left+x)*4;bytes[p]=bytes[p+1]=bytes[p+2]=255;bytes[p+3]=255;
+            }
+            return new ScreenPixels(bytes,128,128,0);
+        }
+        var region=new HudRegion {X=80.0/128,Y=50.0/128,Width=24.0/128,Height=10.0/128};
+        var template=HudVision.Normalize(HudVision.Extract(Frame(50),region,false),128,32);
+        Check(HudVision.MatchVerticalText(Frame(50),region,template)>.99,"death text matches at learned position");
+        Check(HudVision.MatchVerticalText(Frame(60),region,template)>.99,"death text follows a shifted report row");
+        Check(HudVision.MatchVerticalText(Frame(90),region,template)<.9,"death text search stays vertically bounded");
+        Check(HudVision.MatchVerticalText(Frame(50,10),region,template)<.9,"death text does not search unrelated horizontal HUD areas");
+        Check(HudVision.MatchVerticalText(Frame(50),region,new byte[4096])==0,"blank death template cannot match");
+        Check(HudVision.MatchVerticalText(Frame(50),region,new byte[12])==0,"malformed death template rejected");
+        foreach(int top in new[]{0,118}) {
+            var edge=new HudRegion {X=region.X,Y=top/128.0,Width=region.Width,Height=region.Height};
+            Check(HudVision.MatchVerticalText(Frame(top),edge,template)>.99,"death text search clips to frame boundary");
+        }
+        var sample=Frame(57);double reference=0;
+        for(int y=35;y<=65;y++)reference=Math.Max(reference,HudVision.Similarity(HudVision.Normalize(HudVision.Extract(sample,new HudRegion {X=region.X,Y=y/128.0,Width=region.Width,Height=region.Height},false),128,32),template));
+        Check(Math.Abs(reference-HudVision.MatchVerticalText(sample,region,template))<.000001,"bounded text score matches independent window normalization");
+    }
     static void DeathMarkerConfirmation()
     {
         var filter=new HudDeathMarkerFilter();
@@ -29,6 +54,7 @@ internal static class ScreenDetectionTests
     }
     static int Main()
     {
+        VerticalDeathText();
         DeathMarkerConfirmation();
         ContinuousHealing();
         ShieldDamage();
@@ -98,6 +124,9 @@ internal static class ScreenDetectionTests
         profile.SpectatorMask=new byte[4096];profile.SpectatorMask[0]=2;Check(!profile.Validate(),"nonbinary spectator marker rejected");
         profile.SpectatorMask=null;profile.Spectator=null;Check(!profile.Validate(),"missing spectator region rejected");
         var old=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>("{\"Version\":1}");Check(old.Validate()&&old.SpectatorMask==null,"older local profiles start without spectator suppression");
+        Check(old.DeathMarkerMask==null&&old.DeathMarker.Valid,"older local profiles leave death text disabled");
+        old.DeathMarkerMask=new byte[3];Check(!old.Validate(),"malformed death text rejected");
+        old.DeathMarkerMask=new byte[4096];old.DeathMarkerMask[0]=2;Check(!old.Validate(),"nonbinary death text rejected");
     }
     static void RapidKillRecovery()
     {
