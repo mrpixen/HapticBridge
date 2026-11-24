@@ -17,26 +17,28 @@ namespace LovenseConnector
         public bool ReadShield { get; set; }
         public HudRegion Badge { get; set; }
         public byte[] BadgeMask { get; set; }
+        public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }
 
-        public bool Valid()=>Format=="hapticbridge-hud"&&Version==1&&new ScreenProfile {
-            Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,BadgeMask=BadgeMask,Digits=Digits
+        public bool Valid()=>Format=="hapticbridge-hud"&&(Version==1||Version==2)&&BadgeVariants!=null&&(Version==2||BadgeVariants.Count==0)&&new ScreenProfile {
+            Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits
         }.Validate();
         static HudRegion Copy(HudRegion r)=>new HudRegion {X=r.X,Y=r.Y,Width=r.Width,Height=r.Height};
         public static ScreenCalibrationData Capture(ScreenProfile profile)
         {
             if(profile==null||!profile.Validate())throw new ArgumentException("Invalid HUD calibration.");
             return new ScreenCalibrationData {
-                Format="hapticbridge-hud",Version=1,Health=Copy(profile.Health),Shield=Copy(profile.Shield),ReadShield=profile.ReadShield,
+                Format="hapticbridge-hud",Version=2,Health=Copy(profile.Health),Shield=Copy(profile.Shield),ReadShield=profile.ReadShield,
                 Badge=Copy(profile.Badge),BadgeMask=profile.BadgeMask?.ToArray(),
+                BadgeVariants=profile.BadgeVariants.Select(m=>m.ToArray()).ToList(),
                 Digits=profile.Digits.Select(d=>new HudGlyph {Digit=d.Digit,Aspect=d.Aspect,Mask=d.Mask.ToArray()}).ToList()
             };
         }
         public ScreenProfile Snapshot()
         {
             if(!Valid())throw new ArgumentException("This is not a valid HapticBridge HUD setup.");
-            var copy=Capture(new ScreenProfile {Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,BadgeMask=BadgeMask,Digits=Digits});
-            return new ScreenProfile {Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,Badge=copy.Badge,BadgeMask=copy.BadgeMask,Digits=copy.Digits};
+            var copy=Capture(new ScreenProfile {Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits});
+            return new ScreenProfile {Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,Badge=copy.Badge,BadgeMask=copy.BadgeMask,BadgeVariants=copy.BadgeVariants,Digits=copy.Digits};
         }
     }
 

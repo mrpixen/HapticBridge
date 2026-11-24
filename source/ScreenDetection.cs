@@ -27,12 +27,14 @@ namespace LovenseConnector
         public bool ReadShield { get; set; }
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public byte[] BadgeMask { get; set; }
+        public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }=new List<HudGlyph>();
         public int DamageLevel { get; set; }=14;
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
         public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
-            (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
+            (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
+            BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
             DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20;
     }
@@ -182,7 +184,9 @@ namespace LovenseConnector
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
                 result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;
             }
-            result.BadgeScore=Similarity(Normalize(Extract(frame,profile.Badge),32,32),profile.BadgeMask);
+            var badge=Normalize(Extract(frame,profile.Badge),32,32);
+            result.BadgeScore=Similarity(badge,profile.BadgeMask);
+            foreach(var variant in profile.BadgeVariants)result.BadgeScore=Math.Max(result.BadgeScore,Similarity(badge,variant));
             return result;
         }
         static Mask ExtractContrast(ScreenPixels frame,HudRegion region)

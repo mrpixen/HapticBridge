@@ -73,7 +73,7 @@ namespace LovenseConnector
             screenPreview.Selected+=SetScreenRegion;
             var learning=new WrapPanel();screenHealthText=Input("100",75);Accessible(screenHealthText,"Selected health or shield number visible in frozen preview");learning.Children.Add(screenHealthText);
             learning.Children.Add(Action("Learn digits",LearnScreenDigits));
-            learning.Children.Add(Action("Learn kill badge",()=>{RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Badge),32,32);int ink=mask?.Count(x=>x>0)??0;if(ink<24||ink>800)throw new ArgumentException("Select a visible kill confirmation badge with a little surrounding background.");RememberScreenCalibration();screenProfile.BadgeMask=mask;SetScreenStatus("Badge learned · save calibration to keep it");RefreshScreenReading();return Task.CompletedTask;}));calibration.Children.Add(learning);
+            learning.Children.Add(Action("Learn kill badge",LearnScreenBadge));calibration.Children.Add(learning);
             var savedButtons=new WrapPanel();savedButtons.Children.Add(Action("Save calibration",()=>{SaveScreenProfile();SetScreenStatus("Calibration saved on this computer");return Task.CompletedTask;}));
             screenUndoCalibration=Action("Undo calibration",UndoScreenCalibration,()=>screenCalibrationUndo.Count>0);screenUndoCalibration.IsEnabled=false;savedButtons.Children.Add(screenUndoCalibration);
             savedButtons.Children.Add(Action("Reset calibration",ResetScreenCalibration));savedButtons.Children.Add(ScreenCalibrationFileMenu());calibration.Children.Add(savedButtons);
@@ -128,6 +128,28 @@ namespace LovenseConnector
             SetScreenStatus(screenFrozen?"Frozen · drag around the selected HUD element":"Preview only · output off");
         }
         void RequireFrozen(){if(!screenFrozen||screenFrame==null)throw new ArgumentException("Start preview, then Freeze on the HUD you want to learn.");}
+        Task LearnScreenBadge()
+        {
+            RequireFrozen();var mask=HudVision.Normalize(HudVision.Extract(screenFrame,screenProfile.Badge),32,32);
+            int ink=mask?.Count(x=>x>0)??0;
+            if(ink<24||ink>800)throw new ArgumentException("Select a visible kill confirmation badge with a little surrounding background.");
+            if(screenProfile.BadgeMask?.SequenceEqual(mask)==true||screenProfile.BadgeVariants.Any(m=>m.SequenceEqual(mask))) {
+                SetScreenStatus("This badge appearance is already learned");return Task.CompletedTask;
+            }
+            if(screenProfile.BadgeVariants.Count==7)throw new ArgumentException("Eight badge appearances are learned. Use More > Clear learned badges to start a new set.");
+            RememberScreenCalibration();
+            if(screenProfile.BadgeMask!=null)screenProfile.BadgeVariants.Add(screenProfile.BadgeMask);
+            screenProfile.BadgeMask=mask;
+            SetScreenStatus("Badge learned: "+(1+screenProfile.BadgeVariants.Count)+" appearances. Save calibration to keep them");
+            RefreshScreenReading();return Task.CompletedTask;
+        }
+        Task ClearScreenBadges()
+        {
+            var stopped=DisarmScreen();
+            if(screenProfile.BadgeMask==null){SetScreenStatus("No learned badges to clear");return stopped;}
+            RememberScreenCalibration();screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();RefreshScreenReading();
+            SetScreenStatus("Learned badges cleared. Undo restores them");return stopped;
+        }
         HudRegion SelectedScreenRegion=>screenRegion.SelectedIndex==0?screenProfile.Health:screenRegion.SelectedIndex==2?screenProfile.Shield:screenProfile.Badge;
         Task LearnScreenDigits()
         {
@@ -161,7 +183,7 @@ namespace LovenseConnector
             RememberScreenCalibration();
             if(screenRegion.SelectedIndex==0)screenProfile.Health=region;
             else if(screenRegion.SelectedIndex==2)screenProfile.Shield=region;
-            else {screenProfile.Badge=region;screenProfile.BadgeMask=null;}
+            else {screenProfile.Badge=region;screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();}
             RefreshScreenCalibration();
             SetScreenStatus("Region changed · Save calibration to keep it");
         }
@@ -169,7 +191,7 @@ namespace LovenseConnector
         {
             var stopped=DisarmScreen();RememberScreenCalibration();
             screenProfile.Health=new ScreenProfile().Health;screenProfile.Badge=new ScreenProfile().Badge;screenProfile.Shield=new ScreenProfile().Shield;screenProfile.ReadShield=false;
-            screenProfile.BadgeMask=null;screenProfile.Digits.Clear();
+            screenProfile.BadgeMask=null;screenProfile.BadgeVariants.Clear();screenProfile.Digits.Clear();
             SaveScreenProfile();RefreshScreenCalibration();SetScreenStatus("Calibration reset · Undo restores the previous setup");
             return stopped;
         }
@@ -181,7 +203,7 @@ namespace LovenseConnector
             // Feedback levels are independent settings, not part of calibration undo.
             screenProfile.Health=previous.Health;screenProfile.Badge=previous.Badge;
             screenProfile.Shield=previous.Shield;screenProfile.ReadShield=previous.ReadShield;
-            screenProfile.BadgeMask=previous.BadgeMask;screenProfile.Digits=previous.Digits;
+            screenProfile.BadgeMask=previous.BadgeMask;screenProfile.BadgeVariants=previous.BadgeVariants;screenProfile.Digits=previous.Digits;
             RefreshScreenCalibration();SetScreenStatus("Calibration restored · Save calibration to keep it");
             return stopped;
         }
@@ -189,7 +211,7 @@ namespace LovenseConnector
         HudReading RefreshScreenReading()
         {
             if(screenFrame==null)return null;var read=HudVision.Read(screenFrame,screenProfile,screenGlyphs);
-            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match");return read;
+            screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned");return read;
         }
         void RefreshScreenRoutes()
         {

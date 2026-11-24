@@ -13,6 +13,7 @@ internal static class ScreenDetectionTests
         ShieldDamage();
         NumberColorMask();
         DimShieldDigits();
+        BadgeAppearances();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -37,6 +38,25 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void BadgeAppearances()
+    {
+        ScreenPixels Frame(bool alternate,bool blank=false) {
+            var bytes=new byte[32*32*4];
+            for(int y=4;y<28;y++)for(int x=4;x<28;x++)if(!blank&&(alternate?(x<8||y>23):(y<8||x>23))) {
+                int at=(y*32+x)*4;bytes[at]=bytes[at+1]=bytes[at+2]=255;bytes[at+3]=255;
+            }return new ScreenPixels(bytes,32,32,0);
+        }
+        var region=new HudRegion {Width=1,Height=1};var a=Frame(false);var b=Frame(true);
+        var profile=new ScreenProfile {Badge=region,BadgeMask=HudVision.Normalize(HudVision.Extract(a,region),32,32)};
+        Check(HudVision.Read(b,profile,Array.Empty<HudGlyph>()).BadgeScore<.9,"different badge shape requires its own template");
+        profile.BadgeVariants.Add(HudVision.Normalize(HudVision.Extract(b,region),32,32));
+        Check(profile.Validate()&&HudVision.Read(a,profile,Array.Empty<HudGlyph>()).BadgeScore>.99&&HudVision.Read(b,profile,Array.Empty<HudGlyph>()).BadgeScore>.99,"either learned badge appearance matches without lowering threshold");
+        Check(HudVision.Read(Frame(false,true),profile,Array.Empty<HudGlyph>()).BadgeScore<.9,"blank crop cannot match a learned badge bank");
+        profile.BadgeVariants[0][0]=2;Check(!profile.Validate(),"nonbinary badge variant rejected");profile.BadgeVariants[0][0]=0;
+        profile.BadgeMask=null;Check(!profile.Validate(),"orphaned badge variants rejected");profile.BadgeMask=new byte[1024];
+        while(profile.BadgeVariants.Count<8)profile.BadgeVariants.Add(new byte[1024]);Check(!profile.Validate(),"more than eight total badge appearances rejected");
+        profile.BadgeVariants=null;Check(!profile.Validate(),"null badge variant list rejected");
     }
     static void NumberColorMask()
     {
