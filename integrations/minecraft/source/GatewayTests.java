@@ -3,9 +3,10 @@ import com.google.gson.*;
 import com.sun.net.httpserver.HttpServer;
 import java.net.*;import java.nio.file.*;import java.nio.charset.StandardCharsets;import java.util.concurrent.*;
 public class GatewayTests {
- public static void main(String[] args)throws Exception { run(false,false);run(true,false);run(true,true);run(false,false,true); }
+ public static void main(String[] args)throws Exception { run(false,false);run(true,false);run(true,true);run(false,false,true);run(false,false,false,true); }
  static void run(boolean selected,boolean reload)throws Exception { run(selected,reload,false); }
- static void run(boolean selected,boolean reload,boolean failFrame)throws Exception {
+ static void run(boolean selected,boolean reload,boolean failFrame)throws Exception {run(selected,reload,failFrame,false);}
+ static void run(boolean selected,boolean reload,boolean failFrame,boolean pauseOpening)throws Exception {
   var frames=new LinkedBlockingQueue<JsonObject>();var released=new CountDownLatch(reload?2:1);
   var opening=new CountDownLatch(1);var resume=new CountDownLatch(1);var sessions=new java.util.concurrent.atomic.AtomicInteger();
   var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
@@ -17,7 +18,7 @@ public class GatewayTests {
     var devices=new JsonArray();devices.add(device);var status=new JsonObject();status.addProperty("enabled",true);status.add("devices",devices);reply=status.toString();
    } else if(route.endsWith("session")) {
     int number=sessions.incrementAndGet();
-    if(reload&&number==1){opening.countDown();try{if(!resume.await(3,TimeUnit.SECONDS))throw new java.io.IOException("Reload test timed out");}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new java.io.IOException(ex);}}
+    if((reload||pauseOpening)&&number==1){opening.countDown();try{if(!resume.await(3,TimeUnit.SECONDS))throw new java.io.IOException("Reload test timed out");}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new java.io.IOException(ex);}}
     reply="{\"sessionId\":\"test-session-"+number+"\"}";
    }
    else if(route.endsWith("frame"))frames.add(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),StandardCharsets.UTF_8)).getAsJsonObject());
@@ -31,6 +32,13 @@ public class GatewayTests {
   var refresh=Executors.newSingleThreadScheduledExecutor();
   try(var bridge=new GatewayBridge(config)) {
    refresh.scheduleAtFixedRate(()->bridge.submit(true,new int[]{4,8,12}),0,50,TimeUnit.MILLISECONDS);
+   if(pauseOpening) {
+    if(!opening.await(3,TimeUnit.SECONDS))throw new Exception("Session request never arrived");
+    refresh.shutdownNow();refresh.awaitTermination(2,TimeUnit.SECONDS);bridge.submit(false,new int[]{0,0,0});resume.countDown();
+    if(!released.await(3,TimeUnit.SECONDS))throw new Exception("Paused acquisition did not release its new session");
+    if(frames.poll(300,TimeUnit.MILLISECONDS)!=null)throw new Exception("Old gameplay frame sent after pausing during acquisition");
+    System.out.println("PASS pause during session acquisition releases without sending a stale frame (simulated loopback)");return;
+   }
    if(reload) {
     if(!opening.await(3,TimeUnit.SECONDS))throw new Exception("Session request never arrived");
     var changed=new ImmersionConfig();changed.gatewayConnectionFile=file.toString();changed.deviceChannels.put("synthetic",java.util.List.of(7));
