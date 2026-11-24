@@ -76,8 +76,14 @@ namespace LovenseConnector
             screenReadKillFeed.Checked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenKillFeed(true);};screenReadKillFeed.Unchecked+=async(s,e)=>{if(!screenCalibrationRefreshing)await SetScreenKillFeed(false);};
             screenPreview.Selected+=SetScreenRegion;
             var learning=new WrapPanel();screenHealthText=Input("100",75);Accessible(screenHealthText,"Selected health or shield number visible in frozen preview");learning.Children.Add(screenHealthText);
-            learning.Children.Add(Action("Learn digits",LearnScreenDigits));
-            learning.Children.Add(Action("Learn kill badge",LearnScreenBadge));learning.Children.Add(Action("Learn spectator marker",LearnScreenSpectator));learning.Children.Add(Action("Learn death text",LearnScreenDeathMarker));calibration.Children.Add(learning);
+            var learnActions=new[]{Action("Learn digits",LearnScreenDigits),Action("Learn kill badge",LearnScreenBadge),Action("Learn spectator marker",LearnScreenSpectator),Action("Learn death text",LearnScreenDeathMarker)};
+            foreach(var action in learnActions)learning.Children.Add(action);
+            void RefreshLearning() {
+                int kind=screenRegion.SelectedIndex,action=kind==2?0:kind>2?kind-1:kind;
+                screenHealthText.Visibility=action==0?Visibility.Visible:Visibility.Collapsed;
+                for(int i=0;i<learnActions.Length;i++)learnActions[i].Visibility=i==action?Visibility.Visible:Visibility.Collapsed;
+            }
+            RefreshLearning();screenRegion.SelectionChanged+=(s,e)=>RefreshLearning();calibration.Children.Add(learning);
             var savedButtons=new WrapPanel();savedButtons.Children.Add(Action("Save calibration",()=>{SaveScreenProfile();SetScreenStatus("Calibration saved on this computer");return Task.CompletedTask;}));
             screenUndoCalibration=Action("Undo calibration",UndoScreenCalibration,()=>screenCalibrationUndo.Count>0);screenUndoCalibration.IsEnabled=false;savedButtons.Children.Add(screenUndoCalibration);
             savedButtons.Children.Add(Action("Reset calibration",ResetScreenCalibration));savedButtons.Children.Add(ScreenCalibrationFileMenu());calibration.Children.Add(savedButtons);
