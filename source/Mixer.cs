@@ -66,9 +66,12 @@ namespace LovenseConnector
             var targets=SelectedMixer();if(targets.Length==0)throw new InvalidOperationException("Connect and select at least one motor.");
             int generation=audioGeneration,operation=operatorGeneration;
             string outputId=(audioOutputChoice?.SelectedItem as AudioOutput)?.Id;
+            bool programMode=audioSourceChoice?.SelectedIndex==1;
+            var program=audioProgramChoice?.SelectedItem as AudioProgram;
+            if(programMode&&program==null)throw new InvalidOperationException("Choose a program first.");
             await Task.WhenAll(devices.Values.Where(d=>d.Player!=null).Select(d=>d.Player.StopAll()));
             if(generation!=audioGeneration||operation!=operatorGeneration||closing||integration!=null)return;
-            var capture=(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
+            var capture=programMode?(audioProgramFactory??(p=>p.CreateSource()))(program):(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
             audioTargets=mixerRows.Values.Where(m=>m.Available).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;audioLabel.Text="Listening · "+capture.OutputName;
         }
         AudioStopRetry[] UnconfirmedAudioStops()

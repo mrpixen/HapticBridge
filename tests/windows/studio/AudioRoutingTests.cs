@@ -87,6 +87,22 @@ internal static class AudioRoutingTests
             await Invoke(app,"StopAudioOutput");
             Check(player.Active(0)&&link.ZeroCommands==zeros,"old sound Stop cannot revoke a newer manual owner");
             await GuardRetryAtWriteReady();
+            var programs=new[]{new AudioProgram(1234,5678,"Example")};
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
+            AudioProgram requestedProgram=null;var programCapture=new Source();
+            Set(app,"audioProgramFactory",new Func<AudioProgram,IAudioSource>(p=>{requestedProgram=p;return programCapture;}));
+            Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=1;
+            await Invoke(app,"RefreshAudioPrograms");
+            var programPicker=Get<ComboBox>(app,"audioProgramChoice");
+            Check(programPicker.Items.Count==1&&programPicker.SelectedItem==null,"program enumeration requires an explicit selection");
+            programPicker.SelectedIndex=0;await Invoke(app,"StartAudio");
+            Check(ReferenceEquals(requestedProgram,programs[0])&&programCapture.Started,"program mode routes selected identity to its own source factory");
+            await Invoke(app,"AudioTick");Check(player.Active(0),"program audio reaches synthetic output");
+            programs=new[]{new AudioProgram(1234,5679,"Example restarted")};
+            await Invoke(app,"RefreshAudioPrograms");
+            Check(programCapture.Disposed&&!player.Active(0)&&programPicker.SelectedItem==null,"refresh stops output and does not retain a reused process id");
+            Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=0;
+            Check(Get<IAudioSource>(app,"audioCapture")==null,"switching source mode never automatically starts capture");
         }finally{await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}
         Console.WriteLine("Audio routing: "+checks+" assertions passed (synthetic endpoints; no audio capture or hardware).");
     }

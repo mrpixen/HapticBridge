@@ -15,7 +15,7 @@ namespace LovenseConnector
         byte[] Read(CancellationToken cancellation);
     }
 
-    // Not yet exposed in the UI. The Windows adapter is a separate implementation.
+    // Capture lifecycle shared by the Windows adapter and offline fake streams.
     internal sealed class ProcessAudioSource : IAudioSource
     {
         readonly Func<CancellationToken,Task<IProcessAudioStream>> open;
