@@ -10,6 +10,10 @@ internal static class ScreenDetectionTests
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
     static void KillFeedTracking()
     {
+        var damage=new HudEvent {Kind="Damage",Health=80,Amount=20};
+        var batch=HudEvent.CombineKills(new[]{new HudEvent {Kind="Kill",Health=80},damage,new HudEvent {Kind="Kill",Health=80}});
+        Check(batch.Length==2&&batch.Single(e=>e.Kind=="Kill").Count==2&&batch.Contains(damage),"same-frame kills combine without dropping damage or changing its data");
+        Check(HudEvent.CombineKills(Enumerable.Range(0,10).Select(i=>new HudEvent {Kind="Kill"})).Single().Count==6,"combined kill feedback stays bounded");
         HudKillFeedRow A(int n)=>new HudKillFeedRow {Mask=Enumerable.Range(0,2048).Select(i=>(byte)(i%7==n?1:0)).ToArray(),Y=96+n*40,Height=32};
         var a=A(0);var b=A(1);var c=A(2);var f=new HudKillFeedFilter();
         Check(f.Push(new[]{a},0,true)==0&&f.Push(new[]{a},.1,true)==0,"existing feed row at startup is silent");

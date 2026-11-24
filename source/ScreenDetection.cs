@@ -67,6 +67,14 @@ namespace LovenseConnector
     {
         public string Kind;
         public int Amount,Health,ShieldAmount;
+        public int Count=1;
+        public static HudEvent[] CombineKills(IEnumerable<HudEvent> events)
+        {
+            var all=events.ToArray();var kills=all.Where(e=>e.Kind=="Kill").ToArray();
+            if(kills.Length<2)return all;
+            var combined=new HudEvent {Kind="Kill",Health=kills[0].Health,Count=Math.Min(6,kills.Sum(e=>Math.Clamp(e.Count,1,6)))};
+            return all.Where(e=>e.Kind!="Kill").Append(combined).ToArray();
+        }
     }
     internal sealed class HudSpectatorFilter
     {

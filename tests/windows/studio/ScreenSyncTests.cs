@@ -361,6 +361,20 @@ internal static partial class ScreenSyncTests
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});await Task.Delay(80);
             await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});await Task.Delay(450);
             Check(links.Select((l,i)=>l.Positive.Skip(before[i]).Contains(profile.KillLevel)&&l.Positive.Skip(before[i]).All(v=>v>=profile.KillLevel*3/4)).All(x=>x),"a lower-priority hit during a kill cue cannot interrupt its second pulse");
+            await Invoke(app,"DisarmScreen");await Ready();
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});
+            string rapidOutcome=await (Task<string>)Call(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});
+            Check(rapidOutcome.StartsWith("queued"),"a distinct rapid kill is not discarded by the damage cooldown");
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Death",Health=0});
+            string afterDeath=await (Task<string>)Call(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});
+            Check(afterDeath=="cooldown","rapid kill exception cannot interrupt a higher-priority death cue");
+            await Invoke(app,"DisarmScreen");await Ready();before=links.Select(l=>l.Positive.Count).ToArray();
+            var combined=HudEvent.CombineKills(new[]{new HudEvent {Kind="Kill",Health=100},new HudEvent {Kind="Kill",Health=100}}).Single();
+            var bounded=(PatternSpec)typeof(ConnectorApp).GetMethod("ScreenKillPattern",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{20,6});bounded.Validate();
+            Check(bounded.durationMs<=2000&&bounded.stopAtMs==bounded.durationMs,"largest combined kill pattern is valid and bounded by a shared deadline");
+            await Invoke(app,"SendScreenCue",combined);await Feed(app,capture,"100",6,"");await Task.Delay(120);
+            Check(links.Select((l,i)=>l.Positive.Skip(before[i]).Count(v=>v==profile.KillLevel)>=2).All(x=>x),"same-frame double kill produces two full-strength peaks on each assigned motor: "+string.Join(" | ",links.Select((l,i)=>string.Join(",",l.Positive.Skip(before[i])))));
+            Check(players.All(p=>p.Level(0)==0),"combined kill reward ends with stopped output");
         }finally {
             await Invoke(app,"DisarmScreen");profile.Health=health;profile.Badge=badge;profile.BadgeMask=mask;
             foreach(var route in choices)foreach(var choice in route.Values)choice.IsChecked=true;

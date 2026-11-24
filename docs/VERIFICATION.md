@@ -2,6 +2,8 @@
 
 ## Unreleased - VALORANT kill feed
 
+Feedback follow-up: a synthetic transport test reproduced a second rapid kill being dropped by the motor cooldown. Distinct kills now retrigger their reward; simultaneous kills are combined into one bounded pattern rather than overwriting each other. Damage cooldown and death priority remain in force. Passed 18 core suites (293 screen-detection assertions), 243 Screen sync assertions and 350 Studio assertions. Fake transports verified two full-strength peaks per assigned motor for a same-frame double kill, stopped output afterward, and death preemption.
+
 Resolution follow-up: a recorded row was missed after resizing to 720p because its weapon icon covered the single color-check line. Three interior scanlines now check the friendly background while retaining the same gold-border and color requirements. All three recorded frames preserve their row counts at 720p, 900p, 1080p, 1440p and 2160p (15 resampled inputs). A 20-second production replay resized to 720p also retains all four personal kills; the original three 1080p replays retain eight with no extra kill events. All 18 core suites pass, including 291 screen-detection assertions. These rescaled frames do not prove native HUD scaling or live capture at those resolutions.
 
 Optional kill-feed mode reads gold personal killer outlines and friendly row color, then tracks victim-text fingerprints locally. Existing rows at startup are silent. Confirmed identities survive fading and row movement; brief unreadable health can hold a fresh event for up to half a second. Feed and badge modes are mutually exclusive.

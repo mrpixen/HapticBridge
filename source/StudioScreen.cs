@@ -386,8 +386,8 @@ namespace LovenseConnector
             var events=screenFilter.Push(read,frame.Time).ToList();
             if(screenDeathMarkerFilter.Push(read,read?.DeathMarkerScore??0,frame.Time)&&!events.Any(e=>e.Kind=="Death"))
                 {screenFilter.Reset();events.Add(new HudEvent {Kind="Death",Health=0});}
-            foreach(var ev in events.OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {
-                string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind;
+            foreach(var ev in HudEvent.CombineKills(events).OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {
+                string description=ev.Kind=="Damage"?"Damage · −"+(ev.Amount-ev.ShieldAmount)+" HP"+(ev.ShieldAmount>0?" · −"+ev.ShieldAmount+" shield":""):ev.Kind=="Kill"&&ev.Count>1?"Kill × "+ev.Count:ev.Kind;
                 string outcome="preview";
                 if(screenArmed&&screenForegroundSeen)outcome=screenDeathUntil>0?"output ending":screenCueBusy?"busy":await SendScreenCue(ev);
                 screenEvents.Enqueue(DateTime.Now.ToString("HH:mm:ss")+"  "+description+" · "+outcome);while(screenEvents.Count>8)screenEvents.Dequeue();screenHistory.Text=string.Join(Environment.NewLine,screenEvents.Reverse());
@@ -410,8 +410,10 @@ namespace LovenseConnector
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;
                     // Cooldowns belong to motors: one event must not silence a different route.
                     // On a shared motor, a higher-priority event can replace the current cue.
-                    if(now-t.LastCue<.45&&priority<=t.Priority){cooling++;continue;}
-                    var pattern=ev.Kind=="Kill"?new PatternSpec { mode="Custom",durationMs=450,periodMs=450,repeat=false,frames=new[]{new Frame { ms=0,level=Math.Max(1,level*3/4) },new Frame { ms=140,level=0 },new Frame { ms=250,level=level },new Frame { ms=450,level=0 }} }:new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=40 };
+                    // The detector already deduplicates kills. A distinct new kill can
+                    // retrigger its reward, but cannot interrupt a higher-priority death.
+                    if(now-t.LastCue<.45&&(priority<t.Priority||priority==t.Priority&&ev.Kind!="Kill")){cooling++;continue;}
+                    var pattern=ev.Kind=="Kill"?ScreenKillPattern(level,ev.Count):new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=40 };
                     t.LastCue=now;t.Priority=priority;
                     pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current));
                 }
@@ -420,6 +422,14 @@ namespace LovenseConnector
                 if(sourceChanged)return "source changed";
                 return starts.Count>0?"queued · "+starts.Count+(starts.Count==1?" motor":" motors"):cooling>0?"cooldown":"muted";
             }catch{await DisarmScreen();SetScreenStatus("Device command failed · output off");return "command failed";}finally{screenCueBusy=false;}
+        }
+        static PatternSpec ScreenKillPattern(int level,int count)
+        {
+            count=Math.Clamp(count,1,6);
+            var frames=new List<Frame> {new Frame {ms=0,level=Math.Max(1,level*3/4)},new Frame {ms=140,level=0}};
+            for(int i=0;i<count;i++){frames.Add(new Frame {ms=250+i*300,level=level});frames.Add(new Frame {ms=450+i*300,level=0});}
+            int duration=450+(count-1)*300;
+            return new PatternSpec {mode="Custom",durationMs=duration,periodMs=duration,repeat=false,stopAtMs=duration,frames=frames.ToArray()};
         }
     }
 }
