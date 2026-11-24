@@ -8,6 +8,8 @@ The regression failed before correction. Replaying recorded recognition results 
 
 Passed: 18 core suites with 200 screen-detection assertions; 198 native Screen sync and 334 Studio assertions; Windows build with no warnings or errors; source privacy scan with no findings. No GUI, live capture or physical output was used.
 
+Additional recorded badge check: an end-of-round kill remained below the match threshold with three previously learned appearances. Adding its stable appearance through the existing badge bank recovered that kill; a 556-frame replay produced two kill cues and three damage cues. A separate 241-frame buy-phase replay with the expanded bank produced zero events. The added template was learned from the positive clip itself, so this is calibration validation, not held-out accuracy. No threshold or matching algorithm changed, and no private badge images are shipped.
+
 ## 0.8.18 — Motion control fixes — 2026-11-24
 
 Device summaries, tooltips and accessible controls now name the discovered actuator functions rather than assuming vibration.
