@@ -1,5 +1,11 @@
 # Release verification
 
+## Recorded spectator follow-up — 2026-11-24
+
+Replayed 956 frames from a separate recorded match using a spectator marker learned from another recording. There were no suspected or confirmed spectator matches in 715 sampled own-player frames before death and after respawn. Within a 111-frame spectator window, 85 frames matched the marker threshold and 75 met consecutive confirmation. This is limited cross-recording evidence, not a general accuracy rate.
+
+The first spectator confirmation came about four seconds after health became unreadable. The existing one-second unreadable-health cutoff would already have disabled output, so spectator detection cannot supply an immediate death cue in this case. The death report also remained visible after respawn; its presence alone is insufficient. No thresholds, output cutoff or death inference were changed. Recordings and calibration remain private.
+
 ## 0.8.20 — Stroke settings display — 2026-11-24
 
 An integration could set the stroke range to 20–75% while the device controls continued showing 0–100%. The offline native-app regression reproduced the mismatch. Stroke fields now follow the accepted profile configuration through one-way bindings; editing a field still requires Set stroke to apply it.
