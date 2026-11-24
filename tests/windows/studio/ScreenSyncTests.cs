@@ -55,7 +55,7 @@ internal static partial class ScreenSyncTests
         public ConcurrentQueue<int> Positive=new ConcurrentQueue<int>();
         public ConcurrentQueue<(int Channel,int Level)> Samples=new ConcurrentQueue<(int Channel,int Level)>();
         public TaskCompletionSource<bool> Block,Entered;
-        public int FailZero,Commands,LatestSamples,AckDelayMs;
+        public int FailPositive,FailZero,Commands,LatestSamples,AckDelayMs;
         public Task<string> Command(string command)=>Command(command,CancellationToken.None);
         public async Task<string> Command(string command,CancellationToken token)
         {
@@ -63,6 +63,7 @@ internal static partial class ScreenSyncTests
             if(Block!=null){Entered?.TrySetResult(true);await Block.Task;token.ThrowIfCancellationRequested();}
             if(command=="Vibrate:0;"&&FailZero>0){FailZero--;throw new IOException("Synthetic stop failure");}
             if(command.StartsWith("Vibrate")&&int.TryParse(command.Split(':')[1].TrimEnd(';'),out int level)&&level>0) {
+                if(FailPositive>0){FailPositive--;throw new IOException("Synthetic motor command failure");}
                 Positive.Enqueue(level);var lane=command.Substring(7,command.IndexOf(':')-7);Samples.Enqueue((lane.Length==0?0:int.Parse(lane),level));
             }
             if(AckDelayMs>0)await Task.Delay(AckDelayMs,token);
@@ -136,7 +137,14 @@ internal static partial class ScreenSyncTests
                     Check(players.All(p=>p.Level(0)==0&&!p.Active(0)),kind+" stops after its deadline with delayed acknowledgements");
                 }finally {foreach(var link in links)link.AckDelayMs=0;}
             }
-            await Feed(app,capture,"60",3);
+            await Invoke(app,"DisarmScreen");await Feed(app,capture,"60",3);await Invoke(app,"ArmScreen");
+            links[0].FailPositive=1;
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=60,Amount=20});
+            await Task.Delay(350);await Invoke(app,"ScreenTick");
+            Check(!Get<bool>(app,"screenArmed"),"rejected motor command disables screen output even when cleanup stop succeeds");
+            Check(Get<TextBlock>(app,"screenStatus").Text.Contains("command failed"),"rejected motor command has an actionable screen status");
+            Check(players.All(p=>p.Level(0)==0&&!p.Active(0)),"command failure stops every selected motor");
+            await Feed(app,capture,"60",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"60",3);
             capture.Foreground=false;await Invoke(app,"ScreenTick");Check(Get<bool>(app,"screenArmed"),"focus loss keeps output enabled");int backgroundBefore=links.Sum(l=>l.Positive.Count);await Feed(app,capture,"40",3);await Task.Delay(350);Check(Get<bool>(app,"screenArmed")&&links.Sum(l=>l.Positive.Count)>backgroundBefore,"damage reaches motors while game is in the background");capture.Foreground=true;
             await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting"),"stale capture waits without disabling output");
             await Feed(app,capture,"40",3);await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);

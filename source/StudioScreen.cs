@@ -16,7 +16,7 @@ namespace LovenseConnector
     internal sealed partial class ConnectorApp
     {
         sealed class ScreenRoute { public Device Device;public int Channel;public CheckBox Include;public Slider Ceiling;public readonly Dictionary<string,CheckBox> Events=new Dictionary<string,CheckBox>(); }
-        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling,Events,Priority;public double LastCue=-10;public Playback Player; }
+        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling,Events,Priority,CommandFailed;public double LastCue=-10;public Playback Player; }
         sealed class ScreenSample { public IScreenCapture Source;public ScreenPixels Pixels; }
         sealed class ScreenStopAttempt
         {
@@ -381,6 +381,9 @@ namespace LovenseConnector
             }
             var sample=Interlocked.Exchange(ref screenPending,null);var frame=sample!=null&&ReferenceEquals(sample.Source,screenCapture)?sample.Pixels:null;
             if(screenArmed) {
+                // A successful cleanup stop must not erase a failed cue. The flag
+                // belongs to this arm's target, so old jobs cannot disarm a new owner.
+                if(screenOwned.Any(t=>Volatile.Read(ref t.CommandFailed)!=0)) {if(!await StopForTick("Device command failed · output off"))return;}
                 if(screenDeathUntil>0&&now>=screenDeathUntil){screenDeathUntil=0;if(!await WaitForTick("Waiting for respawn · output remains enabled"))return;}
                 if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!ScreenChannelAvailable(t.Device,t.Channel)||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!screenWaiting&&!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
                 if(screenArmed&&(screenFrozen||frame==null||now-frame.Time>.5)&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await WaitForTick("Waiting for live HUD · output remains enabled"))return;}
@@ -441,7 +444,7 @@ namespace LovenseConnector
                     // sample plus a Bluetooth ACK can consume their whole deadline.
                     var pattern=ev.Kind=="Kill"?ScreenKillPattern(level,ev.Count):new PatternSpec { mode="Steady",high=level,durationMs=ev.Kind=="Death"?350:220,transitionMs=0 };
                     t.LastCue=now;t.Priority=priority;
-                    pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current));
+                    pattern.stopAtMs=pattern.durationMs;starts.Add(t.Player.Start(t.Channel,pattern,20,clock,Current,()=>Interlocked.Exchange(ref t.CommandFailed,1)));
                 }
                 await Task.WhenAll(starts);
                 if(!screenArmed||generation!=screenGeneration||operatorGeneration!=screenOperation)return "cancelled";
