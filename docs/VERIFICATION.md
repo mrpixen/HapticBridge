@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.16 — Digit boundary fallback — 2026-11-24
+
+Bright pixels outside HUD digits can stretch their shared recognition bounds. Rejected readings now retry with separate vertical bounds for each digit. Existing successful health and shield readings, calibration masks, confidence thresholds and ambiguity checks are preserved.
+
+A synthetic regression failed on the old reader and passed after the change. Tests cover recovery, blank/noisy crops, ambiguous shapes and unchanged learning. Passed locally: 17 core suites including 164 screen-detection assertions; 198 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. Source privacy checks found no configured private markers.
+
+The private prototype recovered 13 additional health readings across three recorded segments without changing their events. The final source recovered the same 11 additional readings in one combat segment; spectator suppression still withheld teammate events. A separate 400-frame segment kept exactly the prior health, shield and event results. This limited evidence does not establish general accuracy. Recorded media and calibration are not distributed. Live game performance and ARM64 execution remain unverified.
+
 ## 0.8.15 — Calibrated spectator suppression — 2026-11-24
 
 Optional spectator-marker calibration adds a separate image region and template. Three fresh matches at 85% or higher stop active Screen sync output; suspected frames do not start new cues. Output never resumes automatically. Enabling checks the marker both before and after waiting for other output to stop. Clear, region changes, reset, Undo and portable calibration handle the new template. Portable exports now use version 3; versions 1 and 2 remain readable without this feature.
