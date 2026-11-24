@@ -287,18 +287,27 @@ namespace LovenseConnector
         {
             RefreshScreenRoutes();double now=ScreenCapture.Now;
             await RetryScreenStops(now);
-            var failure=Interlocked.Exchange(ref screenFailure,null);if(failure!=null){await StopScreenCapture();SetScreenStatus(failure);return;}
+            var failure=Interlocked.Exchange(ref screenFailure,null);if(failure!=null){var stop=StopScreenCapture();int request=screenCaptureRequest;await stop;if(request==screenCaptureRequest)SetScreenStatus(failure);return;}
+            int captureRequest=screenCaptureRequest;
+            async Task<bool> StopForTick(string message)
+            {
+                var stop=DisarmScreen();int generation=screenGeneration;await stop;
+                // A stop can wait for a device while the user replaces or stops capture.
+                // The old tick must not restore its frame or overwrite the newer state.
+                if(captureRequest!=screenCaptureRequest||generation!=screenGeneration||closing)return false;
+                SetScreenStatus(message);return true;
+            }
             var sample=Interlocked.Exchange(ref screenPending,null);var frame=sample!=null&&ReferenceEquals(sample.Source,screenCapture)?sample.Pixels:null;
             if(screenArmed) {
-                if(screenDeathUntil>0&&now>=screenDeathUntil){await DisarmScreen();SetScreenStatus("Death detected · output off until enabled again");}
-                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!t.Device.Connected||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {await DisarmScreen();SetScreenStatus("Source or device changed · output off");}
+                if(screenDeathUntil>0&&now>=screenDeathUntil){if(!await StopForTick("Death detected · output off until enabled again"))return;}
+                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!t.Device.Connected||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
                 else if(screenCapture.Foreground){if(!screenForegroundSeen){screenFilter.Reset();screenLastGood=now;}screenForegroundSeen=true;}
-                else if(screenForegroundSeen||now-screenArmedAt>8){await DisarmScreen();SetScreenStatus("Window inactive · output off");}
-                if(screenArmed&&screenForegroundSeen&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {await DisarmScreen();SetScreenStatus("HUD signal lost · output off");}
+                else if(screenForegroundSeen||now-screenArmedAt>8){if(!await StopForTick("Window inactive · output off"))return;}
+                if(screenArmed&&screenForegroundSeen&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await StopForTick("HUD signal lost · output off"))return;}
             }
             if(screenFrozen||frame==null)return;
             if(now-frame.Time>.5){screenFilter.Reset();return;}
-            if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){await DisarmScreen();screenFilter.Reset();SetScreenStatus("Window resized · verify calibration before enabling output");}
+            if(screenFrame!=null&&(screenFrame.Width!=frame.Width||screenFrame.Height!=frame.Height)){if(!await StopForTick("Window resized · verify calibration before enabling output"))return;screenFilter.Reset();}
             screenFrame=frame;if(screenPreview.IsVisible)screenPreview.Show(frame);var read=RefreshScreenReading();if(read?.Health.HasValue==true)screenLastGood=now;
             var events=screenFilter.Push(read,frame.Time);
             foreach(var ev in events.OrderByDescending(e=>ScreenMotorFeedback.EventPriority(e.Kind))) {

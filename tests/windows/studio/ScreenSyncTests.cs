@@ -182,6 +182,7 @@ internal static partial class ScreenSyncTests
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
             await CalibrationFiles(app,capture,temp,links,players);
             capture=await CaptureStopFailures(app,capture,links,players);
+            capture=await StoppedCaptureDiscardsPendingTick(app,capture,links);
             capture=await ScreenShortcutGameplay(app,capture,links,players);
             await EventRoutingAndPersistence(app,capture,temp);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
@@ -215,6 +216,23 @@ internal static partial class ScreenSyncTests
             await Invoke(app,"StopScreenCapture");capture=new Capture();
         }
         Set(app,"screenCapture",capture);return capture;
+    }
+
+    static async Task<Capture> StoppedCaptureDiscardsPendingTick(ConnectorApp app,Capture capture,Link[] links)
+    {
+        Set(app,"screenCapture",capture);capture.Foreground=true;
+        await Feed(app,capture,"100",3,"25");await Invoke(app,"ArmScreen");await Feed(app,capture,"100",2,"25");
+        links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
+        capture.Foreground=false;
+        var tick=Feed(app,capture,"75",1,"25");
+        try {
+            await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await Invoke(app,"StopScreenCapture");
+        }finally {links[0].Block.TrySetResult(true);await tick;links[0].Block=null;}
+        Check(Get<ScreenPixels>(app,"screenFrame")==null,"a pending recognition tick cannot restore a frame after Stop capture");
+        Check(Get<TextBlock>(app,"screenReading").Text=="Health —    Badge —","stopped capture keeps its cleared HUD reading");
+        Check(Get<TextBlock>(app,"screenStatus").Text=="Capture off · output off","a late focus-loss stop cannot overwrite the newer capture status");
+        capture=new Capture();Set(app,"screenCapture",capture);return capture;
     }
 
     static async Task EventRoutingAndPersistence(ConnectorApp app,Capture capture,string folder)
