@@ -13,6 +13,7 @@ internal static class ScreenDetectionTests
         ShieldDamage();
         NumberColorMask();
         DimShieldDigits();
+        DigitBoundaryFallback();
         BadgeAppearances();
         RapidKillRecovery();
         SpectatorConfirmation();
@@ -131,6 +132,33 @@ internal static class ScreenDetectionTests
         Check(HudVision.Learn(dim,region,"0",50).Length==1,"dim shield digits can be learned");
         bool rejected=false;try{HudVision.Learn(dim,region,"0",100);}catch(ArgumentException){rejected=true;}
         Check(rejected,"dim shield learning fallback is not applied to health");
+    }
+    static void DigitBoundaryFallback()
+    {
+        ScreenPixels Frame(bool noise,bool digit=true) {
+            var bytes=new byte[32*32*4];
+            for(int y=0;y<32;y++)for(int x=0;x<32;x++) {
+                bool ring=digit&&x>=10&&x<22&&y>=6&&y<26&&(x<13||x>=19||y<9||y>=23);
+                bool speck=noise&&(y==0&&(x==2||x==29)||y==31&&(x==4||x==27));
+                int p=(y*32+x)*4;bytes[p]=bytes[p+1]=bytes[p+2]=(byte)(ring||speck?255:0);bytes[p+3]=255;
+            }return new ScreenPixels(bytes,32,32,0);
+        }
+        var region=new HudRegion {Width=1,Height=1};var clean=Frame(false);var noisy=Frame(true);
+        var profile=new ScreenProfile {Health=region,Shield=region,ReadShield=true};
+        profile.Digits.AddRange(HudVision.Learn(clean,region,"0",50));
+        var other=new[]{new HudGlyph {Digit=1,Aspect=1,Mask=new byte[384]}};
+        var baseline=HudVision.Read(clean,profile,other);
+        Check(baseline.Health==0&&baseline.Shield==0,"clean digit calibration remains readable");
+        var recovered=HudVision.Read(noisy,profile,other);
+        Check(recovered.Health==0&&recovered.Shield==0,"isolated background rows do not stretch every digit");
+        Check(recovered.Confidence>=.82,"trim fallback retains normal confidence threshold");
+        var absent=HudVision.Read(Frame(true,false),profile,other);
+        Check(absent.Health==null&&absent.Shield==null,"background specks alone never become zero");
+        var ambiguous=new[]{new HudGlyph {Digit=1,Aspect=profile.Digits[0].Aspect,Mask=profile.Digits[0].Mask}};
+        Check(HudVision.Read(noisy,profile,ambiguous).Health==null,"trim fallback still rejects ambiguous digit shapes");
+        var learned=HudVision.Learn(noisy,region,"0",50).Single();
+        var originalPart=HudVision.Segment(HudVision.Extract(noisy,region,false)).Single();
+        Check(learned.Mask.SequenceEqual(HudVision.Normalize(originalPart))&&learned.Aspect==(double)originalPart.Width/originalPart.Height,"learning preserves existing mask semantics");
     }
     static void ShieldDamage()
     {

@@ -154,7 +154,7 @@ namespace LovenseConnector
             }
             return result;
         }
-        public static Mask[] Segment(Mask input)
+        public static Mask[] Segment(Mask input,bool trimDigits=false)
         {
             if(input==null)return Array.Empty<Mask>();
             // Tight number regions should contain only digits. Reject noise instead of guessing a subset.
@@ -167,8 +167,19 @@ namespace LovenseConnector
                 if(ink&&start<0)start=x;
                 if(!ink&&start>=0) {
                     if(x-start>=2) {
-                        var part=new Mask { Width=x-start,Height=bottom-top+1,Pixels=new byte[(x-start)*(bottom-top+1)] };
-                        for(int y=top;y<=bottom;y++)Array.Copy(input.Pixels,y*input.Width+start,part.Pixels,(y-top)*part.Width,part.Width);
+                        int digitTop=top,digitBottom=bottom;
+                        if(trimDigits) {
+                            // Bright background pixels outside a digit can extend the shared
+                            // bounds. Retry rejected readings with each digit's own rows.
+                            digitTop=bottom+1;digitBottom=-1;
+                            for(int row=top;row<=bottom;row++) {
+                                int rowInk=0;for(int col=start;col<x;col++)rowInk+=input.At(col,row);
+                                if(rowInk>=2){digitTop=Math.Min(digitTop,row);digitBottom=row;}
+                            }
+                            if(digitBottom-digitTop<5)return Array.Empty<Mask>();
+                        }
+                        var part=new Mask { Width=x-start,Height=digitBottom-digitTop+1,Pixels=new byte[(x-start)*(digitBottom-digitTop+1)] };
+                        for(int y=digitTop;y<=digitBottom;y++)Array.Copy(input.Pixels,y*input.Width+start,part.Pixels,(y-digitTop)*part.Width,part.Width);
                         parts.Add(part);
                     }
                     start=-1;
@@ -203,10 +214,14 @@ namespace LovenseConnector
         {
             var templates=profile.Digits.Concat(defaults).ToArray();
             var health=ReadNumber(frame,profile.Health,templates,100);
+            if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
             if(profile.ReadShield) {
                 var shield=ReadNumber(frame,profile.Shield,templates,50);
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
+                // Preserve successful normal/contrast readings before trying new geometry.
+                if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,trimDigits:true);
+                if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true,true);
                 result.Shield=shield.Number;result.ShieldConfidence=shield.Confidence;
             }
             result.SpectatorScore=profile.SpectatorMask==null?0:Similarity(Normalize(Extract(frame,profile.Spectator,false),128,32),profile.SpectatorMask);
@@ -239,9 +254,9 @@ namespace LovenseConnector
             int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold?1:0);ink+=mask.Pixels[i];}
             return ink<12||ink>values.Length*.65?null:mask;
         }
-        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false)
+        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false)
         {
-            var parts=Segment(contrast?ExtractContrast(frame,region):Extract(frame,region,false));
+            var parts=Segment(contrast?ExtractContrast(frame,region):Extract(frame,region,false),trimDigits);
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
