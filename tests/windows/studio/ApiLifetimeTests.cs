@@ -90,6 +90,23 @@ internal static partial class StudioIntegrationTests
         }
     }
 
+    static async Task ApiReleaseCannotRetargetReconnectedDevice()
+    {
+        await using var fixture=new Fixture();var session=SyntheticApiSession(fixture);
+        await NativeApi(fixture,"motor",ApiMotor(session,"000000000002",0,6));
+        var device=fixture.Rows[2].Device;var original=device.Player;
+        await Until(()=>original.Level(0)==6,"session owns output on the original connection");
+        original.CancelAll();device.Generation+=2;
+        var link=new FakeLink("replacement");device.Player=new Playback(link,new[]{0});
+        await Invoke(fixture.App,"RevokeIntegration",false);
+        Check(link.Snapshot().Length==0,"revoking an old API session sends no stop to an unowned replacement connection");
+        session=SyntheticApiSession(fixture);
+        await NativeApi(fixture,"motor",ApiMotor(session,"000000000002",0,9));
+        await Until(()=>device.Player.Level(0)==9,"a new session can explicitly own the replacement");
+        await Invoke(fixture.App,"RevokeIntegration",false);
+        Check(!device.Player.Running&&device.Player.Level(0)==0,"revoking the new session stops its actual replacement output");
+    }
+
     static async Task ApiFrameCannotRetargetReconnectedDevice()
     {
         await using var fixture=new Fixture();var session=SyntheticApiSession(fixture);

@@ -62,6 +62,7 @@ internal static partial class StudioIntegrationTests
         await CancelledApiFrameStopsBeforeNextMotor();
         await CancelledApiStartCannotEscapePlaybackWaits();
         await AcceptedApiOutputKeepsItsLease();
+        await ApiReleaseCannotRetargetReconnectedDevice();
         await ApiFrameCannotRetargetReconnectedDevice();
         await ApiPatternRejectsConnectionChangeDuringAdmission();
         await ExportOrderMatchesImportSlots();

@@ -46,11 +46,12 @@ namespace LovenseConnector
             if(pause) { apiEnabled=false; var allow=Find<CheckBox>("AllowApi"); if(allow!=null) allow.IsChecked=false; }
             UpdateApiLabel();
             if(old==null) return;
-            await Task.WhenAll(old.Motors.ToArray().Select(async key=>
+            await Task.WhenAll(old.Motors.ToArray().Select(async target=>
             {
-                var parts=key.Split('/'); var d=devices.Values.FirstOrDefault(x=>x.Address.ToString("X12")==parts[0]);
-                var player=d==null?null:d.Player;
-                if(player!=null) try { await player.Stop(int.Parse(parts[1])); } catch(Exception ex) { Report(ex); }
+                // A Bluetooth address can now refer to a replacement connection.
+                // Never transfer an old session's ownership to that new player.
+                if(!devices.Values.Any(d=>ReferenceEquals(d.Player,target.Player)))return;
+                try { await target.Player.Stop(target.Channel); } catch(Exception ex) { Report(ex); }
             }));
         }
         Task<object> DispatchApi(ApiRequest request)
@@ -133,7 +134,7 @@ namespace LovenseConnector
                 if(value<0||function=="stroke"&&high<0)throw new ApiFault(400,"value is required; stroke also requires high.");
                 try { player.ValidateFunction(function,value,high); }catch(NotSupportedException ex){throw new ApiFault(400,ex.Message);}
                 RequireTarget(d,player,generation);session.Touch();
-                foreach(int channel in d.Channels)session.Motors.Add(d.Address.ToString("X12")+"/"+channel);
+                foreach(int channel in d.Channels)session.Motors.Add((player,channel));
                 await player.ApplyFunction(function,value,high,()=>CurrentTarget(d,player,generation));
                 RequireTarget(d,player,generation);return new { accepted=true,playbackStopped=true };
             }
@@ -158,7 +159,7 @@ namespace LovenseConnector
                 foreach(var command in commands) {
                     var d=command.Device;var player=command.Player;int generation=command.Generation;
                     bool Current()=>CurrentTarget(d,player,generation);
-                    RequireTarget(d,player,generation);session.Motors.Add(d.Address.ToString("X12")+"/"+command.Channel);
+                    RequireTarget(d,player,generation);session.Motors.Add((player,command.Channel));
                     if(command.Level==0) { if(player.Active(command.Channel)||player.Level(command.Channel)!=0) await player.Stop(command.Channel); }
                     else if(!player.UpdateSteady(command.Channel,command.Level,duration,transition,Current))await player.Start(command.Channel,new PatternSpec { mode="Steady",high=command.Level,durationMs=duration,transitionMs=transition },20,isCurrent:Current);
                     RequireTarget(d,player,generation);
@@ -170,7 +171,7 @@ namespace LovenseConnector
                 var d=ApiDevice(body); int channel=FieldInt(body,"motor",-1,0,9); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                 object value; if(!body.TryGetValue("pattern",out value)) throw new ApiFault(400,"pattern is required."); var pattern=json.Deserialize<PatternSpec>(json.Serialize(value)); if(pattern==null) throw new ApiFault(400,"pattern is required."); pattern.Validate();
                 var player=d.Player;int generation=d.Generation;
-                RequireTarget(d,player,generation);session.Touch();session.Motors.Add(d.Address.ToString("X12")+"/"+channel);
+                RequireTarget(d,player,generation);session.Touch();session.Motors.Add((player,channel));
                 await player.Start(channel,pattern,20,isCurrent:()=>CurrentTarget(d,player,generation));
                 RequireTarget(d,player,generation);return new { accepted=true };
             }

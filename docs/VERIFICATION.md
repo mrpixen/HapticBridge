@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased — Integration session cleanup — 2026-11-24
+
+Reproduced an old integration session sending stop commands to a replacement device connection at the same address. Session ownership now retains the original playback instance and channel; cleanup skips connections that have been replaced. A session that explicitly commands the replacement still stops it normally.
+
+The new regression failed before the fix. All 18 core suites and 330 native Studio assertions passed afterward, using simulated connections with no visible windows or physical output. Source privacy checks passed with no findings. Hardware reconnection behavior remains unverified.
+
 ## Unreleased — Binary command diagnostics — 2026-11-24
 
 A valid Solace Pro stroke packet with speed 13 and range 10–59 produced multiple activity-log lines because its payload contains raw control bytes. Command traces and transport errors now render numeric stroke fields; other non-printing command characters are escaped. Bluetooth payload bytes and reply matching are unchanged. Passed: 18 core suites, including the binary-payload regression, and a Windows x64 build with zero warnings. Source privacy checks found no configured private markers. No hardware or normal app startup was used.

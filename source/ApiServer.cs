@@ -116,7 +116,7 @@ namespace LovenseConnector
         public string Id,Name;
         public int TtlMs;
         public long Deadline;
-        public readonly HashSet<string> Motors=new HashSet<string>();
+        public readonly HashSet<(Playback Player,int Channel)> Motors=new();
         public void Touch() { Deadline=System.Diagnostics.Stopwatch.GetTimestamp()+(long)(TtlMs/1000.0*System.Diagnostics.Stopwatch.Frequency); }
         public bool Expired { get { return System.Diagnostics.Stopwatch.GetTimestamp()>=Deadline; } }
     }

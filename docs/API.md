@@ -52,6 +52,8 @@ All following POST requests except `/stop` include `sessionId`:
 
 Valid output requests also renew the session. Keep a heartbeat running during long patterns. Expiry stops owned motors even if a requested output duration was longer. A transport failure can prevent a stop acknowledgement; check device connection state.
 
+Ownership belongs to the connection that received each command. After a device reconnects, releasing or expiring an old session will not stop the replacement connection unless that session has explicitly commanded it.
+
 ## Set motor levels
 
 `POST /motor` controls one motor:
