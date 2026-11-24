@@ -11,6 +11,7 @@ internal static class ScreenDetectionTests
     static int Main()
     {
         ShieldDamage();
+        NumberColorMask();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -35,6 +36,20 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void NumberColorMask()
+    {
+        var pixels=new byte[32*32*4];
+        void Ink(int x,int y,byte r,byte g,byte b){int p=(y*32+x)*4;pixels[p]=b;pixels[p+1]=g;pixels[p+2]=r;pixels[p+3]=255;}
+        for(int y=2;y<30;y++)foreach(int x in new[]{2,3,28,29})Ink(x,y,40,220,180);
+        for(int y=6;y<26;y++)for(int x=10;x<22;x++)if(y<9||y>=14&&y<17||y>=23||x<13&&y<17||x>=19&&y>=14)Ink(x,y,255,255,255);
+        var frame=new ScreenPixels(pixels,32,32,0);var region=new HudRegion {Width=1,Height=1};
+        var learned=HudVision.Learn(frame,region,"5",50);
+        Check(learned.Length==1&&learned[0].Digit==5,"teal armor outline does not become a learned digit");
+        var profile=new ScreenProfile {Health=region,Shield=region,ReadShield=true};profile.Digits.AddRange(learned);
+        var read=HudVision.Read(frame,profile,new[]{new HudGlyph {Digit=0,Aspect=1,Mask=new byte[384]}});
+        Check(read.Health==5&&read.Shield==5,"health and shield both exclude teal outlines when reading");
+        Check(HudVision.Extract(frame,region).Pixels.Count(x=>x>0)>HudVision.Extract(frame,region,false).Pixels.Count(x=>x>0),"badge extraction retains teal marks");
     }
     static void ShieldDamage()
     {

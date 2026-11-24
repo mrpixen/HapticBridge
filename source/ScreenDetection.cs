@@ -113,7 +113,7 @@ namespace LovenseConnector
             public byte[] Pixels;
             public byte At(int x,int y)=>Pixels[y*Width+x];
         }
-        public static Mask Extract(ScreenPixels frame,HudRegion region)
+        public static Mask Extract(ScreenPixels frame,HudRegion region,bool includeTeal=true)
         {
             if(frame==null||!frame.Valid||region==null||!region.Valid)return null;
             int x=(int)(region.X*frame.Width),y=(int)(region.Y*frame.Height);
@@ -122,8 +122,8 @@ namespace LovenseConnector
             var result=new Mask { Width=w,Height=h,Pixels=new byte[w*h] };
             for(int j=0;j<h;j++)for(int i=0;i<w;i++) {
                 int p=((j+y)*frame.Width+i+x)*4;int b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
-                // White HUD text, red low-health text, and bright teal confirmation marks.
-                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||r>=190&&r-g>=65&&r-b>=65||g>=185&&b>=145&&r<145)?1:0);
+                // Numbers use white/red text. Teal belongs to badge matching, not armor outlines or ability effects behind digits.
+                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
             }
             return result;
         }
@@ -167,7 +167,7 @@ namespace LovenseConnector
         {
             if(string.IsNullOrEmpty(number)||number.Length>3||number.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Enter the visible number (0–"+maximum+").");
             if(!int.TryParse(number,out int value)||value>maximum)throw new ArgumentException("The number must be 0–"+maximum+".");
-            var parts=Segment(Extract(frame,region));
+            var parts=Segment(Extract(frame,region,false));
             if(parts.Length!=number.Length)throw new ArgumentException("Select just the digits, then try again. The digit count did not match.");
             return parts.Select((p,i)=>new HudGlyph { Digit=number[i]-'0',Aspect=(double)p.Width/p.Height,Mask=Normalize(p) }).ToArray();
         }
@@ -182,7 +182,7 @@ namespace LovenseConnector
         }
         static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum)
         {
-            var parts=Segment(Extract(frame,region));
+            var parts=Segment(Extract(frame,region,false));
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {

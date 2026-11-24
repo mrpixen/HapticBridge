@@ -1,5 +1,13 @@
 # Release verification
 
+## Current source — Recorded HUD color interference
+
+Private 1080p SDR recordings exposed teal armor outlines and ability effects entering the number mask. Digit learning and health/shield reading now exclude the saturated teal category; badge matching retains it. Confidence thresholds are unchanged.
+
+In one calibrated 35.9-second combat segment, readable health samples increased from 281/359 to 311/359 at 10 Hz, with the same four damage events and no events during the visible healing ramp. A separate 40-second clip segment had identical health readings with both masks (259/400 readable), using the same calibration and templates. These are readability comparisons, not measured precision/recall. Shield recognition remained poor and a disappearing death HUD did not produce a death event. Kill-badge recognition was not calibrated in this comparison.
+
+Passed: 17 core suites, including 78 screen-detection checks; 174 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions. Synthetic regression checks cover learning/reading white digits beside a teal outline and preserving teal badge extraction. No recordings, extracted frames or personal calibration data are included in the repository. Recorded-file processing does not validate live capture timing or physical output.
+
 ## 0.8.13 — Pending capture updates — 2026-11-23
 
 A recognition update waiting for a focus-loss motor stop could restore its old HUD frame and reading after **Stop capture**, overwriting the newer status. This was reproduced before correction. Pending recognition updates now check capture and output revisions after device stops; outdated updates leave the newer state alone.
