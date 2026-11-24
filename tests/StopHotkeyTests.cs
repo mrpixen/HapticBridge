@@ -57,6 +57,26 @@ internal static class StopHotkeyTests
         hotkey.Configure(true,first);int closing=hotkey.ActiveId.Value;hotkey.Dispose();
         Check(registrar.Bindings.Count==0&&!hotkey.HandleMessage(GlobalStopHotkey.HotkeyMessage,closing,Packed(first)),"shutdown releases registrations and ignores late callbacks");
         Check(!hotkey.Configure(true,first),"a disposed controller cannot register again");
+        SeparateActionRanges();
         Console.WriteLine("Stop shortcut: "+checks+" assertions passed (fake registrar only).");
+    }
+    static void SeparateActionRanges()
+    {
+        var registrar=new Registrar();int stops=0,enables=0;
+        using var stop=new GlobalStopHotkey(registrar,()=>stops++,0x4100,0x4101);
+        using var screen=new GlobalStopHotkey(registrar,()=>enables++,0x8000,0x8001);
+        Check(stop.Configure(true,StopHotkeyChord.Default)&&screen.Configure(true,StopHotkeyChord.ScreenDefault)&&registrar.Bindings.Count==2,"two actions register independently on the same window boundary");
+        int stopId=stop.ActiveId.Value,screenId=screen.ActiveId.Value;
+        Check(stopId!=screenId&&!stop.HandleMessage(GlobalStopHotkey.HotkeyMessage,screenId,Packed(StopHotkeyChord.ScreenDefault))&&screen.HandleMessage(GlobalStopHotkey.HotkeyMessage,screenId,Packed(StopHotkeyChord.ScreenDefault))&&stops==0&&enables==1,"screen shortcut cannot invoke Stop all");
+        Check(!screen.HandleMessage(GlobalStopHotkey.HotkeyMessage,stopId,Packed(StopHotkeyChord.Default))&&stop.HandleMessage(GlobalStopHotkey.HotkeyMessage,stopId,Packed(StopHotkeyChord.Default))&&stops==1&&enables==1,"Stop all cannot invoke screen enable");
+        Check(screen.Configure(false,StopHotkeyChord.ScreenDefault)&&stop.Active&&registrar.Bindings.Count==1,"disabling one action preserves the other's binding");
+        Check(screen.Configure(true,StopHotkeyChord.ScreenDefault)&&screen.ActiveId!=screenId&&!screen.HandleMessage(GlobalStopHotkey.HotkeyMessage,screenId,Packed(StopHotkeyChord.ScreenDefault)),"reenabling ignores queued messages for an older screen binding");
+        int retained=screen.ActiveId.Value;
+        Check(!screen.Configure(true,new StopHotkeyChord(3,0x79))&&screen.ActiveId==retained&&stop.ActiveId==stopId&&registrar.Bindings.Count==2,"exhausting an action's ID range preserves both current bindings");
+        foreach(var range in new[]{(-1,1),(1,0xc000),(2,1)}) {
+            int before=registrar.Calls;bool rejected=false;
+            try{using var invalid=new GlobalStopHotkey(registrar,()=>{},range.Item1,range.Item2);}catch(ArgumentOutOfRangeException){rejected=true;}
+            Check(rejected&&registrar.Calls==before,"invalid application ID range is rejected without registration");
+        }
     }
 }

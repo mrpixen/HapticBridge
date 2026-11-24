@@ -13,10 +13,11 @@ internal static partial class StudioIntegrationTests
     sealed class ShortcutRegistrar : IStopHotkeyRegistrar
     {
         public readonly HashSet<int> Active=new();
+        readonly Dictionary<int,(uint Modifiers,uint Key)> bindings=new();
         public int Registered;
         public bool Conflict;
-        public bool Register(int id,uint modifiers,uint key,out int error){Registered++;error=Conflict?1409:0;if(Conflict)return false;Active.Add(id);return true;}
-        public bool Unregister(int id,out int error){error=0;return Active.Remove(id);}
+        public bool Register(int id,uint modifiers,uint key,out int error){Registered++;error=Conflict||bindings.Values.Contains((modifiers,key))?1409:0;if(error!=0)return false;bindings.Add(id,(modifiers,key));Active.Add(id);return true;}
+        public bool Unregister(int id,out int error){error=0;bindings.Remove(id);return Active.Remove(id);}
     }
     static void SetupShortcutSettings(Fixture fixture,string folder,ShortcutRegistrar registrar)
     {

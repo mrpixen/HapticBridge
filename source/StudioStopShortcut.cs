@@ -41,17 +41,19 @@ namespace LovenseConnector
             window.SourceInitialized+=(s,e)=> {
                 if(closing)return;
                 stopShortcutWindow=new WindowsStopHotkeyRegistrar(HwndSource.FromHwnd(new WindowInteropHelper(window).Handle));
-                AttachStopShortcut(stopShortcutWindow);stopShortcutWindow.Receive=stopShortcut.HandleMessage;
+                AttachStopShortcut(stopShortcutWindow);stopShortcutWindow.Receive=HandleAppShortcut;
             };
             window.Closed+=(s,e)=>CloseStopShortcut();
         }
         void AttachStopShortcut(IStopHotkeyRegistrar registrar)
         {
-            stopShortcut=new GlobalStopHotkey(registrar,()=>{if(!closing)_=StopFromShortcut();});
+            stopShortcut=new GlobalStopHotkey(registrar,()=>{if(!closing)_=StopFromShortcut();},0x4100,0x7fff);
             if(studioUiPreferences.StopEnabled&&!stopShortcut.Configure(true,new StopHotkeyChord(studioUiPreferences.StopModifiers,studioUiPreferences.StopKey)))
                 studioUiPreferences.StopEnabled=false;
             RefreshStopShortcutSettings();
+            AttachScreenShortcut(registrar);
         }
+        bool HandleAppShortcut(int message,int id,long data)=>stopShortcut?.HandleMessage(message,id,data)==true||screenShortcut?.HandleMessage(message,id,data)==true;
         async Task StopFromShortcut()
         {
             try { await StopAll(); }
@@ -80,6 +82,7 @@ namespace LovenseConnector
         }
         void CloseStopShortcut()
         {
+            CloseScreenShortcut();
             stopShortcut?.Dispose();stopShortcut=null;stopShortcutWindow?.Dispose();stopShortcutWindow=null;
         }
     }

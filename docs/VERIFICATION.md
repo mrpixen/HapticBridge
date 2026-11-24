@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.12 — Enable Screen sync shortcut — 2026-11-23
+
+Settings includes an optional shortcut to enable Screen sync from the captured window. It starts disabled and suggests Ctrl + Shift + F9. A live preview and readable positive health are required. It does not start capture or send a test pulse. Repeated presses while enabled or enabling do not queue another start. Stop all remains a separate action; conflicting bindings preserve the working shortcut.
+
+The new handoff tests reproduced an existing bug: a pending enable could adopt a reconnected device while another device was stopping. Both the button and shortcut now retain the original playback instances and connection generations across source and motor stops. A reconnect requires a fresh explicit enable.
+
+Passed locally: 17 core suites, including 35 shortcut-controller checks; 315 Studio, 171 screen, 21 audio and 17 legacy-import assertions. Coverage includes saved preferences, registration conflicts, independent action IDs, stale messages, focus loss, shortcut changes, Stop all cancellation, death/re-enable and reconnects during both handoff stages. Tests used fake registrars, invisible controls, synthetic frames and simulated devices. Actual shortcut delivery during gameplay, visual layout, recognition accuracy and ARM64 execution remain unverified.
+
 ## 0.8.11 — Capture stop status — 2026-11-23
 
 A failed device stop could leave the output level unknown while **Stop capture** displayed **output off**. Capture-error and focus-loss messages could also replace the stop warning. Screen status now preserves pending or unconfirmed stops across capture and calibration messages. A successful retry clears the warning; the change does not alter motor commands or detection thresholds.

@@ -9,6 +9,7 @@ namespace LovenseConnector
         public static readonly uint[] ModifierChoices={3,6,5,7};
         public static readonly string[] ModifierLabels={"Ctrl + Alt","Ctrl + Shift","Alt + Shift","Ctrl + Alt + Shift"};
         public static StopHotkeyChord Default=>new(6,0x77); // Ctrl + Shift + F8; never enabled by default.
+        public static StopHotkeyChord ScreenDefault=>new(6,0x78); // Ctrl + Shift + F9.
         public bool Valid=>ModifierChoices.Contains(Modifiers)&&Key>=0x75&&Key<=0x7a;
         public string Label=>Valid?ModifierLabels[Array.IndexOf(ModifierChoices,Modifiers)]+" + F"+(Key-0x6f):"Choose a shortcut";
     }
@@ -27,7 +28,8 @@ namespace LovenseConnector
         readonly IStopHotkeyRegistrar registrar;
         readonly Action stop;
         readonly Dictionary<int,StopHotkeyChord> registrations=new();
-        int nextId=0x4100;
+        int nextId;
+        readonly int lastId;
         int? activeId;
         bool disposed;
         public bool Active=>activeId.HasValue;
@@ -36,8 +38,12 @@ namespace LovenseConnector
         public StopHotkeyChord? ActiveChord=>activeId.HasValue?registrations[activeId.Value]:null;
         public string Error {get;private set;}="";
 
-        public GlobalStopHotkey(IStopHotkeyRegistrar registrar,Action stop)
-        { this.registrar=registrar??throw new ArgumentNullException(nameof(registrar));this.stop=stop??throw new ArgumentNullException(nameof(stop)); }
+        public GlobalStopHotkey(IStopHotkeyRegistrar registrar,Action stop,int firstId=0x4100,int lastId=0xbfff)
+        {
+            if(firstId<0||lastId>0xbfff||firstId>lastId)throw new ArgumentOutOfRangeException(nameof(firstId));
+            this.registrar=registrar??throw new ArgumentNullException(nameof(registrar));this.stop=stop??throw new ArgumentNullException(nameof(stop));
+            nextId=firstId;this.lastId=lastId;
+        }
 
         bool Release(int id)
         {
@@ -62,7 +68,7 @@ namespace LovenseConnector
             if(ActiveChord==chord)return true;
             // Never reuse an ID: a queued message for a replaced binding must not
             // become current again, even when the user later chooses that chord.
-            if(nextId>0xbfff){Error="Restart HapticBridge before changing the shortcut again.";return false;}
+            if(nextId>lastId){Error="Restart HapticBridge before changing the shortcut again.";return false;}
             int candidate=nextId++;
             if(!registrar.Register(candidate,chord.Modifiers|NoRepeat,chord.Key,out int error))
             {

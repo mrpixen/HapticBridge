@@ -38,6 +38,8 @@ Leaving the selected window, losing a usable HUD signal, resizing it, changing t
 
 To stop without switching windows, opt into **Settings → Global Stop all** and choose an unused shortcut. The status must say **Active**. This uses a Windows-registered shortcut, with no game hook or input injection, and stops all sources rather than toggling output. The setting is off by default. Registration and stopping logic have offline test coverage; delivery during actual gameplay remains unverified.
 
+To re-enable feedback after death or focus loss, open **Settings → Enable Screen sync shortcut**. It is off by default; its suggested binding is **Ctrl + Shift + F9**. After enabling the shortcut, press it in the captured window with a live preview and readable positive health. It enables feedback without switching apps or sending a test pulse. Pressing it while already enabled does nothing. It never starts capture: after **Stop all** or **Stop capture**, start a preview again first. Focus changes, Stop all, shortcut changes or a reconnect cancel a pending enable. A new connection requires another explicit enable.
+
 ## Recognition limits
 
 The event preview reports matches, not authoritative game events. Use it before enabling output. Three consistent health readings confirm a change; two badge matches and a cleared interval confirm a new kill. Unreadable frames are ignored and sustained signal loss disarms output.
@@ -49,6 +51,7 @@ Native Windows capture, calibration, damage and kill previews were tested agains
 ## Implementation references
 
 - [Microsoft: Windows screen capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) and [window capture interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow).
+- [Microsoft: RegisterHotKey](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey). Both shortcut actions use separate application ID ranges and suppress keyboard auto-repeat. Conflicting bindings keep the existing working shortcut.
 - [Riot: VALORANT developer policies](https://developer.riotgames.com/docs/valorant). Avoiding game hooks is an implementation choice, not a guarantee of approval or exemption from product-registration rules.
 - [Riot: Regen Shield introduction](https://playvalorant.com/en-gb/news/game-updates/valorant-patch-notes-9-10/). Its damage absorption can leave health unchanged, which is why shield reading is available separately.
 - [Microsoft: Windows OCR](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr). That API's desktop support requires package identity. This unpackaged single-executable app instead uses local digit templates and a user-calibrated badge, with no cloud recognition service.

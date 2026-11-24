@@ -182,6 +182,7 @@ internal static partial class ScreenSyncTests
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
             await CalibrationFiles(app,capture,temp,links,players);
             capture=await CaptureStopFailures(app,capture,links,players);
+            capture=await ScreenShortcutGameplay(app,capture,links,players);
             await EventRoutingAndPersistence(app,capture,temp);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");

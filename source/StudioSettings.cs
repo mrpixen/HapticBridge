@@ -19,6 +19,9 @@ namespace LovenseConnector
         public bool StopEnabled { get; set; }
         public uint StopModifiers { get; set; }=StopHotkeyChord.Default.Modifiers;
         public uint StopKey { get; set; }=StopHotkeyChord.Default.Key;
+        public bool ScreenShortcutEnabled { get; set; }
+        public uint ScreenShortcutModifiers { get; set; }=StopHotkeyChord.ScreenDefault.Modifiers;
+        public uint ScreenShortcutKey { get; set; }=StopHotkeyChord.ScreenDefault.Key;
     }
     internal sealed class StudioBrushState
     {
@@ -62,6 +65,10 @@ namespace LovenseConnector
                         studioUiPreferences.StopEnabled=loaded.StopEnabled&&chord.Valid;
                         studioUiPreferences.StopModifiers=chord.Valid?chord.Modifiers:StopHotkeyChord.Default.Modifiers;
                         studioUiPreferences.StopKey=chord.Valid?chord.Key:StopHotkeyChord.Default.Key;
+                        var screenChord=new StopHotkeyChord(loaded.ScreenShortcutModifiers,loaded.ScreenShortcutKey);
+                        studioUiPreferences.ScreenShortcutEnabled=loaded.ScreenShortcutEnabled&&screenChord.Valid;
+                        studioUiPreferences.ScreenShortcutModifiers=screenChord.Valid?screenChord.Modifiers:StopHotkeyChord.ScreenDefault.Modifiers;
+                        studioUiPreferences.ScreenShortcutKey=screenChord.Valid?screenChord.Key:StopHotkeyChord.ScreenDefault.Key;
                     }
                 }
             }
@@ -80,6 +87,7 @@ namespace LovenseConnector
             var appearanceCard=new Border { CornerRadius=new CornerRadius(24),Padding=new Thickness(22),Margin=new Thickness(0,0,0,12),BorderBrush=Color("#30E4D3FF"),BorderThickness=new Thickness(0,1,0,0),Child=appearance };appearanceCard.SetResourceReference(Border.BackgroundProperty,"Glass");body.Children.Add(appearanceCard);
             studioSettingsStatus=Text("",13);studioSettingsStatus.Visibility=Visibility.Collapsed;studioSettingsStatus.Foreground=Color("#C4BAD7");body.Children.Add(studioSettingsStatus);
             BuildStopShortcutSettings(body);
+            BuildScreenShortcutSettings(body);
 
             var browserHelper=new StackPanel { Margin=new Thickness(0,24,0,0) };browserHelper.Children.Add(Text("Browser helper",21));
             var browserNote=Text("Save the helper, then load it in your browser. Instructions included.",13);browserNote.TextWrapping=TextWrapping.Wrap;browserNote.Foreground=Color("#C4BAD7");browserNote.Margin=new Thickness(0,8,0,8);browserHelper.Children.Add(browserNote);

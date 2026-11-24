@@ -34,6 +34,8 @@ Choose a window and **Start preview**, then calibrate your health digits and kil
 
 **Calibration → More → Save setup** keeps a separate `.hud.json` file. **Open setup** restores its regions and learned templates without changing motor choices or strengths. Loading is undoable and leaves output off. After checking it, **Save calibration** keeps the loaded setup across launches.
 
+**Settings → Enable Screen sync shortcut** can re-enable feedback from the captured game window after death or focus loss. The optional shortcut starts disabled and suggests **Ctrl + Shift + F9**. It requires a live preview and readable positive health; it never starts capture. Pressing it while feedback is enabled does nothing. After **Stop all**, start a preview again before using it.
+
 ## Local programs and mods
 
 In **Integrations**, enable **Allow app and game controls**, then use **Copy connection** to configure a native client. Keep the copied token private. Only one integration session owns output at a time, and its heartbeat must remain active. A manual stop or expired lease ends its output. Re-enable integrations when you want a program to take control again. See **API** for the complete contract.

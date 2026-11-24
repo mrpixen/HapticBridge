@@ -211,21 +211,28 @@ namespace LovenseConnector
             foreach(var route in screenRoutes.Values)route.Include.IsEnabled=route.Device.Connected&&route.Device.Player!=null;
             screenNoMotors.Visibility=screenRoutes.Values.Any(r=>r.Device.Connected&&r.Device.Player!=null)?Visibility.Collapsed:Visibility.Visible;
         }
-        async Task ArmScreen()
+        Task ArmScreen()=>ArmScreenCore(null);
+        async Task ArmScreenCore(Func<bool> allowed)
         {
+            if(allowed!=null&&!allowed())return;
             if(screenCapture==null||screenFrozen||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)throw new ArgumentException("Start a live preview first.");
             var read=RefreshScreenReading();if(read?.Health==null||read.Health<=0)throw new ArgumentException("Calibrate health until the preview reads it correctly before enabling output.");
-            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null&&r.Ceiling.Value>0&&ScreenRouteEvents(r)!=0).ToArray();if(selected.Length==0)throw new ArgumentException("Select a connected motor with an enabled event and a maximum above zero.");
+            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null&&r.Ceiling.Value>0&&ScreenRouteEvents(r)!=0)
+                .Select(r=>new ScreenTarget {Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value,Events=ScreenRouteEvents(r)}).ToArray();
+            if(selected.Length==0)throw new ArgumentException("Select a connected motor with an enabled event and a maximum above zero.");
+            bool TargetsCurrent()=>selected.All(t=>t.Device.Connected&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player));
             await ManualGuarded(async()=> {
+                if(allowed!=null&&!allowed())return;
+                if(!TargetsCurrent()){SetScreenStatus("Device connection changed · enable output again");return;}
                 int operation=operatorGeneration,generation=screenGeneration;var capture=screenCapture;
                 if(!await StopPlayers())throw new InvalidOperationException("Existing output could not be stopped.");
-                if(closing||screenCapture==null||screenFrozen||capture!=screenCapture||operation!=operatorGeneration||generation!=screenGeneration||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)return;
+                if(closing||screenCapture==null||screenFrozen||capture!=screenCapture||operation!=operatorGeneration||generation!=screenGeneration||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75||allowed!=null&&!allowed())return;
+                if(!TargetsCurrent()){SetScreenStatus("Device connection changed · enable output again");return;}
                 // The HUD can change while another source or device is stopping.
                 // Do not arm using the positive reading taken before those waits.
                 var current=RefreshScreenReading();
                 if(current?.Health==null||current.Health<=0){SetScreenStatus("HUD changed · verify health before enabling output");return;}
-                screenOwned.Clear();foreach(var r in selected)if(r.Device.Connected&&r.Device.Player!=null)screenOwned.Add(new ScreenTarget { Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value,Events=ScreenRouteEvents(r) });
-                if(screenOwned.Count==0)return;
+                screenOwned.Clear();screenOwned.AddRange(selected);
                 screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenArmedAt=ScreenCapture.Now;screenForegroundSeen=false;screenLastGood=ScreenCapture.Now;screenFilter.Reset();screenOutput.Content="Disable output";SetScreenStatus("Armed · return to the selected window within 8 seconds");
             },()=>screenGeneration);
         }
