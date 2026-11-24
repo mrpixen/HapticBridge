@@ -32,6 +32,17 @@ internal static class ScreenDetectionTests
         var faded=new HudKillFeedRow {Mask=c.Mask,Y=a.Y,Height=a.Height};f.Push(new[]{faded},.3,true);
         var moved=new HudKillFeedRow {Mask=a.Mask,Y=a.Y-40,Height=a.Height};
         Check(f.Push(new[]{moved},.4,true)==0,"fading before row movement preserves confirmed identity");
+        var partlyCovered=a.Mask.Select((v,i)=>(byte)(i%2==0?v:0)).ToArray();
+        foreach(var scenario in new[]{(Offset:-40,Gap:.1,Mask:partlyCovered,Expected:0),(Offset:40,Gap:.1,Mask:partlyCovered,Expected:1),(Offset:-40,Gap:.1,Mask:b.Mask,Expected:1),(Offset:-40,Gap:.4,Mask:partlyCovered,Expected:1)}) {
+            f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,true);f.Push(new[]{a},.2,true);
+            var shifted=new HudKillFeedRow {Mask=scenario.Mask,Y=a.Y+scenario.Offset,Height=a.Height};
+            double at=.2+scenario.Gap;
+            int count=f.Push(new[]{shifted},at,true)+f.Push(new[]{shifted},at+.1,true);
+            Check(count==scenario.Expected,"only continuous upward movement preserves a partly obscured confirmed row: "+scenario.Offset+"/"+scenario.Gap);
+        }
+        f.Reset();f.Push(new[]{a},0,true);
+        var extra=new HudKillFeedRow {Mask=partlyCovered,Y=a.Y-40,Height=a.Height};
+        Check(f.Push(new[]{extra,a},.1,true)+f.Push(new[]{extra,a},.2,true)==1,"a partly matching row is new when the original slot remains occupied");
         ScreenPixels Image(bool gold,bool friendly,bool rightSide,bool covered=false) {
             var pixels=new byte[1920*1080*4];int left=rightSide?1820:1500;
             void Pixel(int x,int y,int r,int g,int b){int p=(y*1920+x)*4;pixels[p]=(byte)b;pixels[p+1]=(byte)g;pixels[p+2]=(byte)r;pixels[p+3]=255;}

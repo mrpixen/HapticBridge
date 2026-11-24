@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased - Moving kill-feed rows under overlays
+
+A recorded 3840×2160 row moved upward out from beneath performance graphs and was counted twice in a feed-only replay with diagnostic health held constant. Tracking now retains a unique recent upward row move with partial text agreement and an empty former slot. Tests keep unrelated text, downward additions, longer gaps and occupied former slots distinct. The isolated replay now produces one event; all nine kills in the existing 80 seconds of 1080p footage remain detected. All 18 core suites passed, followed by 298 focused screen assertions after adding an extra occupied-slot check. Natural health recognition in the 4K segment remains intermittent, so this does not establish full 4K gameplay accuracy.
+
 ## Unreleased - Screen sync channel changes
 
 A synthetic reconnect/capability-change check reproduced obsolete motor routes remaining enabled. Screen sync now checks the current channels when displaying routes, arming, monitoring output and admitting a cue. A previously checked obsolete route cannot become an armed target. Tests use fake devices and transport; physical reconnection behavior remains unverified.

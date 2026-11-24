@@ -289,8 +289,21 @@ namespace LovenseConnector
                 // A continuously visible row may fade or change contrast over the world.
                 // Its existing slot remains the same event; new rows append below it.
                 var held=tracks.Where(t=>!used.Contains(t)&&time-t.Last<.2&&Math.Abs(t.Y-row.Y)<row.Height*.3).FirstOrDefault();
+                // An expiring row above can move a confirmed kill out from under
+                // an overlay. Keep that identity only for a unique, recent upward
+                // single-row move with partial text agreement and no row left in
+                // its old slot. Appended rows and capture gaps do not qualify.
+                Track shifted=null;
+                if(held==null&&(match==null||match.Score<.7)) {
+                    var candidates=tracks.Where(t=>t.Done&&!used.Contains(t)&&time-t.Last<.2&&
+                        t.Y-row.Y>=row.Height*.8&&t.Y-row.Y<=row.Height*1.5&&
+                        HudVision.Similarity(row.Mask,t.Mask)>=.6&&
+                        !rows.Any(r=>r!=null&&Math.Abs(r.Y-t.Y)<row.Height*.3)).Take(2).ToArray();
+                    if(candidates.Length==1)shifted=candidates[0];
+                }
                 if(match!=null&&match.Score>=.7) {track=match.Track;track.Hits=time-track.Last<=.3?track.Hits+1:1;}
                 else if(held!=null) {track=held;track.Hits++;}
+                else if(shifted!=null) {track=shifted;track.Hits++;}
                 else {track=new Track {Mask=row.Mask,Y=row.Y,First=time,Hits=1,Done=baseline};tracks.Add(track);}
                 used.Add(track);track.Last=time;track.Y=row.Y;
                 // Keep the confirmed appearance: learning every fading frame corrupts
