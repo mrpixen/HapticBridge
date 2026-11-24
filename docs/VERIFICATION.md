@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased — Stable output motor labels
+
+The output bar now uses the same motor slots as the control tabs. Disconnecting earlier devices no longer renumbers remaining outputs. Its tooltip and accessible name identify each device and actuator. A synthetic disconnect regression reproduced the old mismatch; playback routing is unchanged. Passed 350 Studio, 236 Screen sync, 21 audio and 17 legacy-import assertions without visible windows or hardware.
+
 ## 0.8.23 — Calibration guidance — 2026-11-24
 
 Unreadable HUD image files now give a clear PNG, JPEG or BMP error instead of a raw decoder exception.

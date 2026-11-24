@@ -53,6 +53,7 @@ internal static partial class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await OutputDockKeepsMotorSlots();
         await ShortcutPreferencesAndConflicts();
         await ScreenShortcutPreferencesAndConflicts();
         await ShortcutCancelsEachPendingStart();
@@ -624,6 +625,26 @@ internal static partial class StudioIntegrationTests
             points = new[] { new LovenseConnector.Frame { ms = 0, level = i / 2 + 1 }, new LovenseConnector.Frame { ms = 300, level = 0 } }
         }).ToArray()
     };
+
+    static async Task OutputDockKeepsMotorSlots()
+    {
+        await using var fixture = new Fixture();
+        var sent = (TextBlock)fixture.Window.FindName("OutputLevels");
+        Call(fixture.App, "RefreshStudioDock");
+        Check(sent.Text.Contains("M1:") && sent.Text.Contains("M2:") && sent.Text.Contains("M3:"), "output dock starts with the same three motor slots as the controls");
+        fixture.Rows[0].Device.Connected = false;
+        Call(fixture.App, "RefreshStudioMotors");Call(fixture.App, "RefreshStudioDock");
+        Check(sent.Text.Contains("M3:") && !sent.Text.Contains("M1:") && !sent.Text.Contains("M2:"), "disconnecting earlier motors cannot renumber the remaining output slot");
+        string details = sent.ToolTip as string;
+        Check(details != null && details.Contains(fixture.Rows[2].Device.Name) && details.Contains(fixture.Rows[2].Device.ChannelLabel(fixture.Rows[2].Channel)), "output tooltip identifies the remaining device and actuator");
+        fixture.Rows[0].Device.Connected = true;
+        Call(fixture.App, "RefreshStudioMotors");Call(fixture.App, "RefreshStudioDock");
+        Check(sent.Text.Contains("M1:") && sent.Text.Contains("M2:") && sent.Text.Contains("M3:"), "reconnecting restores the original output slots");
+        foreach(var row in fixture.Rows) row.Device.Connected = false;
+        Call(fixture.App, "RefreshStudioMotors");Call(fixture.App, "RefreshStudioDock");
+        Check(sent.Text == "No motors connected" && sent.ToolTip == null, "disconnecting every motor clears output identities");
+        Check(!fixture.Commands().Any(command => command.Nonzero), "output identity refresh never starts a motor");
+    }
 
     static async Task FailedStopCannotDisplayOutputOff()
     {

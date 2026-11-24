@@ -425,7 +425,15 @@ namespace LovenseConnector
         void RefreshStudioDock()
         {
             if(window==null)return;var source=Find<TextBlock>("OutputSource");var sent=Find<TextBlock>("OutputLevels");if(source==null||sent==null)return;
-            var motors=devices.Values.Where(d=>d.Connected&&d.Player!=null).SelectMany(d=>d.Channels.Select(c=>d.Player.Level(c))).ToArray();sent.Text=motors.Length==0?"No motors connected":"Sent: "+string.Join(" · ",motors.Select((n,i)=>"M"+(i+1)+": "+(n<0?"Unknown":n.ToString())));
+            // Match the persistent motor slots used by RebuildStudioSelectors;
+            // filtering devices first would renumber later motors on disconnect.
+            var slots=mixerRows.Values.Select((motor,index)=>new {Motor=motor,Slot=index+1})
+                .Where(item=>item.Motor.Available&&item.Motor.Device.Player!=null).ToArray();
+            var motors=slots.Select(item=>item.Motor.Device.Player.Level(item.Motor.Channel)).ToArray();
+            string Level(int index)=>motors[index]<0?"Unknown":motors[index].ToString();
+            sent.Text=slots.Length==0?"No motors connected":"Sent: "+string.Join(" · ",slots.Select((item,index)=>"M"+item.Slot+": "+Level(index)));
+            sent.ToolTip=slots.Length==0?null:string.Join(Environment.NewLine,slots.Select((item,index)=>"M"+item.Slot+" · "+item.Motor.Device.Name+" · "+item.Motor.Device.ChannelLabel(item.Motor.Channel)+": "+Level(index)));
+            Accessible(sent,sent.ToolTip as string??sent.Text);
             source.Text=sweep!=null?"Device test":screenArmed?"Screen sync":feelArmed?"Video sync":audioCapture!=null?"Sound sync":integration!=null?integration.Name:OwnsStudio?(studioRunningPattern?"Pattern playing":"Live controls"):devices.Values.Any(d=>d.Player?.Running==true)?"Device controls":motors.Any(level=>level<0)?"Output unconfirmed":"Output off";
         }
 
