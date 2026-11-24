@@ -1,6 +1,6 @@
 # Release verification
 
-## Current source — Calibrated spectator suppression
+## 0.8.15 — Calibrated spectator suppression — 2026-11-24
 
 Optional spectator-marker calibration adds a separate image region and template. Three fresh matches at 85% or higher stop active Screen sync output; suspected frames do not start new cues. Output never resumes automatically. Enabling checks the marker both before and after waiting for other output to stop. Clear, region changes, reset, Undo and portable calibration handle the new template. Portable exports now use version 3; versions 1 and 2 remain readable without this feature.
 
