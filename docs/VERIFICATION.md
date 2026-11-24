@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.22 — HUD image calibration — 2026-11-24
+
+Calibration can open a saved PNG, JPEG or BMP. It stops capture and output, freezes the image for learning, and cannot enable gameplay feedback from that image. A newer Stop cancels an import waiting on an earlier output stop. Files are released after decoding; saved setups retain templates and regions, not the screenshot.
+
+Selected shield, spectator and death-text regions now show their outlines before learning. An invisible rendered-pixel regression failed before this fix and passed afterward. Tests also cover image pixels, invalid files, stopped capture, no output, learning readiness and cancellation. Passed: 228 Screen sync, 343 Studio, 21 audio and 17 legacy-import assertions using synthetic images and transports. File-dialog interaction and live gameplay remain unverified; no installed app was replaced.
+
 ## Death-text resolution follow-up — 2026-11-24
 
 A 1920-wide recorded frame was resampled to widths 1280, 1600, 2560 and 3840. Reusing its original death-text template scored 0.39–0.65, below the 0.90 confirmation threshold; relearning on each resized frame matched that frame at 1.00. This tests image resampling, not actual game rendering at those resolutions. It demonstrates that the small text template should be relearned after changing resolution or HUD scale. No recognition thresholds changed.
