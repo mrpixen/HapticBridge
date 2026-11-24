@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.13 — Pending capture updates — 2026-11-23
+
+A recognition update waiting for a focus-loss motor stop could restore its old HUD frame and reading after **Stop capture**, overwriting the newer status. This was reproduced before correction. Pending recognition updates now check capture and output revisions after device stops; outdated updates leave the newer state alone.
+
+Passed locally: 174 Screen sync, 315 Studio, 21 audio and 17 legacy-import assertions using synthetic frames, invisible controls and simulated transports. The regression verifies that the frame stays cleared, the reading stays empty and the stopped status survives the late update. No live game, physical device or ARM64 execution was tested.
+
 ## 0.8.12 — Enable Screen sync shortcut — 2026-11-23
 
 Settings includes an optional shortcut to enable Screen sync from the captured window. It starts disabled and suggests Ctrl + Shift + F9. A live preview and readable positive health are required. It does not start capture or send a test pulse. Repeated presses while enabled or enabling do not queue another start. Stop all remains a separate action; conflicting bindings preserve the working shortcut.
