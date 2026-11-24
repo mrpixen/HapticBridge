@@ -254,6 +254,9 @@ internal static class ScreenDetectionTests
         var dim=Frame(145,70);var reading=HudVision.Read(dim,profile,other);
         Check(reading.Shield==0&&reading.ShieldConfidence>=.82,"dim shield zero uses contrast without treating an absent number as zero");
         Check(reading.Health==null,"shield fallback does not relax health reading");
+        Check(HudVision.Read(Frame(255,175),profile,other).Health==0,"bright health digits separate from a bright gray background");
+        Check(HudVision.Read(Frame(255,175,true),profile,other).Health==null,"uniform bright health crop remains unknown");
+        Check(HudVision.Read(Frame(195,185),profile,other).Health==null,"low-contrast bright health noise remains unknown");
         Check(HudVision.Read(Frame(145,70,true),profile,other).Shield==null,"uniform shield crop remains unknown");
         Check(HudVision.Read(Frame(100,90),profile,other).Shield==null,"low-contrast shield noise remains unknown");
         Check(HudVision.Learn(dim,region,"0",50).Length==1,"dim shield digits can be learned");

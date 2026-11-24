@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased - Health against bright backgrounds
+
+A saved 3840×2160 frame reproduced white health digits merging with bright weapon pixels under the fixed color mask. Rejected health readings now retry local contrast separation while retaining minimum foreground brightness, digit confidence and ambiguity checks. In the eight-second recorded segment, readable health improved from 39/80 to 73/80 frames; every recognized value was the visible 100, and the one kill appeared at 0.6 seconds using natural health readings. Four existing 1080p segments retain their nine kills and damage amounts; some events confirm earlier. Synthetic checks reject dim, uniform and low-contrast health crops. Seven 4K frames remain unreadable, and this small sample does not establish general resolution or live-game accuracy.
+
 ## Unreleased - Moving kill-feed rows under overlays
 
 A recorded 3840×2160 row moved upward out from beneath performance graphs and was counted twice in a feed-only replay with diagnostic health held constant. Tracking now retains a unique recent upward row move with partial text agreement and an empty former slot. Tests keep unrelated text, downward additions, longer gaps and occupied former slots distinct. The isolated replay now produces one event; all nine kills in the existing 80 seconds of 1080p footage remain detected. All 18 core suites passed, followed by 298 focused screen assertions after adding an extra occupied-slot check. Natural health recognition in the 4K segment remains intermittent, so this does not establish full 4K gameplay accuracy.
