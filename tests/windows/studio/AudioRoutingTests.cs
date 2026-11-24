@@ -87,7 +87,54 @@ internal static class AudioRoutingTests
             await Invoke(app,"StopAudioOutput");
             Check(player.Active(0)&&link.ZeroCommands==zeros,"old sound Stop cannot revoke a newer manual owner");
             await GuardRetryAtWriteReady();
-        }finally{await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}
+            var programs=new[]{new AudioProgram(1234,5678,"Example")};
+            Set(app,"audioProgramSupport",new Func<bool>(()=>true));
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
+            AudioProgram requestedProgram=null;var programCapture=new Source {Ready=false};
+            Set(app,"audioProgramFactory",new Func<AudioProgram,IAudioSource>(p=>{requestedProgram=p;return programCapture;}));
+            Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=1;
+            await Invoke(app,"RefreshAudioPrograms");
+            var programPicker=Get<ComboBox>(app,"audioProgramChoice");
+            Check(programPicker.Items.Count==1&&programPicker.SelectedItem==null,"program enumeration requires an explicit selection");
+            programPicker.SelectedIndex=0;await Invoke(app,"StartAudio");
+            Check(ReferenceEquals(requestedProgram,programs[0])&&programCapture.Started,"program mode routes selected identity to its own source factory");
+            Check(label.Text.StartsWith("Starting audio"),"pending capture has a truthful starting label");
+            await Invoke(app,"AudioTick");
+            Check(label.Text.StartsWith("Starting audio")&&!player.Active(0),"pending capture cannot produce feedback even if its reader has energy");
+            programCapture.Ready=true;
+            await Invoke(app,"AudioTick");Check(player.Active(0),"program audio reaches synthetic output");
+            Check(label.Text.Contains("level"),"ready capture transitions to the live level display");
+            programs=new[]{new AudioProgram(1234,5679,"Example restarted")};
+            await Invoke(app,"RefreshAudioPrograms");
+            Check(programCapture.Disposed&&!player.Active(0)&&programPicker.SelectedItem==null,"refresh stops output and does not retain a reused process id");
+            Set(app,"audioProgramSupport",new Func<bool>(()=>false));
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>throw new Exception("Unsupported Windows must not enumerate programs")));
+            await Invoke(app,"RefreshAudioPrograms");
+            Check(programPicker.Items.Count==0&&label.Text.Contains("newer Windows"),"unsupported Windows explains availability without enumerating processes");
+            await player.Start(0,new PatternSpec { mode="Steady",high=7,durationMs=2000 },20);
+            zeros=link.ZeroCommands;bool unsupported=false;
+            try {await Invoke(app,"StartAudio");}catch(PlatformNotSupportedException){unsupported=true;}
+            Check(unsupported&&link.ZeroCommands==zeros&&player.Active(0),"unsupported program capture is rejected before disrupting independent output");
+            int operatorBefore=Get<int>(app,"operatorGeneration");unsupported=false;
+            try {await Invoke(app,"StartSoundSync");}catch(PlatformNotSupportedException){unsupported=true;}
+            Check(unsupported&&Get<int>(app,"operatorGeneration")==operatorBefore&&link.ZeroCommands==zeros&&player.Active(0),"public sound Start validates support before taking output ownership");
+            Set(app,"audioProgramSupport",new Func<bool>(()=>true));
+            operatorBefore=Get<int>(app,"operatorGeneration");bool missing=false;
+            try {await Invoke(app,"StartSoundSync");}catch(InvalidOperationException ex)when(ex.Message=="Choose a program first."){missing=true;}
+            Check(missing&&Get<int>(app,"operatorGeneration")==operatorBefore&&link.ZeroCommands==zeros&&player.Active(0),"missing program selection leaves existing output ownership intact");
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
+            await Invoke(app,"RefreshAudioPrograms");programPicker.SelectedIndex=0;
+            requestedProgram=null;link.HoldDirect();
+            var pendingStart=Invoke(app,"StartAudio");
+            await link.Held.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=0;
+            link.Release.TrySetResult(true);await pendingStart;
+            Check(requestedProgram==null,"switching mode while device stop waits cancels the old program start");
+            Check(Get<IAudioSource>(app,"audioCapture")==null,"switching source mode never automatically starts capture");
+            int captureCount=captures.Count;
+            await Invoke(app,"StartSoundSync");
+            Check(captures.Count==captureCount+1&&captures[captureCount].Started,"valid public sound Start still opens the chosen source");
+        }finally{link.Release?.TrySetResult(true);await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}
         Console.WriteLine("Audio routing: "+checks+" assertions passed (synthetic endpoints; no audio capture or hardware).");
     }
     static async Task ExpectFailedStop(Task stop)
@@ -117,8 +164,9 @@ internal static class AudioRoutingTests
             Check(!player.Running&&link.ZeroCommands==zeros,"retry also checks whole-player epoch when channel revision is unchanged");
         }finally{link.Release?.TrySetResult(true);await player.StopAll();}
     }
-    sealed class Source:IAudioSource
+    sealed class Source:IAudioSource,IAudioSourceReadiness
     {
+        public bool Ready {get;set;}=true;
         internal bool Started,Disposed;internal string Failure;
         public string Error=>Failure;public string OutputName=>"Actual synthetic output";
         public void Start(){Started=true;}
@@ -127,16 +175,18 @@ internal static class AudioRoutingTests
     }
     sealed class Link:ICommandLink,ILatestCommandLink
     {
-        internal int FailNextZero,ZeroCommands;int holdNext;
+        internal int FailNextZero,ZeroCommands;int holdNext,holdDirect;
         internal TaskCompletionSource<bool> Held,Release;
         internal void HoldNext(){Held=new(TaskCreationOptions.RunContinuationsAsynchronously);Release=new(TaskCreationOptions.RunContinuationsAsynchronously);Interlocked.Exchange(ref holdNext,1);}
-        public Task<string> Command(string value)
+        internal void HoldDirect(){Held=new(TaskCreationOptions.RunContinuationsAsynchronously);Release=new(TaskCreationOptions.RunContinuationsAsynchronously);Interlocked.Exchange(ref holdDirect,1);}
+        public async Task<string> Command(string value)
         {
+            if(Interlocked.Exchange(ref holdDirect,0)!=0){Held.TrySetResult(true);await Release.Task;}
             if(value.StartsWith("Vibrate")&&value.EndsWith(":0;")) {
                 Interlocked.Increment(ref ZeroCommands);
                 if(Interlocked.Exchange(ref FailNextZero,0)!=0)throw new InvalidOperationException("Synthetic stop rejected");
             }
-            return Task.FromResult("OK");
+            return "OK";
         }
         public Task<string> Command(string value,CancellationToken token){token.ThrowIfCancellationRequested();return Command(value);}
         public async Task<string> CommandLatest(Func<string> command,CancellationToken token)

@@ -63,13 +63,16 @@ namespace LovenseConnector
         }
         async Task StartAudio()
         {
-            var targets=SelectedMixer();if(targets.Length==0)throw new InvalidOperationException("Connect and select at least one motor.");
+            ValidateSoundSelection();
             int generation=audioGeneration,operation=operatorGeneration;
             string outputId=(audioOutputChoice?.SelectedItem as AudioOutput)?.Id;
+            bool programMode=audioSourceChoice?.SelectedIndex==1;
+            var program=audioProgramChoice?.SelectedItem as AudioProgram;
             await Task.WhenAll(devices.Values.Where(d=>d.Player!=null).Select(d=>d.Player.StopAll()));
             if(generation!=audioGeneration||operation!=operatorGeneration||closing||integration!=null)return;
-            var capture=(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
-            audioTargets=mixerRows.Values.Where(m=>m.Available).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;audioLabel.Text="Listening · "+capture.OutputName;
+            var capture=programMode?(audioProgramFactory??(p=>p.CreateSource()))(program):(audioSourceFactory??(id=>new AudioSync(id)))(outputId);try { capture.Start(); }catch { capture.Dispose();throw; }
+            audioTargets=mixerRows.Values.Where(m=>m.Available).ToArray();audioCapture=capture;audioStopRetries=null;audioGeneration++;
+            audioLabel.Text=(capture is IAudioSourceReadiness readiness&&!readiness.Ready?"Starting audio · ":"Listening · ")+capture.OutputName;
         }
         AudioStopRetry[] UnconfirmedAudioStops()
         { return audioStopRetries=(audioStopRetries??Array.Empty<AudioStopRetry>()).Where(r=>r.Unconfirmed).ToArray(); }
@@ -104,8 +107,9 @@ namespace LovenseConnector
             if(audioCapture==null||audioTickBusy)return;audioTickBusy=true;int generation=audioGeneration;
             Exception failure=null;try {
                 if(audioCapture.Error!=null)throw new InvalidOperationException(audioCapture.Error);
-                double energy=audioCapture.Read(audioMode.SelectedIndex==0);int level=AudioMeter.Level(energy,audioGain.Value);
-                audioLabel.Text=audioCapture.OutputName+" · level "+level+" / 20";
+                bool ready=!(audioCapture is IAudioSourceReadiness readiness)||readiness.Ready;
+                double energy=ready?audioCapture.Read(audioMode.SelectedIndex==0):0;int level=AudioMeter.Level(energy,audioGain.Value);
+                audioLabel.Text=ready?audioCapture.OutputName+" · level "+level+" / 20":"Starting audio · "+audioCapture.OutputName;
                 foreach(var m in audioTargets) {
                     if(generation!=audioGeneration||audioCapture==null)return;
                     if(!m.Available||m.Device.Player==null)throw new InvalidOperationException("A sound-sync motor disconnected.");
