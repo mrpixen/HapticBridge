@@ -55,8 +55,16 @@ namespace LovenseConnector
         }
         async Task StartSoundSync()
         {
+            ValidateSoundSelection();
             int request=++audioStartRequest;
             await Manual(async()=>{if(request==audioStartRequest)await StartAudio();});
+        }
+        void ValidateSoundSelection()
+        {
+            if(SelectedMixer().Length==0)throw new InvalidOperationException("Connect and select at least one motor.");
+            if(audioSourceChoice?.SelectedIndex!=1)return;
+            if(!ProgramAudioSupported)throw new PlatformNotSupportedException("Program audio needs a newer Windows version. Choose Audio output instead.");
+            if(!(audioProgramChoice?.SelectedItem is AudioProgram))throw new InvalidOperationException("Choose a program first.");
         }
         async Task RefreshAudioPrograms()
         {

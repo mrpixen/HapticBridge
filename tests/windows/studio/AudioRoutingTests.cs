@@ -110,9 +110,26 @@ internal static class AudioRoutingTests
             zeros=link.ZeroCommands;bool unsupported=false;
             try {await Invoke(app,"StartAudio");}catch(PlatformNotSupportedException){unsupported=true;}
             Check(unsupported&&link.ZeroCommands==zeros&&player.Active(0),"unsupported program capture is rejected before disrupting independent output");
+            int operatorBefore=Get<int>(app,"operatorGeneration");unsupported=false;
+            try {await Invoke(app,"StartSoundSync");}catch(PlatformNotSupportedException){unsupported=true;}
+            Check(unsupported&&Get<int>(app,"operatorGeneration")==operatorBefore&&link.ZeroCommands==zeros&&player.Active(0),"public sound Start validates support before taking output ownership");
+            Set(app,"audioProgramSupport",new Func<bool>(()=>true));
+            operatorBefore=Get<int>(app,"operatorGeneration");bool missing=false;
+            try {await Invoke(app,"StartSoundSync");}catch(InvalidOperationException ex)when(ex.Message=="Choose a program first."){missing=true;}
+            Check(missing&&Get<int>(app,"operatorGeneration")==operatorBefore&&link.ZeroCommands==zeros&&player.Active(0),"missing program selection leaves existing output ownership intact");
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
+            await Invoke(app,"RefreshAudioPrograms");programPicker.SelectedIndex=0;
+            requestedProgram=null;link.HoldDirect();
+            var pendingStart=Invoke(app,"StartAudio");
+            await link.Held.Task.WaitAsync(TimeSpan.FromSeconds(2));
             Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=0;
+            link.Release.TrySetResult(true);await pendingStart;
+            Check(requestedProgram==null,"switching mode while device stop waits cancels the old program start");
             Check(Get<IAudioSource>(app,"audioCapture")==null,"switching source mode never automatically starts capture");
-        }finally{await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}
+            int captureCount=captures.Count;
+            await Invoke(app,"StartSoundSync");
+            Check(captures.Count==captureCount+1&&captures[captureCount].Started,"valid public sound Start still opens the chosen source");
+        }finally{link.Release?.TrySetResult(true);await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}
         Console.WriteLine("Audio routing: "+checks+" assertions passed (synthetic endpoints; no audio capture or hardware).");
     }
     static async Task ExpectFailedStop(Task stop)
@@ -152,16 +169,18 @@ internal static class AudioRoutingTests
     }
     sealed class Link:ICommandLink,ILatestCommandLink
     {
-        internal int FailNextZero,ZeroCommands;int holdNext;
+        internal int FailNextZero,ZeroCommands;int holdNext,holdDirect;
         internal TaskCompletionSource<bool> Held,Release;
         internal void HoldNext(){Held=new(TaskCreationOptions.RunContinuationsAsynchronously);Release=new(TaskCreationOptions.RunContinuationsAsynchronously);Interlocked.Exchange(ref holdNext,1);}
-        public Task<string> Command(string value)
+        internal void HoldDirect(){Held=new(TaskCreationOptions.RunContinuationsAsynchronously);Release=new(TaskCreationOptions.RunContinuationsAsynchronously);Interlocked.Exchange(ref holdDirect,1);}
+        public async Task<string> Command(string value)
         {
+            if(Interlocked.Exchange(ref holdDirect,0)!=0){Held.TrySetResult(true);await Release.Task;}
             if(value.StartsWith("Vibrate")&&value.EndsWith(":0;")) {
                 Interlocked.Increment(ref ZeroCommands);
                 if(Interlocked.Exchange(ref FailNextZero,0)!=0)throw new InvalidOperationException("Synthetic stop rejected");
             }
-            return Task.FromResult("OK");
+            return "OK";
         }
         public Task<string> Command(string value,CancellationToken token){token.ThrowIfCancellationRequested();return Command(value);}
         public async Task<string> CommandLatest(Func<string> command,CancellationToken token)
