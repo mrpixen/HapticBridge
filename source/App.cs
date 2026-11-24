@@ -88,6 +88,15 @@ namespace LovenseConnector
             return Task.WhenAll(audio,video,local,screen);
         }
         Task Manual(Func<Task> action) => ManualGuarded(action,null);
+        Task ManualDevice(Device d,Func<Playback,Func<bool>,Task> action)
+        {
+            int deviceGeneration=d.Generation;var player=d.Player;
+            return Manual(()=> {
+                int operation=operatorGeneration;
+                bool Current()=>!closing&&operation==operatorGeneration&&deviceGeneration==d.Generation&&d.Connected&&player!=null&&ReferenceEquals(d.Player,player);
+                return Current()?action(player,Current):Task.CompletedTask;
+            });
+        }
         async Task ManualGuarded(Func<Task> action,Func<int> requestRevision)
         {
             if(sweep!=null) { hint.Text="Stop the speed test before starting a manual output."; return; }
@@ -185,8 +194,8 @@ namespace LovenseConnector
                 var nudges=Row(); nudges.Children.Add(Action("−1",()=> { v.Level.Value--; return Task.FromResult(0); })); nudges.Children.Add(Action("+1",()=> { v.Level.Value++; return Task.FromResult(0); })); panel.Children.Add(nudges);
                 var time=Row(); v.Duration=Input("10000"); v.Duration.ToolTip="duration in milliseconds"; Field(time,"Duration (ms)",v.Duration); panel.Children.Add(time);
                 var buttons=new WrapPanel();
-                buttons.Children.Add(Action("Start",()=>Manual(()=>d.Player.Start(channel,new PatternSpec { mode="Steady",high=(int)v.Level.Value,durationMs=Number(v.Duration) },20))));
-                buttons.Children.Add(Action("Test 2s",()=>Manual(()=>d.Player.Start(channel,new PatternSpec { mode="Steady",high=2,durationMs=2000 },20))));
+                buttons.Children.Add(Action("Start",()=>ManualDevice(d,(player,current)=>player.Start(channel,new PatternSpec { mode="Steady",high=(int)v.Level.Value,durationMs=Number(v.Duration) },20,isCurrent:current))));
+                buttons.Children.Add(Action("Test 2s",()=>ManualDevice(d,(player,current)=>player.Start(channel,new PatternSpec { mode="Steady",high=2,durationMs=2000 },20,isCurrent:current))));
                 buttons.Children.Add(Action("Stop",()=>OperatorStop(()=>d.Player.Stop(channel)))); panel.Children.Add(buttons);
                 v.Output=Text("Stopped",12); v.Output.Foreground=Color("#B6E6D1"); panel.Children.Add(v.Output);
             }
@@ -213,13 +222,11 @@ namespace LovenseConnector
                 spec.Validate(); return spec;
             };
             var actions=new WrapPanel { Margin=new Thickness(0,10,0,0) };
-            actions.Children.Add(Action("Play pattern",()=>Manual(async()=> {
+            actions.Children.Add(Action("Play pattern",()=>ManualDevice(d,async(player,current)=> {
                 var spec=read(); var selected=d.Motors.Values.ToArray(); if(target.SelectedIndex<selected.Length) selected=new[]{selected[target.SelectedIndex]};
-                int operation=operatorGeneration,deviceGeneration=d.Generation;var player=d.Player;
-                bool Current()=>!closing&&operation==operatorGeneration&&deviceGeneration==d.Generation&&d.Connected&&player!=null&&ReferenceEquals(d.Player,player);
                 foreach(var motor in selected) {
-                    if(!Current())return;
-                    await player.Start(motor.Channel,json.Deserialize<PatternSpec>(json.Serialize(spec)),20,isCurrent:Current);
+                    if(!current())return;
+                    await player.Start(motor.Channel,json.Deserialize<PatternSpec>(json.Serialize(spec)),20,isCurrent:current);
                 }
             })));
             actions.Children.Add(Action("Save JSON…",async()=> { var spec=read(); if(!await StopAll())return; var dialog=new SaveFileDialog { Filter="Pattern JSON|*.json",FileName="pattern.json",InitialDirectory=AssetFiles.PatternDirectory }; Directory.CreateDirectory(dialog.InitialDirectory); if(dialog.ShowDialog(window)==true) File.WriteAllText(dialog.FileName,json.Serialize(spec)); }));
@@ -235,7 +242,7 @@ namespace LovenseConnector
             })); body.Children.Add(actions);
             var presetBody=new StackPanel { Margin=new Thickness(4,10,4,12) };
             var presetRow=new WrapPanel(); var slot=new ComboBox { Width=80 }; for(int i=1;i<=10;i++) slot.Items.Add(i); slot.SelectedIndex=0; var presetTime=Input("2000"); Field(presetRow,"Slot",slot); Field(presetRow,"Duration ms · 500–60000",presetTime);
-            presetRow.Children.Add(Action("Play hardware preset",()=>Manual(()=>d.Player.HardwarePreset((int)slot.SelectedItem,Number(presetTime))))); presetBody.Children.Add(presetRow);
+            presetRow.Children.Add(Action("Play hardware preset",()=>ManualDevice(d,(player,current)=>player.HardwarePreset((int)slot.SelectedItem,Number(presetTime))))); presetBody.Children.Add(presetRow);
             d.Controls.Children.Add(new Expander { Header="Device presets",Content=presetBody,Margin=new Thickness(0,8,0,16) });
         }
         void BuildSettings(Device d)
@@ -250,7 +257,7 @@ namespace LovenseConnector
                 await d.Link.Command("Light:"+(d.Light.IsChecked==true?"on":"off")+";");
                 await d.Link.Command("AutoSwith:"+(d.AutoStop.IsChecked==true?"On":"Off")+":"+(d.AutoResume.IsChecked==true?"On":"Off")+";"); await ReadSettings(d);
             }));
-            row.Children.Add(Action("Power off toy",()=>OperatorStop(async()=> { await d.Player.StopAll(); try { await d.Link.Command("PowerOff;"); } finally { Release(d,"Power off requested · turn on to reconnect"); } }))); panel.Children.Add(row);
+            row.Children.Add(Action("Power off toy",()=>PowerOff(d))); panel.Children.Add(row);
             d.Controls.Children.Add(new Expander { Header="Settings",Content=panel,Margin=new Thickness(0,8,0,12) });
         }
         void StartScan(bool connectDiscovered=false)
@@ -327,6 +334,22 @@ namespace LovenseConnector
             // Stop all cancels output, not an already requested disconnect. A new
             // connection generation, however, must never be released by this request.
             if(deviceGeneration==d.Generation&&!closing)Release(d,"Disconnected");
+        }
+        Task PowerOff(Device d)
+        {
+            int generation=d.Generation;var player=d.Player;var link=d.Link;
+            bool Current()=>!closing&&generation==d.Generation&&d.Connected&&player!=null&&ReferenceEquals(d.Player,player)&&ReferenceEquals(d.Link,link);
+            return OperatorStop(async()=> {
+                if(!Current())return;
+                await player.StopAll();
+                if(!Current())return;
+                try { await link.Command("PowerOff;"); }
+                finally {
+                    // A connection can be replaced while the command is pending.
+                    // Only the original connection belongs to this request.
+                    if(Current())Release(d,"Power off requested · turn on to reconnect");
+                }
+            });
         }
         void Lost(Device d)
         {

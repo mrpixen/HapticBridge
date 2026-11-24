@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.5 — Pending device controls — 2026-11-23
+
+Reconnection races were reproduced in the advanced device controls. A pending power-off could release a replacement connection; Start, Test 2s, Play pattern and Play hardware preset could use a new connection after waiting for other output to stop. Each request now retains its original connection before that wait. Power-off also checks ownership before sending its command and before releasing the connection.
+
+Regression checks cover replacement during source handoff and during the device stop, failed power-off cleanup, a concurrent Stop all, and fresh explicit starts after reconnection. Tests use invisible controls and fake motor transports. Power-off failure is simulated with an absent Bluetooth link; this verifies cleanup, not physical power-off or a real Bluetooth reconnect. Live gameplay, background shortcut delivery and ARM64 execution remain unverified.
+
 ## 0.8.4 — Advanced device controls — 2026-11-23
 
 Two conflicts were reproduced before correction. An advanced device slider could raise a Screen sync damage pulse above its configured strength; edits now prepare the next manual value without changing screen-owned output. Explicit manual Start still takes control normally.

@@ -84,6 +84,10 @@ internal static partial class StudioIntegrationTests
         await DeviceSliderCannotRetargetStudio();
         await DevicePatternCannotResumeAfterStop();
         await DevicePatternCannotReachReconnectedPlayer();
+        await PowerOffCannotReleaseReplacement();
+        await PowerOffCannotRetargetDuringHandoff();
+        await PowerOffFailureStillReleasesOriginal();
+        await PendingDeviceStartsStayOnOriginalConnection();
         await ImportIsAtomic();
         await UnassignedMixLanesSurviveRoundTrip();
         await NoDeviceDraftRoundTripAndPreview();
