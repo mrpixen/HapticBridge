@@ -1,5 +1,11 @@
 # Release verification
 
+## Unreleased — Stop pending motion settings — 2026-11-24
+
+A channel stop could leave a previously queued position move eligible to start. Reproduced this with a blocked simulated transport: the position command was sent after the stop request. Channel stops now invalidate pending device-wide settings, checked both after the playback queue and before transport submission. This does not undo commands already transmitted.
+
+The regression failed before the change and passed afterward. All 18 core suites passed; the Windows build completed with no warnings or errors. Source privacy checks reported no findings. No physical devices or GUI were used.
+
 ## Unreleased — Integration session cleanup — 2026-11-24
 
 Reproduced an old integration session sending stop commands to a replacement device connection at the same address. Session ownership now retains the original playback instance and channel; cleanup skips connections that have been replaced. A session that explicitly commands the replacement still stops it normally.

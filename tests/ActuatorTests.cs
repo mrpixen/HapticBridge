@@ -55,5 +55,10 @@ internal static class ActuatorTests
         link=new FakeLink { DelayMs=1,Block="Mply:0:20;" };player=new Playback(link,pro);bool current=true;
         var move=player.ApplyFunction("position",50,isCurrent:()=>current);await link.Entered.Task;current=false;link.Release.SetResult(true);await move;
         Check(!link.Snapshot().Any(c=>c.StartsWith("FSetSite:")),"revoked source cannot submit a queued position move");
+        link=new FakeLink { DelayMs=1,Block="Mply:0:20;" };player=new Playback(link,pro);
+        move=player.ApplyFunction("position",50);await link.Entered.Task;
+        var stop=player.Stop(7);link.Release.SetResult(true);await Task.WhenAll(move,stop);
+        Check(!link.Snapshot().Any(c=>c.StartsWith("FSetSite:")),"channel stop cancels a pending position move before it can start");
+
     }
 }

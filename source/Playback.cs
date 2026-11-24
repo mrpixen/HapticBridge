@@ -107,6 +107,8 @@ namespace LovenseConnector
         readonly SemaphoreSlim controls=new SemaphoreSlim(1,1);
         readonly Dictionary<int,int> revisions=new Dictionary<int,int>();
         int epoch, stopping;
+        // Per-channel stops must also invalidate pending device-wide settings.
+        int functionRevision;
         CancellationTokenSource preset;
         public event Action<int,int,string> Changed;
         public event Action<string> Error;
@@ -206,7 +208,7 @@ namespace LovenseConnector
         internal Task StopTracked(int channel,out PlaybackStopRevision claim)
         {
             MotorCommand(channel,0);
-            lock(sync) { InvalidateOrdered(channel); claim=new(epoch,++revisions[channel]); MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
+            lock(sync) { functionRevision++; InvalidateOrdered(channel); claim=new(epoch,++revisions[channel]); MotorJob job; if(jobs.TryGetValue(channel,out job)) { jobs.Remove(channel); job.Cancel.Cancel(); } }
             return StopClaimed(channel);
         }
         async Task StopClaimed(int channel)

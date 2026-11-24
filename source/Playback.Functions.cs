@@ -23,16 +23,16 @@ namespace LovenseConnector
         public async Task ApplyFunction(string function,int value,int high=0,Func<bool> isCurrent=null)
         {
             ValidateFunction(function,value,high);
-            int expected;lock(sync) { if(stopping>0||isCurrent!=null&&!isCurrent())return;expected=epoch+1; }
+            int expected,revision;lock(sync) { if(stopping>0||isCurrent!=null&&!isCurrent())return;expected=epoch+1;revision=functionRevision; }
             await StopAll().ConfigureAwait(false);
             await controls.WaitAsync().ConfigureAwait(false);
             try {
-                lock(sync)if(epoch!=expected||stopping>0||isCurrent!=null&&!isCurrent())return;
+                lock(sync)if(epoch!=expected||functionRevision!=revision||stopping>0||isCurrent!=null&&!isCurrent())return;
                 lock(sync)if(jobs.Count>0||orderedMotors.Count>0||preset!=null)throw new InvalidOperationException("Playback changed while applying the setting. Retry after stopping output.");
                 if(function=="stroke") { profile.SetStroke(value,high);return; }
                 string command=function=="position"?profile.PositionCommand(value):function=="depth"?profile.DepthCommand(value):"RotateChange;";
                 // Recheck after the transport queue as well as the playback queue.
-                Func<string> sample=()=> { lock(sync)return epoch==expected&&(isCurrent==null||isCurrent())?command:null; };
+                Func<string> sample=()=> { lock(sync)return epoch==expected&&functionRevision==revision&&(isCurrent==null||isCurrent())?command:null; };
                 var latest=link as ILatestCommandLink;
                 try {
                     if(latest!=null)await latest.CommandLatest(sample,System.Threading.CancellationToken.None).ConfigureAwait(false);
