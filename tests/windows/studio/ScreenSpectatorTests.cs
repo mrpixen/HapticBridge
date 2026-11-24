@@ -28,6 +28,12 @@ internal static partial class ScreenSyncTests
             bool rejected=false;try{await Invoke(app,"ArmScreen");}catch(ArgumentException){rejected=true;}
             Check(rejected&&!Get<bool>(app,"screenArmed"),"output cannot be enabled on a visible spectator marker");
             await Feed(app,capture,"100",3,"");Check(!Get<bool>(app,"screenArmed"),"marker disappearing never automatically re-enables output");
+            await Invoke(app,"ArmScreen");await Feed(app,capture,"100",1,"");links[0].FailZero=1;
+            await Feed(app,capture,"100",3,"80");
+            Check(!Get<bool>(app,"screenArmed")&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),"spectator status cannot hide a failed motor stop");
+            await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);
+            Check(!Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),"spectator stop warning clears only after a successful retry");
+            await Feed(app,capture,"100",3,"");
             // The marker can appear while another output source is stopping during enable.
             links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
             var pendingArm=Invoke(app,"ArmScreen");await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
