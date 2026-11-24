@@ -16,6 +16,12 @@ Calibration can open a saved PNG, JPEG or BMP. It stops capture and output, free
 
 Selected shield, spectator and death-text regions now show their outlines before learning. An invisible rendered-pixel regression failed before this fix and passed afterward. Tests also cover image pixels, invalid files, stopped capture, no output, learning readiness and cancellation. Passed: 228 Screen sync, 343 Studio, 21 audio and 17 legacy-import assertions using synthetic images and transports. File-dialog interaction and live gameplay remain unverified; no installed app was replaced.
 
+## Additional recorded death check — 2026-11-24
+
+A separate 1920×1080 recording was replayed through the production image reader and health/death-text filters at 10 samples per second, reusing the earlier health calibration and death-text template unchanged. One 35-second interval (350 frames) produced exactly one death event after health disappeared and three text matches exceeded 0.97. A separate 50-second respawn/buy-phase interval (500 frames) produced no death events, including 235 frames where positive health and a strong match to the old report were both present.
+
+Mean image-read/filter time was 1.85 ms and 1.71 ms respectively, excluding decoding and capture. These are limited recorded examples, not a general accuracy guarantee or a live capture/device test. No thresholds changed; recordings and extracted frames remain private.
+
 ## Death-text resolution follow-up — 2026-11-24
 
 A 1920-wide recorded frame was resampled to widths 1280, 1600, 2560 and 3840. Reusing its original death-text template scored 0.39–0.65, below the 0.90 confirmation threshold; relearning on each resized frame matched that frame at 1.00. This tests image resampling, not actual game rendering at those resolutions. It demonstrates that the small text template should be relearned after changing resolution or HUD scale. No recognition thresholds changed.
