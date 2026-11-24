@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="260" viewBox="0 0 1280 260" role="img" aria-labelledby="title desc">
+<title id="title">HapticBridge</title><desc id="desc">A lavender waveform on layered dark glass.</desc>
+<defs>
+ <linearGradient id="base" x2="1" y2="1"><stop stop-color="#201334"/><stop offset="1" stop-color="#070611"/></linearGradient>
+ <radialGradient id="glow"><stop stop-color="#9173d1" stop-opacity=".34"/><stop offset="1" stop-color="#9173d1" stop-opacity="0"/></radialGradient>
+ <linearGradient id="glass" x2=".8" y2="1"><stop stop-color="#e0ccff" stop-opacity=".22"/><stop offset="1" stop-color="#a28bc9" stop-opacity=".04"/></linearGradient>
+ <linearGradient id="wave"><stop stop-color="#ccb8ff"/><stop offset="1" stop-color="#a5d8ef"/></linearGradient>
+</defs>
+<rect width="1280" height="260" rx="32" fill="url(#base)"/>
+<ellipse cx="290" cy="25" rx="520" ry="300" fill="url(#glow)"/>
+<rect x="30" y="28" width="1220" height="204" rx="28" fill="url(#glass)"/>
+<path d="M58 29H1222" stroke="#eee4ff" stroke-opacity=".16"/>
+<rect x="70" y="77" width="106" height="106" rx="31" fill="#ccb8ff" fill-opacity=".17"/>
+<path d="M92 130h14l10-23 16 46 11-23h13" fill="none" stroke="#eee4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="210" y="151" fill="#faf7ff" font-family="Outfit, Segoe UI, sans-serif" font-size="63" font-weight="600" letter-spacing="-2">HapticBridge</text>
+<path d="M820 145C855 145 855 145 875 145S900 85 925 85 950 180 975 180 1000 108 1025 108 1050 145 1080 145H1175" fill="none" stroke="url(#wave)" stroke-width="5" stroke-linecap="round"/>
+<circle cx="925" cy="85" r="8" fill="#e3d5ff"/><circle cx="1025" cy="108" r="7" fill="#bed1f4"/>
+</svg>

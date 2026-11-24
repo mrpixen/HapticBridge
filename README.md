@@ -1,27 +1,70 @@
-# HapticBridge
+<p align="center">
+  <img src="assets/readme-banner.svg" alt="HapticBridge" width="100%">
+</p>
 
-A Windows app for controlling compatible Lovense devices, making vibration patterns, following system audio, and receiving feedback from local programs or FeelConnect sessions. No HapticBridge account is required.
+<p align="center">
+  <a href="https://github.com/mrpixen/HapticBridge/releases"><strong>Download for Windows</strong></a> ·
+  <a href="docs/SCREEN-SYNC.md">Screen sync setup</a> ·
+  <a href="docs/API.md">Developer API</a> ·
+  <a href="docs/VERIFICATION.md">Release checks</a>
+</p>
 
-## Run
+Control compatible Lovense devices from one Windows app. Shape vibration patterns, follow system audio, or let local games and programs control individual motors. **One executable. No HapticBridge account.**
 
-1. Download the executable for your Windows architecture from [Releases](https://github.com/mrpixen/HapticBridge/releases) and open it.
-2. Enable Bluetooth, turn on a compatible device, and disconnect it from other control apps.
-3. Select **Find & connect**, then choose the motors you want to control. The Devices page also lets you scan and connect individually.
+## What you can do
 
-Use **Controls** for motor levels and patterns, **Sound** for audio sync, and **Video sync** for FeelConnect sessions. **Stop all** stops connected devices; Escape does the same while the window has focus.
+| Feature | Controls |
+| :--- | :--- |
+| **Motor controls** | Set each motor independently or control several together. |
+| **Curve editor** | Draw, preview, save and assign vibration patterns. Preview works without a connected device. |
+| **Sound sync** | Follow a selected audio output, with a bass-focused option. |
+| **Screen sync** | Experimental VALORANT feedback from visible health, shield and kill badges. Learn multiple badge appearances for different skins. |
+| **Video sync** | Pair FeelConnect sessions by code or QR image, including an image pasted from the clipboard. |
+| **Game & app integrations** | Send commands through the local HTTP API. Discover motors and their capabilities at runtime. |
 
-Patterns can be edited, previewed and saved without a device. **Preview** animates the curves without sending output. **More → Duplicate curve** creates an independent, unassigned copy; **Assign curve to motor** copies it to a connected motor. Edits save as a local draft; use **More → Restore previous draft** after reopening. In **Sound**, choose the audio output to follow, then select **Start sound sync**.
+## Get started
 
-**Screen sync** provides experimental VALORANT feedback from visible health or shield drops and a calibrated kill badge. Choose a window, check recognition in preview, then enable output. It uses Windows window capture without game hooks or Overwolf. See [screen setup](docs/SCREEN-SYNC.md); actual gameplay accuracy and Riot approval are not established.
+**Requirements:** Windows 10 version 2004 or newer, or Windows 11; Bluetooth Low Energy for device connections. The .NET runtime is included. FeelConnect sessions require internet access.
 
-FeelConnect website playback is experimental. Pairing can succeed before a player sends any vibration cues; see [compatibility notes](docs/FEELCONNECT.md).
+1. Download `HapticBridge-win-x64.exe` from [Releases](https://github.com/mrpixen/HapticBridge/releases). Choose `win-arm64` for Windows on ARM.
+2. Turn on Bluetooth and your device. Disconnect it from other control apps.
+3. Open HapticBridge and select **Find & connect**. Use **Devices** to scan or connect individually.
+4. Choose **Controls**, **Sound**, **Screen sync** or **Video sync** and select the motors to use.
 
-Requires Windows 10 version 2004 or newer, or Windows 11, with Bluetooth Low Energy support. Internet is needed for FeelConnect sessions. A single executable contains the app and its .NET runtime; settings and runtime caches are created locally when it runs. Device capabilities vary by model and firmware.
+**Stop all** stops connected output. **Escape** does the same while the app has focus. Previewing a curve does not send output; Screen sync and Video sync have separate output-enable controls.
 
-Mods and native programs can use the [local HTTP API](docs/API.md). The [Python example](examples/gateway_client.py) uses only Python's standard library.
+### Games and other programs
 
-## Build
+In **Integrations**, enable **Allow app and game controls**, then use **Copy connection**. The API listens only on this computer and requires the generated local token. Keep that connection information private.
 
-Install the .NET 10 SDK, then run `./test.ps1` and `./build.ps1 -Locked` in PowerShell. The executable is written to `dist/win-x64/HapticBridge.exe`. See [build details](docs/BUILD.md) for other architectures and verification.
+[API reference](docs/API.md) · [Python example](examples/gateway_client.py)
 
-[Privacy and connection behavior](docs/PRIVACY.md) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [MIT license](LICENSE)
+### Experimental features
+
+- **Screen sync:** calibrate the visible HUD and check the event preview before enabling output. It uses Windows window capture, without game hooks or Overwolf. Recognition can miss or misread events; Riot approval is not established. [Setup and limits](docs/SCREEN-SYNC.md)
+- **FeelConnect:** pairing alone does not mean a video is sending cues. Website playback remains experimental. [Compatibility and troubleshooting](docs/FEELCONNECT.md)
+
+Device features vary by model and firmware. Settings and patterns are stored locally; a single-file download does not mean the app creates no local files. [Privacy and connections](docs/PRIVACY.md)
+
+## Build from source
+
+On Windows, install the **.NET 10 SDK**, clone this repository, and run these commands from its root in PowerShell:
+
+```powershell
+./test.ps1
+./build.ps1 -Locked
+```
+
+Output: `dist/win-x64/HapticBridge.exe`.
+
+For Windows on ARM:
+
+```powershell
+./build.ps1 -Runtime win-arm64 -Locked
+```
+
+Package restore needs internet access. [Build details](docs/BUILD.md) cover dependency locking, verification and packaging.
+
+---
+
+[MIT license](LICENSE) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [Report an issue](https://github.com/mrpixen/HapticBridge/issues)
