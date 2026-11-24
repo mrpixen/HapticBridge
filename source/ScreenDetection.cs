@@ -216,6 +216,7 @@ namespace LovenseConnector
             double s=frame.Height/1080.0;
             int left=(int)(frame.Width*.55),right=(int)(frame.Width*.985);
             int h=Math.Max(12,(int)Math.Round(32*s)),portrait=(int)Math.Round(58*s);
+            int topMinimum=(int)Math.Ceiling(portrait*.75);
             bool Gold(int x,int y) {
                 if(x<0||x>=frame.Width||y<0||y>=frame.Height)return false;
                 int p=(y*frame.Width+x)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
@@ -225,11 +226,20 @@ namespace LovenseConnector
                 bool found=false;int run=0;
                 for(int x=left;x<right-portrait-(int)(100*s);x++) {
                     run=Gold(x,y)?run+1:0;
-                    if(run<portrait*.75)continue;
+                    // Every later pixel in this same run has the same candidate start.
+                    // Evaluate its geometry once rather than repeating it across scenery.
+                    if(run!=topMinimum)continue;
                     int start=x-run+1,vertical=0,bottom=0,green=0;
                     for(int dy=0;dy<=h;dy++)if(Gold(start,y+dy)||Gold(start+1,y+dy)||Gold(start-1,y+dy))vertical++;
                     for(int dx=0;dx<portrait;dx++)if(Gold(start+dx,y+h)||Gold(start+dx,y+h+1)||Gold(start+dx,y+h-1))bottom++;
                     if(vertical<h*.75||bottom<portrait*.65)continue;
+                    // A gold border encloses portrait detail, not a mostly solid patch.
+                    // Scenery can match the outer edges and unrelated team colors.
+                    int interiorGold=0,interiorSamples=0,step=Math.Max(1,(int)Math.Round(2*s));
+                    for(int iy=step;iy<h-step;iy+=step)for(int ix=step;ix<portrait-step;ix+=step) {
+                        interiorSamples++;if(Gold(start+ix,y+iy))interiorGold++;
+                    }
+                    if(interiorSamples==0||interiorGold>=interiorSamples*.75)continue;
                     int gx=start+portrait+(int)(12*s),gy=y+h/2;
                     // Weapon silhouettes can cover the middle scanline, especially
                     // after downsampling. Require the same amount of team background

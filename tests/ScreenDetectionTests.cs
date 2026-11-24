@@ -43,13 +43,15 @@ internal static class ScreenDetectionTests
         f.Reset();f.Push(new[]{a},0,true);
         var extra=new HudKillFeedRow {Mask=partlyCovered,Y=a.Y-40,Height=a.Height};
         Check(f.Push(new[]{extra,a},.1,true)+f.Push(new[]{extra,a},.2,true)==1,"a partly matching row is new when the original slot remains occupied");
-        ScreenPixels Image(bool gold,bool friendly,bool rightSide,bool covered=false) {
+        ScreenPixels Image(bool gold,bool friendly,bool rightSide,bool covered=false,bool broad=false,bool extendedTop=false) {
             var pixels=new byte[1920*1080*4];int left=rightSide?1820:1500;
             void Pixel(int x,int y,int r,int g,int b){int p=(y*1920+x)*4;pixels[p]=(byte)b;pixels[p+1]=(byte)g;pixels[p+2]=(byte)r;pixels[p+3]=255;}
             if(gold){for(int x=left;x<left+58;x++){Pixel(x,96,225,225,100);Pixel(x,128,225,225,100);}for(int y=96;y<=128;y++)Pixel(left,y,225,225,100);}
             for(int y=97;y<128;y++)for(int x=1560;x<1760;x++)Pixel(x,y,friendly?80:230,friendly?170:80,145);
             for(int y=97;y<128;y++)for(int x=1760;x<1833;x++)Pixel(x,y,240,80,70);
             for(int y=105;y<120;y++)for(int x=1770;x<1825;x++)if(x%8<3||y==106)Pixel(x,y,250,250,250);
+            if(extendedTop)for(int x=1500;x<1620;x++)Pixel(x,96,225,225,100);
+            if(broad)for(int y=96;y<=128;y++)for(int x=1500;x<1620;x++)Pixel(x,y,225,225,100);
             if(covered)for(int x=1570;x<1660;x++)for(int y=109;y<=115;y++)Pixel(x,y,255,255,255);
             return new ScreenPixels(pixels,1920,1080,0);
         }
@@ -59,6 +61,8 @@ internal static class ScreenDetectionTests
         Check(HudKillFeedVision.Read(Image(false,true,false)).Length==0,"teammate green row without personal outline ignored");
         Check(HudKillFeedVision.Read(Image(true,false,false)).Length==0,"hostile killer row ignored");
         Check(HudKillFeedVision.Read(Image(true,true,true)).Length==0,"victim-side personal outline is not a kill");
+        Check(HudKillFeedVision.Read(Image(true,true,false,broad:true)).Length==0,"solid gold scenery beside team colors is not a portrait outline");
+        Check(HudKillFeedVision.Read(Image(true,true,false,extendedTop:true)).Length==1,"portrait top border may extend across the adjacent row without losing a valid kill");
         var events=new HudEventFilter();for(int i=0;i<4;i++)events.Push(new HudReading {Health=100,Confidence=1,KillFeed=Array.Empty<HudKillFeedRow>(),BadgeScore=0},i*.1);
         Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.4).Length==0,"feed mode does not emit a simultaneous badge");
         Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.5).Count(e=>e.Kind=="Kill")==1,"feed and badge together produce exactly one kill");
