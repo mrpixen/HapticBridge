@@ -60,11 +60,11 @@ namespace LovenseConnector
     internal sealed class HudEventFilter
     {
         int? health,candidate,shield,shieldCandidate;
-        int repeat,badgeRepeat,shieldRepeat;
-        double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100;
+        int repeat,badgeRepeat,shieldRepeat,rapidRebuilding;
+        double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100,rapidSince=-1;
         bool badgeLatched=true;
         public int? Health => health;
-        public void Reset() { health=candidate=null;ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100; }
+        public void Reset() { health=candidate=null;ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
         void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;}
         public HudEvent[] Push(HudReading read,double time)
         {
@@ -74,7 +74,7 @@ namespace LovenseConnector
             lastTime=time;
             if(read==null||read.Confidence<.82||!read.Health.HasValue||read.Health<0||read.Health>100) {
                 if(invalidSince<0)invalidSince=time;
-                candidate=null;repeat=badgeRepeat=0;badgeOffSince=-1;ResetShield();
+                candidate=null;repeat=badgeRepeat=0;badgeOffSince=rapidSince=-1;rapidRebuilding=0;ResetShield();
                 if(time-invalidSince>.6){health=null;badgeLatched=true;}
                 return events.ToArray();
             }
@@ -96,13 +96,23 @@ namespace LovenseConnector
                 }
             }
             if(healthLoss>0||shieldLoss>0)events.Add(new HudEvent { Kind=health==0?"Death":"Damage",Amount=healthLoss+shieldLoss,ShieldAmount=shieldLoss,Health=health.Value });
+            // Rapid kills can restart the badge without a full clear interval. Require a deep
+            // disappearance, a rebuilding phase, then three strong frames; a black-frame flicker
+            // returning directly to the held badge is not a new kill.
+            if(rapidSince>=0&&time-rapidSince>1.25)rapidSince=-1;
+            if(badgeLatched&&lastKill>=0&&read.BadgeScore<.25&&rapidSince<0){rapidSince=time;rapidRebuilding=0;}
+            if(rapidSince>=0) {
+                if(read.BadgeScore>=.55&&read.BadgeScore<.9)rapidRebuilding++;
+                else if(read.BadgeScore<.55)rapidRebuilding=0;
+                else if(read.BadgeScore>=.9&&rapidRebuilding<2)rapidSince=-1;
+            }
             // A badge already visible when starting never emits a stale kill.
             if(read.BadgeScore<.55) {
                 badgeRepeat=0;
                 if(badgeOffSince<0)badgeOffSince=time;
                 if(time-badgeOffSince>=.3)badgeLatched=false;
-            } else if(read.BadgeScore>=.9&&++badgeRepeat>=2&&health>0&&repeat>=3&&!badgeLatched&&time-lastKill>=.65) {
-                events.Add(new HudEvent { Kind="Kill",Health=health.Value });badgeLatched=true;lastKill=time;badgeOffSince=-1;
+            } else if(read.BadgeScore>=.9&&++badgeRepeat>=(badgeLatched?3:2)&&health>0&&repeat>=3&&(!badgeLatched||rapidSince>=0)&&time-lastKill>=.65) {
+                events.Add(new HudEvent { Kind="Kill",Health=health.Value });badgeLatched=true;lastKill=time;badgeOffSince=rapidSince=-1;rapidRebuilding=0;
             } else {badgeOffSince=-1;if(read.BadgeScore<.9)badgeRepeat=0;}
             return events.ToArray();
         }

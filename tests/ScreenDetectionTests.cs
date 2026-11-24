@@ -14,6 +14,7 @@ internal static class ScreenDetectionTests
         NumberColorMask();
         DimShieldDigits();
         BadgeAppearances();
+        RapidKillRecovery();
         var f=new HudEventFilter();Stable(f,100,0);
         Check(f.Push(Read(75),.3).Length==0&&f.Push(Read(75),.4).Length==0,"damage waits for confirmation");
         var ev=f.Push(Read(75),.5);Check(ev.Length==1&&ev[0].Kind=="Damage"&&ev[0].Amount==25,"confirmed health drop emits once");
@@ -38,6 +39,28 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void RapidKillRecovery()
+    {
+        HudEventFilter Start() {
+            var f=new HudEventFilter();for(int i=0;i<5;i++)f.Push(Read(100),i*.1);
+            f.Push(Read(100,1),.5);Check(f.Push(Read(100,1),.6).Single().Kind=="Kill","rapid-kill fixture establishes a first confirmed kill");
+            for(int i=7;i<=13;i++)f.Push(Read(100,1),i*.1);return f;
+        }
+        var f=Start();f.Push(Read(100,.2),1.4);f.Push(Read(100,.65),1.5);f.Push(Read(100,.8),1.6);
+        Check(f.Push(Read(100,.95),1.7).Length==0&&f.Push(Read(100,.96),1.8).Length==0,"rapid restart requires three strong frames after rebuilding");
+        Check(f.Push(Read(100,.97),1.9).Single().Kind=="Kill","brief deep disappearance plus rebuilding recovers a rapid kill");
+        for(int i=20;i<26;i++)Check(f.Push(Read(100,1),i*.1).Length==0,"rapid kill remains latched while badge is held");
+        foreach(double dip in new[]{.2,.4,.7}) {
+            f=Start();f.Push(Read(100,dip),1.4);
+            for(int i=15;i<22;i++)Check(f.Push(Read(100,1),i*.1).Length==0,"isolated visibility flicker returning directly to the same badge cannot repeat kill");
+        }
+        f=Start();f.Push(Read(100,.2),1.4);f.Push(Read(100,.7),1.5);f.Push(Read(100,.8),1.6);f.Push(Read(null),1.7);
+        for(int i=18;i<25;i++)Check(f.Push(Read(100,1),i*.1).Length==0,"unreadable health cancels rapid-kill candidate");
+        f=Start();f.Push(Read(100,.2),1.4);for(int i=15;i<29;i++)f.Push(Read(100,.7),i*.1);
+        for(int i=29;i<34;i++)Check(f.Push(Read(100,1),i*.1).Length==0,"expired rebuilding cannot become a later phantom kill");
+        f=Start();f.Push(Read(100,.2),1.4);f.Push(Read(100,.7),1.5);f.Push(Read(100,.8),1.6);f.Reset();
+        for(int i=17;i<25;i++)Check(f.Push(Read(100,1),i*.1).Length==0,"reset discards rapid restart and suppresses an already visible badge");
     }
     static void BadgeAppearances()
     {

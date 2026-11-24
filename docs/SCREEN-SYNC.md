@@ -46,7 +46,7 @@ To re-enable feedback after death or focus loss, open **Settings → Enable Scre
 
 ## Recognition limits
 
-The event preview reports matches, not authoritative game events. Use it before enabling output. Three consistent health readings confirm a change; two badge matches and a cleared interval confirm a new kill. Unreadable frames are ignored and sustained signal loss disarms output.
+The event preview reports matches, not authoritative game events. Use it before enabling output. Three consistent health readings confirm a change; two badge matches after a cleared interval confirm a new kill. For rapid kills without a full clear, the detector requires a deep visibility drop, two rebuilding frames and three strong matches within a short window. A brief disappearance that returns directly to the same badge does not count again. Some animations can still be missed or mistaken for a restart. Unreadable frames are ignored and sustained signal loss disarms output.
 
 Health loss from abilities or decay can resemble damage. Hits absorbed without changing health require shield reading and readable shield digits. Health and shield values must each repeat across three frames; a shield baseline is discarded when that number becomes unreadable, preventing a false hit on reacquisition. Spectating and replay HUDs may resemble your own HUD: keep output off in those modes. A disappearing death HUD may produce signal loss instead of a death cue. Background effects, overlays, compressed video, HDR, font changes and animated badges can cause missed or incorrect detections.
 
