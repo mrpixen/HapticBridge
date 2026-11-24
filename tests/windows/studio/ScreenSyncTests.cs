@@ -105,10 +105,24 @@ internal static partial class ScreenSyncTests
         var links=new[]{new Link(),new Link()};var players=links.Select(l=>new Playback(l,new[]{0})).ToArray();
         var devices=Get<Dictionary<ulong,Device>>(app,"devices");for(int i=0;i<2;i++){var d=new Device {Address=(ulong)i+1,Name="Synthetic actuator",Connected=true,Channels=new[]{0},Player=players[i]};d.Motors[0]=new MotorView {Channel=0,Output=new TextBlock()};devices.Add(d.Address,d);}
         Call(app,"InitializeScreenSync");Get<DispatcherTimer>(app,"screenTimer").Stop();Set(app,"screenProfile",profile);Call(app,"RefreshScreenRoutes");
+        var changed=devices.Values.First();var originalMotor=changed.Motors[0];
+        changed.Channels=new[]{9};changed.Motors.Clear();changed.Motors[9]=new MotorView {Channel=9,Output=new TextBlock()};
+        Call(app,"RefreshScreenRoutes");
+        var changedRoutes=((IDictionary)Get<object>(app,"screenRoutes")).Values.Cast<object>().Where(r=>ReferenceEquals(Get<Device>(r,"Device"),changed)).ToArray();
+        Check(!Get<CheckBox>(changedRoutes.Single(r=>Get<int>(r,"Channel")==0),"Include").IsEnabled&&Get<CheckBox>(changedRoutes.Single(r=>Get<int>(r,"Channel")==9),"Include").IsEnabled,"reidentified device disables obsolete Screen sync channels");
+        changed.Channels=new[]{0};changed.Motors.Clear();changed.Motors[0]=originalMotor;Call(app,"RefreshScreenRoutes");
         var capture=new Capture();Set(app,"screenCapture",capture);
         try {
             await Feed(app,capture,"100",3);await Feed(app,capture,"80",3);Check(links.All(l=>l.Positive.IsEmpty),"preview detects damage without actuator commands");Check(Get<TextBlock>(app,"screenHistory").Text.Contains("Damage"),"preview records confirmed damage");
-            await Invoke(app,"ArmScreen");Check(Get<bool>(app,"screenArmed"),"explicit arm succeeds on a calibrated live HUD");await Feed(app,capture,"80",3);await Feed(app,capture,"60",3);await Task.Delay(350);
+            await Invoke(app,"ArmScreen");Check(Get<bool>(app,"screenArmed"),"explicit arm succeeds on a calibrated live HUD");
+            Check(((IEnumerable)Get<object>(app,"screenOwned")).Cast<object>().All(t=>Get<int>(t,"Channel")==0),"obsolete checked routes cannot enter armed targets");
+            // Remove this case's obsolete lane before the independent persistence checks.
+            var routeMap=(IDictionary)Get<object>(app,"screenRoutes");
+            var obsolete=changedRoutes.Single(r=>Get<int>(r,"Channel")==9);
+            var obsoleteKey=routeMap.Keys.Cast<object>().Single(k=>ReferenceEquals(routeMap[k],obsolete));
+            var obsoleteGroup=(StackPanel)((WrapPanel)Get<CheckBox>(obsolete,"Include").Parent).Parent;
+            Get<StackPanel>(app,"screenMotorPanel").Children.Remove(obsoleteGroup);routeMap.Remove(obsoleteKey);
+            await Feed(app,capture,"80",3);await Feed(app,capture,"60",3);await Task.Delay(350);
             Check(links.All(l=>!l.Positive.IsEmpty),"same damage event reaches both selected motors");Check(players.All(p=>p.Level(0)==0&&!p.Active(0)),"bounded damage automatically stops all motors");
             capture.Foreground=false;await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"focus loss disarms");capture.Foreground=true;await Feed(app,capture,"40",3);Check(!Get<bool>(app,"screenArmed"),"returning to window never rearms output");
             await Invoke(app,"ArmScreen");await Feed(app,capture,"40",3);Set(app,"screenFrame",new ScreenPixels(Pixels("40").Bgra,180,80,ScreenCapture.Now-2));await Invoke(app,"ScreenTick");Check(!Get<bool>(app,"screenArmed"),"stale capture disarms");

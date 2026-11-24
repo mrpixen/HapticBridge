@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased - Screen sync channel changes
+
+A synthetic reconnect/capability-change check reproduced obsolete motor routes remaining enabled. Screen sync now checks the current channels when displaying routes, arming, monitoring output and admitting a cue. A previously checked obsolete route cannot become an armed target. Tests use fake devices and transport; physical reconnection behavior remains unverified.
+
 ## Unreleased - Stroke range validation
 
 UI follow-up: invalid text or an invalid stroke range used to revoke the active output source before showing an error. Motion controls now parse and validate before the manual handoff. An offline button-click regression reproduced the interruption; the fixed suite passes 356 Studio assertions and verifies playback, source ownership and the stored range survive rejected settings. No visible window or physical output was used.

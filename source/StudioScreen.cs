@@ -255,6 +255,7 @@ namespace LovenseConnector
             if(screenFrame==null)return null;var read=HudVision.Read(screenFrame,screenProfile,screenGlyphs);
             screenReading.Text="Health "+(read.Health?.ToString()??"—")+" · "+Math.Round(read.Confidence*100)+"% match"+(screenProfile.ReadShield?"    Shield "+(read.Shield?.ToString()??"—")+" · "+Math.Round(read.ShieldConfidence*100)+"% match":"")+(screenProfile.ReadKillFeed?"    Kill feed "+read.KillFeed.Length+" personal rows":"    Badge "+(screenProfile.BadgeMask==null?"not calibrated":Math.Round(read.BadgeScore*100)+"% match · "+(1+screenProfile.BadgeVariants.Count)+" learned"))+(screenProfile.SpectatorMask==null?"":"    Spectator "+Math.Round(read.SpectatorScore*100)+"% match")+(screenProfile.DeathMarkerMask==null?"":"    Death text "+(screenProfile.DeathMarkerFrameWidth>0&&(screenProfile.DeathMarkerFrameWidth!=screenFrame.Width||screenProfile.DeathMarkerFrameHeight!=screenFrame.Height)?"relearn for "+screenFrame.Width+" × "+screenFrame.Height:Math.Round(read.DeathMarkerScore*100)+"% match"));return read;
         }
+        static bool ScreenChannelAvailable(Device device,int channel)=>device.Connected&&device.Player!=null&&device.Motors.ContainsKey(channel)&&device.Channels.Contains(channel);
         void RefreshScreenRoutes()
         {
             foreach(var d in devices.Values.Where(d=>d.Connected&&d.Player!=null))foreach(int channel in d.Motors.Keys) {
@@ -272,8 +273,8 @@ namespace LovenseConnector
                 group.Children.Add(events);screenMotorPanel.Children.Add(group);screenRoutes[key]=route;
                 route.Include.Checked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};route.Include.Unchecked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};route.Ceiling.ValueChanged+=async(s,e)=>{value.Text=(int)route.Ceiling.Value+" / 20";var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};
             }
-            foreach(var route in screenRoutes.Values)route.Include.IsEnabled=route.Device.Connected&&route.Device.Player!=null;
-            screenNoMotors.Visibility=screenRoutes.Values.Any(r=>r.Device.Connected&&r.Device.Player!=null)?Visibility.Collapsed:Visibility.Visible;
+            foreach(var route in screenRoutes.Values)route.Include.IsEnabled=ScreenChannelAvailable(route.Device,route.Channel);
+            screenNoMotors.Visibility=screenRoutes.Values.Any(r=>ScreenChannelAvailable(r.Device,r.Channel))?Visibility.Collapsed:Visibility.Visible;
         }
         Task ArmScreen()=>ArmScreenCore(null);
         async Task ArmScreenCore(Func<bool> allowed)
@@ -282,10 +283,10 @@ namespace LovenseConnector
             if(screenCapture==null||screenFrozen||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)throw new ArgumentException("Start a live preview first.");
             var read=RefreshScreenReading();if(read?.Health==null||read.Health<=0)throw new ArgumentException("Calibrate health until the preview reads it correctly before enabling output.");
             if(read.SpectatorScore>=.85)throw new ArgumentException("Spectator marker visible. Return to your own HUD before enabling output.");
-            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null&&r.Ceiling.Value>0&&ScreenRouteEvents(r)!=0)
+            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&ScreenChannelAvailable(r.Device,r.Channel)&&r.Ceiling.Value>0&&ScreenRouteEvents(r)!=0)
                 .Select(r=>new ScreenTarget {Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value,Events=ScreenRouteEvents(r)}).ToArray();
             if(selected.Length==0)throw new ArgumentException("Select a connected motor with an enabled event and a maximum above zero.");
-            bool TargetsCurrent()=>selected.All(t=>t.Device.Connected&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player));
+            bool TargetsCurrent()=>selected.All(t=>ScreenChannelAvailable(t.Device,t.Channel)&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player));
             await ManualGuarded(async()=> {
                 if(allowed!=null&&!allowed())return;
                 if(!TargetsCurrent()){SetScreenStatus("Device connection changed · enable output again");return;}
@@ -366,7 +367,7 @@ namespace LovenseConnector
             var sample=Interlocked.Exchange(ref screenPending,null);var frame=sample!=null&&ReferenceEquals(sample.Source,screenCapture)?sample.Pixels:null;
             if(screenArmed) {
                 if(screenDeathUntil>0&&now>=screenDeathUntil){if(!await StopForTick("Death detected · output off until enabled again"))return;}
-                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!t.Device.Connected||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
+                if(screenOperation!=operatorGeneration||screenCapture==null||screenOwned.Any(t=>!ScreenChannelAvailable(t.Device,t.Channel)||t.Device.Generation!=t.Generation||t.Device.Player!=t.Player||!t.Player.Active(t.Channel)&&t.Player.Level(t.Channel)<0)) {if(!await StopForTick("Source or device changed · output off"))return;}
                 else if(screenCapture.Foreground){if(!screenForegroundSeen){ResetScreenDetection();screenLastGood=now;}screenForegroundSeen=true;}
                 else if(screenForegroundSeen||now-screenArmedAt>8){if(!await StopForTick("Window inactive · output off"))return;}
                 if(screenArmed&&screenForegroundSeen&&(screenFrame==null||now-screenFrame.Time>.75||screenLastGood>=0&&now-screenLastGood>1)) {if(!await StopForTick("HUD signal lost · output off"))return;}
@@ -405,7 +406,7 @@ namespace LovenseConnector
                 var clock=Stopwatch.StartNew();var starts=new List<Task>();int cooling=0;bool sourceChanged=false;
                 foreach(var t in screenOwned.ToArray()) {
                     if((t.Events&ScreenMotorFeedback.EventMask(ev.Kind))==0)continue;
-                    bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture?.Foreground==true&&t.Device.Connected&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
+                    bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture?.Foreground==true&&ScreenChannelAvailable(t.Device,t.Channel)&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
                     if(!Current()){sourceChanged=true;break;}
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;
                     // Cooldowns belong to motors: one event must not silence a different route.
