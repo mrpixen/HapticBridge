@@ -14,7 +14,7 @@ import sys
 
 
 EXCLUDED_DIRECTORIES = {".git", "bin", "obj", "dist", "artifacts", "publish", "packages", "__pycache__", ".vs"}
-PRIVATE_NAMES = {"integration.json", "status.json", "session.log", "screen-profile.json", "screen-profile.json.tmp", "ui-preferences.json", "ui-preferences.json.tmp", "private-terms.txt", "private-verification.json", ".env"}
+PRIVATE_NAMES = {"integration.json", "status.json", "session.log", "screen-profile.json", "screen-profile.json.tmp", "screen-feedback.json", "screen-feedback.json.tmp", "ui-preferences.json", "ui-preferences.json.tmp", "private-terms.txt", "private-verification.json", ".env"}
 PRIVATE_SUFFIXES = {".log", ".dmp", ".etl", ".apk", ".xapk", ".hbc", ".har", ".pcap", ".pcapng", ".png", ".jpg", ".jpeg", ".mp4", ".webm", ".key", ".pem", ".pdb"}
 PATTERNS = {
     "absolute-user-profile-path": re.compile(r"(?i)[a-z]:[\\/]+Users[\\/]+[^\\/\s\"'<>]+"),

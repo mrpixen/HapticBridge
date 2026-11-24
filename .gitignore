@@ -7,6 +7,8 @@ status.json
 session.log
 screen-profile.json
 screen-profile.json.tmp
+screen-feedback.json
+screen-feedback.json.tmp
 ui-preferences.json
 ui-preferences.json.tmp
 *.log

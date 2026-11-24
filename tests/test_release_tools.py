@@ -93,6 +93,13 @@ class ReleaseToolsTests(unittest.TestCase):
             binary.write_bytes(b"\0" + marker.encode("utf-16-le"))
             self.assertEqual(privacy.inspect(binary, [marker], artifact=True)["private-audit-term"], 1)
 
+    def test_screen_feedback_runtime_files_are_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for name in ("screen-feedback.json", "screen-feedback.json.tmp"):
+                settings = Path(temporary) / name
+                settings.write_text("{}", encoding="utf-8")
+                self.assertEqual(privacy.inspect(settings, [])["private-runtime-or-research-file"], 1)
+
     def test_privacy_scan_rejects_terms_file_inside_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

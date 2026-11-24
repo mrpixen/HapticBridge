@@ -52,6 +52,7 @@ internal static class ScreenSyncTests
     sealed class Link : ICommandLink,ILatestCommandLink
     {
         public ConcurrentQueue<int> Positive=new ConcurrentQueue<int>();
+        public ConcurrentQueue<(int Channel,int Level)> Samples=new ConcurrentQueue<(int Channel,int Level)>();
         public TaskCompletionSource<bool> Block,Entered;
         public int FailZero,Commands,LatestSamples;
         public Task<string> Command(string command)=>Command(command,CancellationToken.None);
@@ -60,7 +61,9 @@ internal static class ScreenSyncTests
             Interlocked.Increment(ref Commands);
             if(Block!=null){Entered?.TrySetResult(true);await Block.Task;token.ThrowIfCancellationRequested();}
             if(command=="Vibrate:0;"&&FailZero>0){FailZero--;throw new IOException("Synthetic stop failure");}
-            if(command.StartsWith("Vibrate")&&int.TryParse(command.Split(':')[1].TrimEnd(';'),out int level)&&level>0)Positive.Enqueue(level);
+            if(command.StartsWith("Vibrate")&&int.TryParse(command.Split(':')[1].TrimEnd(';'),out int level)&&level>0) {
+                Positive.Enqueue(level);var lane=command.Substring(7,command.IndexOf(':')-7);Samples.Enqueue((lane.Length==0?0:int.Parse(lane),level));
+            }
             return "OK";
         }
         public async Task<string> CommandLatest(Func<string> command,CancellationToken token)
@@ -174,8 +177,69 @@ internal static class ScreenSyncTests
             await Invoke(app,"UndoScreenCalibration");Check(profile.ReadShield&&!Get<bool>(app,"screenArmed"),"undo restores shield calibration without rearming");
             Call(app,"SaveScreenProfile");var restored=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>(File.ReadAllText(Path.Combine(temp,"screen-profile.json")));
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
+            await EventRoutingAndPersistence(app,capture,temp);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static async Task EventRoutingAndPersistence(ConnectorApp app,Capture capture,string folder)
+    {
+        var devices=Get<Dictionary<ulong,Device>>(app,"devices");var routes=(IDictionary)Get<object>(app,"screenRoutes");
+        foreach(var old in routes.Values.Cast<object>())Get<CheckBox>(old,"Include").IsChecked=false;
+        var link=new Link();var player=new Playback(link,new[]{1,2});
+        var device=new Device {Address=3,Name="Synthetic dual",Connected=true,Channels=new[]{1,2},Player=player};
+        foreach(int channel in device.Channels)device.Motors[channel]=new MotorView {Channel=channel,Output=new TextBlock()};devices.Add(device.Address,device);
+        Call(app,"RefreshScreenRoutes");var dual=routes.Values.Cast<object>().Where(r=>ReferenceEquals(Get<Device>(r,"Device"),device)).OrderBy(r=>Get<int>(r,"Channel")).ToArray();
+        Dictionary<string,CheckBox> Choices(object route)=>Get<Dictionary<string,CheckBox>>(route,"Events");
+        var first=Choices(dual[0]);var second=Choices(dual[1]);
+        Check(first.Values.Concat(second.Values).All(c=>c.IsChecked==true),"new motors receive all three event types by default");
+        first["Kill"].IsChecked=false;second["Damage"].IsChecked=false;second["Death"].IsChecked=false;
+        Get<Slider>(dual[0],"Ceiling").Value=8;Get<Slider>(dual[1],"Ceiling").Value=17;
+        var profile=Get<ScreenProfile>(app,"screenProfile");profile.Health=new HudRegion {Width=1,Height=1};profile.ReadShield=false;
+        var kill=Descendants(Get<TabControl>(app,"tabs")).OfType<Slider>().Single(s=>System.Windows.Automation.AutomationProperties.GetName(s)=="Kill event strength");kill.Value=18;
+        Set(app,"screenCapture",capture);capture.Foreground=true;
+        async Task Arm(){Set(app,"screenFrame",Pixels("100"));await Invoke(app,"ArmScreen");Check(Get<bool>(app,"screenArmed"),"routed test arms only after explicit request");}
+        try {
+            foreach(var ev in new[]{new HudEvent {Kind="Damage",Health=20,Amount=10},new HudEvent {Kind="Kill",Health=100},new HudEvent {Kind="Death",Health=0}}) {
+                await Arm();int marker=link.Samples.Count;
+                await Invoke(app,"SendScreenCue",ev);await Task.Delay(550);
+                var samples=link.Samples.Skip(marker).ToArray();int expected=ev.Kind=="Kill"?2:1;
+                Check(samples.Any()&&samples.All(s=>s.Channel==expected&&s.Level<=(expected==1?8:17)),ev.Kind+" reaches only its assigned motor within that motor's ceiling");
+                Check(player.Level(1)==0&&player.Level(2)==0&&!player.Active(1)&&!player.Active(2),ev.Kind+" leaves both motors stopped at the end");
+                await Invoke(app,"DisarmScreen");
+            }
+            await Arm();link.Block=new TaskCompletionSource<bool>();link.Entered=new TaskCompletionSource<bool>();int before=link.Positive.Count;
+            await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});await link.Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            second["Kill"].IsChecked=false;
+            Check(!Get<bool>(app,"screenArmed"),"changing an event assignment immediately cancels armed output while a write is blocked");
+            link.Block.TrySetResult(true);await Task.Delay(200);link.Block=null;
+            Check(link.Positive.Count==before,"an excluded event cannot escape an already-queued device write");
+            second["Kill"].IsChecked=true;
+            first["Damage"].IsChecked=false;first["Death"].IsChecked=false;second["Kill"].IsChecked=false;
+            bool rejected=false;Set(app,"screenFrame",Pixels("100"));try{await Invoke(app,"ArmScreen");}catch(ArgumentException){rejected=true;}
+            Check(rejected&&!Get<bool>(app,"screenArmed"),"all event assignments off cannot arm an empty route");
+            first["Damage"].IsChecked=true;first["Death"].IsChecked=true;second["Kill"].IsChecked=true;
+            string path=Path.Combine(folder,"screen-feedback.json"),saved=File.ReadAllText(path);
+            var preferences=System.Text.Json.JsonSerializer.Deserialize<ScreenFeedbackPreferences>(saved);
+            Check(preferences.Valid()&&preferences.KillLevel==18&&preferences.Motors.Count==4,"event strengths and all motor choices save without a separate calibration save");
+            Check(!saved.Contains("Synthetic")&&!saved.Contains("000000000003/")&&!saved.Contains("screenFrame")&&!saved.Contains("screenArmed"),"feedback file omits names, raw device addresses, captured pixels and output-enabled state");
+            // Rebuild in reversed discovery order to prove preferences follow motor identity, not row order.
+            var original=devices.Values.Reverse().ToArray();devices.Clear();foreach(var d in original)devices.Add(d.Address,d);
+            routes.Clear();Get<StackPanel>(app,"screenMotorPanel").Children.Clear();Call(app,"LoadScreenFeedback");Call(app,"RefreshScreenRoutes");
+            var reloaded=routes.Values.Cast<object>().Where(r=>ReferenceEquals(Get<Device>(r,"Device"),device)).OrderBy(r=>Get<int>(r,"Channel")).ToArray();
+            Check(Get<Slider>(reloaded[0],"Ceiling").Value==8&&Get<Slider>(reloaded[1],"Ceiling").Value==17&&Choices(reloaded[0])["Kill"].IsChecked==false&&Choices(reloaded[1])["Damage"].IsChecked==false&&Choices(reloaded[1])["Kill"].IsChecked==true,"reloaded assignments and ceilings stay on the same motor after discovery order changes");
+            Check(routes.Values.Cast<object>().Where(r=>!ReferenceEquals(Get<Device>(r,"Device"),device)).All(r=>Get<CheckBox>(r,"Include").IsChecked==false)&&!Get<bool>(app,"screenArmed"),"reloading retains excluded devices and never enables output");
+            using(var locked=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)) {
+                Get<Slider>(reloaded[0],"Ceiling").Value=9;
+                Check(Get<TextBlock>(app,"screenFeedbackStatus").Visibility==Visibility.Visible&&File.ReadAllText(path)==saved&&!File.Exists(path+".tmp"),"a locked save preserves previous settings, removes temporary data and reports session-only changes");
+            }
+            Check((bool)Call(app,"SaveScreenFeedback")&&Get<TextBlock>(app,"screenFeedbackStatus").Visibility==Visibility.Collapsed,"saving recovers after the destination becomes writable");
+            File.WriteAllText(path,"{\"Version\":99}");Call(app,"LoadScreenFeedback");
+            Check(Get<bool>(app,"screenFeedbackLoadFailed")&&Get<ScreenFeedbackPreferences>(app,"screenFeedback").Motors.Count==0&&!Get<bool>(app,"screenArmed"),"invalid saved feedback is rejected without enabling capture or output");
+            File.Delete(path);profile.DamageLevel=6;profile.KillLevel=11;profile.DeathLevel=9;Call(app,"LoadScreenFeedback");
+            var migrated=Get<ScreenFeedbackPreferences>(app,"screenFeedback");
+            Check(migrated.DamageLevel==6&&migrated.KillLevel==11&&migrated.DeathLevel==9,"older calibration strengths remain the defaults when no feedback file exists");
+        }finally {link.Block?.TrySetResult(true);await Invoke(app,"DisarmScreen");await player.StopAll();}
     }
 
     static async Task AdvancedSliderCannotRetargetScreen(ConnectorApp app,Capture capture,Device device,Link link)

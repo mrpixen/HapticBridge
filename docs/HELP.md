@@ -28,6 +28,10 @@ For a shortcut while another app has focus, open **Settings → Global Stop all*
 
 Select motors under **Controls** or **Sound**. In **Sound**, choose the **Audio output** to follow, choose **Bass rumble** or **Full sound**, then **Start sound sync**. Adjust sensitivity and each motor's maximum level. Audio is analyzed in memory without being recorded. Changing the selected output or pressing **Refresh** stops sound sync; start it again when ready. **Windows default** resolves the current default each time you start.
 
+## Screen sync
+
+Choose a window and **Start preview**, then calibrate your health digits and kill badge. Optional shield reading detects damage absorbed by shields. Each motor has its own maximum and **Damage**, **Kill** and **Death** choices. Feedback settings save automatically; calibration uses **Save calibration**. Changes turn output off until **Enable output** is selected again. See **SCREEN-SYNC** for setup and recognition limits.
+
 ## Local programs and mods
 
 In **Integrations**, enable **Allow app and game controls**, then use **Copy connection** to configure a native client. Keep the copied token private. Only one integration session owns output at a time, and its heartbeat must remain active. A manual stop or expired lease ends its output. Re-enable integrations when you want a program to take control again. See **API** for the complete contract.

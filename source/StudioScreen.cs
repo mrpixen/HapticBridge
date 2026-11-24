@@ -15,8 +15,8 @@ namespace LovenseConnector
 {
     internal sealed partial class ConnectorApp
     {
-        sealed class ScreenRoute { public Device Device;public int Channel;public CheckBox Include;public Slider Ceiling; }
-        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling;public Playback Player; }
+        sealed class ScreenRoute { public Device Device;public int Channel;public CheckBox Include;public Slider Ceiling;public readonly Dictionary<string,CheckBox> Events=new Dictionary<string,CheckBox>(); }
+        sealed class ScreenTarget { public Device Device;public int Channel,Generation,Ceiling,Events;public Playback Player; }
         sealed class ScreenSample { public IScreenCapture Source;public ScreenPixels Pixels; }
         sealed class ScreenStopAttempt
         {
@@ -53,6 +53,7 @@ namespace LovenseConnector
         void InitializeScreenSync()
         {
             try { if(File.Exists(ScreenProfilePath)&&new FileInfo(ScreenProfilePath).Length<=150000) { var saved=json.Deserialize<ScreenProfile>(File.ReadAllText(ScreenProfilePath));if(saved!=null&&saved.Validate())screenProfile=saved; } }catch{}
+            LoadScreenFeedback();
             screenGlyphs=HudDefaultGlyphs.Create();
             var body=new StackPanel { Margin=new Thickness(24),MaxWidth=1000 };body.Children.Add(Text("Screen sync",32));
             body.Children.Add(Text("VALORANT · experimental HUD detection",14));
@@ -81,6 +82,7 @@ namespace LovenseConnector
             var coordinateExpander=new Expander { Header="Region coordinates",Content=coordinates,Margin=new Thickness(0,8,0,0) };screenRefreshCoordinates=()=>{var r=SelectedScreenRegion;double[] a={r.X,r.Y,r.Width,r.Height};for(int i=0;i<4;i++)coords[i].Text=(a[i]*100).ToString("0.###",CultureInfo.InvariantCulture);};coordinateExpander.Expanded+=(s,e)=>screenRefreshCoordinates();screenRegion.SelectionChanged+=(s,e)=>screenRefreshCoordinates();calibration.Children.Add(coordinateExpander);body.Children.Add(StudioPanel(new Expander { Header="Calibration",Content=calibration,IsExpanded=screenProfile.Digits.Count==0 }));
             var feedback=new StackPanel();feedback.Children.Add(Text("Feedback",18));var levels=new WrapPanel();
             AddScreenLevel(levels,"Damage",screenProfile.DamageLevel,v=>screenProfile.DamageLevel=v);AddScreenLevel(levels,"Kill",screenProfile.KillLevel,v=>screenProfile.KillLevel=v);AddScreenLevel(levels,"Death",screenProfile.DeathLevel,v=>screenProfile.DeathLevel=v);feedback.Children.Add(levels);
+            screenFeedbackStatus=Text("Saved feedback could not be read. Using defaults.",13);screenFeedbackStatus.Visibility=screenFeedbackLoadFailed?Visibility.Visible:Visibility.Collapsed;feedback.Children.Add(screenFeedbackStatus);
             feedback.Children.Add(Text("Motors · maximum level",14));screenNoMotors=Text("Connect a device to enable feedback. Preview works without one.",13);feedback.Children.Add(screenNoMotors);screenMotorPanel=new StackPanel();feedback.Children.Add(screenMotorPanel);
             screenOutput=Action("Enable output",async()=>{if(screenArmed)await DisarmScreen();else await ArmScreen();});feedback.Children.Add(screenOutput);
             feedback.Children.Add(Text("Return to the selected window within 8 seconds. Leaving it turns output off.",13));body.Children.Add(StudioPanel(feedback));
@@ -92,7 +94,7 @@ namespace LovenseConnector
         }
         void AddScreenLevel(Panel parent,string label,int initial,Action<int> set)
         {
-            var panel=new StackPanel { Width=150,Margin=new Thickness(0,0,16,10) };var value=Text(label+" · "+initial+" / 20",14);panel.Children.Add(value);var slider=new Slider { Minimum=0,Maximum=20,Value=initial,TickFrequency=1,IsSnapToTickEnabled=true };Accessible(slider,label+" event strength");slider.ValueChanged+=async(s,e)=>{await DisarmScreen();set((int)slider.Value);value.Text=label+" · "+(int)slider.Value+" / 20";};panel.Children.Add(slider);parent.Children.Add(panel);
+            var panel=new StackPanel { Width=150,Margin=new Thickness(0,0,16,10) };var value=Text(label+" · "+initial+" / 20",14);panel.Children.Add(value);var slider=new Slider { Minimum=0,Maximum=20,Value=initial,TickFrequency=1,IsSnapToTickEnabled=true };Accessible(slider,label+" event strength");slider.ValueChanged+=async(s,e)=>{var stopped=DisarmScreen();set((int)slider.Value);value.Text=label+" · "+(int)slider.Value+" / 20";SaveScreenFeedback();await stopped;};panel.Children.Add(slider);parent.Children.Add(panel);
         }
         void RefreshScreenWindows()
         {
@@ -193,10 +195,18 @@ namespace LovenseConnector
         {
             foreach(var d in devices.Values.Where(d=>d.Connected&&d.Player!=null))foreach(int channel in d.Motors.Keys) {
                 string key=MixerKey(d,channel);if(screenRoutes.ContainsKey(key))continue;
-                var route=new ScreenRoute { Device=d,Channel=channel,Include=new CheckBox { Content=d.Name+(channel==0?"":" · Motor "+channel),IsChecked=!screenArmed,MinWidth=150,Margin=new Thickness(0,0,16,0) },Ceiling=new Slider { Minimum=0,Maximum=20,Value=20,Width=130,TickFrequency=1,IsSnapToTickEnabled=true } };
+                var saved=screenFeedback.Motors.TryGetValue(ScreenFeedbackKey(d,channel),out var preferences)?preferences:new ScreenMotorFeedback();
+                var route=new ScreenRoute { Device=d,Channel=channel,Include=new CheckBox { Content=d.Name+(channel==0?"":" · Motor "+channel),IsChecked=!screenArmed&&saved.Enabled,MinWidth=150,Margin=new Thickness(0,0,16,0) },Ceiling=new Slider { Minimum=0,Maximum=20,Value=saved.Maximum,Width=130,TickFrequency=1,IsSnapToTickEnabled=true } };
                 Accessible(route.Include,d.Name+" screen sync motor "+channel);Accessible(route.Ceiling,d.Name+" screen sync motor "+channel+" maximum level");
-                var row=new WrapPanel { Margin=new Thickness(0,8,0,8) };row.Children.Add(route.Include);row.Children.Add(route.Ceiling);var value=Text("20 / 20",13);value.Margin=new Thickness(12,0,0,0);row.Children.Add(value);screenMotorPanel.Children.Add(row);screenRoutes[key]=route;
-                route.Include.Checked+=async(s,e)=>await DisarmScreen();route.Include.Unchecked+=async(s,e)=>await DisarmScreen();route.Ceiling.ValueChanged+=async(s,e)=>{value.Text=(int)route.Ceiling.Value+" / 20";await DisarmScreen();};
+                var group=new StackPanel { Margin=new Thickness(0,8,0,12) };var row=new WrapPanel();row.Children.Add(route.Include);row.Children.Add(route.Ceiling);var value=Text(saved.Maximum+" / 20",13);value.Margin=new Thickness(12,0,0,0);row.Children.Add(value);group.Children.Add(row);
+                var events=new WrapPanel { Margin=new Thickness(0,6,0,0) };
+                foreach(string kind in new[]{"Damage","Kill","Death"}) {
+                    var choice=new CheckBox { Content=kind,IsChecked=(saved.Events&ScreenMotorFeedback.EventMask(kind))!=0,Margin=new Thickness(0,0,20,6),MinHeight=28,VerticalContentAlignment=VerticalAlignment.Center };
+                    Accessible(choice,d.Name+" screen sync motor "+channel+" "+kind.ToLowerInvariant()+" feedback");route.Events.Add(kind,choice);events.Children.Add(choice);
+                    choice.Checked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};choice.Unchecked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};
+                }
+                group.Children.Add(events);screenMotorPanel.Children.Add(group);screenRoutes[key]=route;
+                route.Include.Checked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};route.Include.Unchecked+=async(s,e)=>{var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};route.Ceiling.ValueChanged+=async(s,e)=>{value.Text=(int)route.Ceiling.Value+" / 20";var stopped=DisarmScreen();SaveScreenRoute(route);await stopped;};
             }
             foreach(var route in screenRoutes.Values)route.Include.IsEnabled=route.Device.Connected&&route.Device.Player!=null;
             screenNoMotors.Visibility=screenRoutes.Values.Any(r=>r.Device.Connected&&r.Device.Player!=null)?Visibility.Collapsed:Visibility.Visible;
@@ -205,7 +215,7 @@ namespace LovenseConnector
         {
             if(screenCapture==null||screenFrozen||screenFrame==null||ScreenCapture.Now-screenFrame.Time>.75)throw new ArgumentException("Start a live preview first.");
             var read=RefreshScreenReading();if(read?.Health==null||read.Health<=0)throw new ArgumentException("Calibrate health until the preview reads it correctly before enabling output.");
-            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null).ToArray();if(selected.Length==0)throw new ArgumentException("Connect and select a motor first.");
+            var selected=screenRoutes.Values.Where(r=>r.Include.IsChecked==true&&r.Device.Connected&&r.Device.Player!=null&&r.Ceiling.Value>0&&ScreenRouteEvents(r)!=0).ToArray();if(selected.Length==0)throw new ArgumentException("Select a connected motor with an enabled event and a maximum above zero.");
             await ManualGuarded(async()=> {
                 int operation=operatorGeneration,generation=screenGeneration;var capture=screenCapture;
                 if(!await StopPlayers())throw new InvalidOperationException("Existing output could not be stopped.");
@@ -214,7 +224,7 @@ namespace LovenseConnector
                 // Do not arm using the positive reading taken before those waits.
                 var current=RefreshScreenReading();
                 if(current?.Health==null||current.Health<=0){screenStatus.Text="HUD changed · verify health before enabling output";return;}
-                screenOwned.Clear();foreach(var r in selected)if(r.Device.Connected&&r.Device.Player!=null)screenOwned.Add(new ScreenTarget { Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value });
+                screenOwned.Clear();foreach(var r in selected)if(r.Device.Connected&&r.Device.Player!=null)screenOwned.Add(new ScreenTarget { Device=r.Device,Channel=r.Channel,Generation=r.Device.Generation,Player=r.Device.Player,Ceiling=(int)r.Ceiling.Value,Events=ScreenRouteEvents(r) });
                 if(screenOwned.Count==0)return;
                 screenOperation=operatorGeneration;screenGeneration++;screenArmed=true;screenDeathUntil=0;screenArmedAt=ScreenCapture.Now;screenForegroundSeen=false;screenLastGood=ScreenCapture.Now;screenFilter.Reset();screenOutput.Content="Disable output";screenStatus.Text="Armed · return to the selected window within 8 seconds";
             },()=>screenGeneration);
@@ -292,6 +302,7 @@ namespace LovenseConnector
                 if(ev.Kind=="Damage"&&screenProfile.DamageLevel==0)high=0;
                 var clock=Stopwatch.StartNew();var starts=new List<Task>();
                 foreach(var t in screenOwned.ToArray()) {
+                    if((t.Events&ScreenMotorFeedback.EventMask(ev.Kind))==0)continue;
                     bool Current()=>screenArmed&&generation==screenGeneration&&operatorGeneration==screenOperation&&screenCapture?.Foreground==true&&t.Device.Connected&&t.Device.Generation==t.Generation&&ReferenceEquals(t.Device.Player,t.Player)&&screenFrame!=null&&ScreenCapture.Now-screenFrame.Time<.75;
                     if(!Current())break;
                     int level=Math.Min(t.Ceiling,high);if(level==0)continue;

@@ -6,6 +6,8 @@ The app stores its settings, connection file, diagnostic status, activity log an
 
 Pattern edits save one local `studio-draft.mix.json` for recovery. It contains numbered curves, links, levels and timing, without device names or identifiers. Recovery is explicit and never starts output. Drafts and manually saved mixes are excluded from public builds.
 
+Screen feedback choices save separately in `screen-feedback.json`. It stores event strengths, selections, maximums and event assignments using hashes of local motor identifiers. These hashes allow matching across launches; they are not anonymous data. The file contains no device names, raw addresses, window details or output-enabled state. It is private local data and excluded from public builds.
+
 Sound sync analyzes the selected Windows audio output in memory. It does not record audio to disk or use the microphone. Audio endpoint identifiers remain in memory and are not exported in mixes. Changing or refreshing the output stops sound sync; start it again deliberately. If Windows changes its default output, restart sound sync to follow the new default.
 
 Screen sync captures only the window you select after **Start preview**. Frames and the short event history stay in memory; no screenshots, window titles or recognition results are uploaded or logged by this feature. Windows displays its capture indicator. **Freeze** holds the preview while capture continues; **Stop capture** or **Stop all** releases it. Saved `screen-profile.json` contains region coordinates, small binary glyph/badge templates and event strengths. It contains no full frames, device identities or window titles, but remains private local calibration data and should not be published. Capture and output are off at startup.
