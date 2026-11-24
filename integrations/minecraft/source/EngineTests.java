@@ -14,6 +14,21 @@ public final class EngineTests {
         engine.clear();check(levels(engine,now,0),"stop clears active effects");
         double last=0;for(int i=0;i<=100;i++) { double scale=HapticEngine.miningProgressScale(i/100.0);if(scale<last)throw new AssertionError("mining curve reversed");last=scale; }
         check(HapticEngine.miningProgressScale(0)==0.1&&Math.abs(last-0.9)<0.0001,"mining progresses smoothly from 2 to 18");
+        int[] materials={HapticEngine.miningLevel(true,false,false,false,0.5),HapticEngine.miningLevel(false,true,false,false,1.5),HapticEngine.miningLevel(false,true,true,false,3),HapticEngine.miningLevel(false,true,false,true,50)};
+        check(Arrays.equals(materials,new int[]{4,9,15,20}),"dirt, stone, ore and obsidian keep distinct material strengths");
+        for(double progress:new double[]{0.25,0.5,0.75,1}) {
+            double weaker=0;
+            for(int material:materials) {double value=HapticEngine.miningProgressScale(progress,material);if(value<=weaker)throw new AssertionError("material order lost");weaker=value;}
+        }
+        check(true,"harder materials stay stronger at matching mining progress");
+        for(int material:materials) {
+            engine.clear();last=0;
+            for(int i=0;i<=100;i++) {long time=now+i*50_000_000L;engine.sustain("mining",true,HapticEngine.miningProgressScale(i/100.0,material),time);int[] values=engine.sample(time);if(values[0]<last||values[0]!=values[1]||values[1]!=values[2])throw new AssertionError("material ramp");last=values[0];}
+            if(last!=Math.min(18,material))throw new AssertionError("material ceiling");
+        }
+        check(true,"each material ramps smoothly on all three motors and reserves level 20 for completion");
+        check(HapticEngine.miningProgressScale(0.5,0)==0&&HapticEngine.miningProgressScale(Double.NaN,20)==0,"unbreakable or invalid mining progress stays silent");
+        engine.clear();
         engine.sustain("mining",true,HapticEngine.miningProgressScale(0.5),now);check(levels(engine,now,10),"half-mined block uses level 10 on all motors");
         engine.sustain("mining",true,HapticEngine.miningProgressScale(0.1),now+50_000_000L);check(engine.sample(now+50_000_000L)[0]<10,"new or reset target returns to low intensity");
         engine.sustain("mining",false,0,now+100_000_000L);check(levels(engine,now+100_000_000L,0),"aborting mining stops without completion");

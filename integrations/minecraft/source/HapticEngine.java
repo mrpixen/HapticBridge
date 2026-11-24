@@ -63,7 +63,13 @@ public final class HapticEngine {
         activeReward=name;rewardPriority=p.priority;peakUntil=now+p.durationMs*1_000_000L;restUntil=peakUntil+650_000_000L;return true;
     }
     public static double miningProgressScale(double progress) {
-        double p=Math.max(0,Math.min(1,progress));return (2+16*p*p*(3-2*p))/20.0;
+        return miningProgressScale(progress,18);
+    }
+    public static double miningProgressScale(double progress,int materialLevel) {
+        if(!Double.isFinite(progress)||materialLevel<=0)return 0;
+        double p=Math.max(0,Math.min(1,progress));
+        double ceiling=Math.min(18,materialLevel),start=Math.min(2,ceiling);
+        return (start+(ceiling-start)*p*p*(3-2*p))/20.0;
     }
     public static boolean crossedMilestone(int before,int after) { return before>=0&&after>before&&after/10>before/10; }
     /** Damage follows remaining health, reaching maximum at one heart (or 10% of max health). */
