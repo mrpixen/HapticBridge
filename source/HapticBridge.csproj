@@ -10,7 +10,7 @@
     <StartupObject>LovenseConnector.ConnectorApp</StartupObject>
     <AssemblyName>HapticBridge</AssemblyName>
     <RootNamespace>LovenseConnector</RootNamespace>
-    <Version>0.8.5</Version>
+    <Version>0.8.6</Version>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <SelfContained>true</SelfContained>

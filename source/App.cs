@@ -31,7 +31,7 @@ namespace LovenseConnector
         public bool Connected, Busy, Supported;
         public int Generation;
         public int[] Channels=new int[0];
-        public BleLink Link;
+        public IDeviceLink Link;
         public Playback Player;
         public TabItem Tab;
         public StackPanel Content, Controls;
@@ -253,10 +253,7 @@ namespace LovenseConnector
             d.AutoResume=new CheckBox { Content="Resume last output when Bluetooth reconnects",Margin=new Thickness(0,4,0,10) };
             panel.Children.Add(d.Light); panel.Children.Add(d.AutoStop); panel.Children.Add(d.AutoResume);
             var row=new WrapPanel(); row.Children.Add(Action("Read settings",()=>ReadSettings(d)));
-            row.Children.Add(Action("Apply settings",async()=> {
-                await d.Link.Command("Light:"+(d.Light.IsChecked==true?"on":"off")+";");
-                await d.Link.Command("AutoSwith:"+(d.AutoStop.IsChecked==true?"On":"Off")+":"+(d.AutoResume.IsChecked==true?"On":"Off")+";"); await ReadSettings(d);
-            }));
+            row.Children.Add(Action("Apply settings",()=>ApplySettings(d)));
             row.Children.Add(Action("Power off toy",()=>PowerOff(d))); panel.Children.Add(row);
             d.Controls.Children.Add(new Expander { Header="Settings",Content=panel,Margin=new Thickness(0,8,0,12) });
         }
@@ -324,6 +321,18 @@ namespace LovenseConnector
             string light=await link.Query("GetLight;",x=>x=="Light:1"||x=="Light:0");
             string switches=await link.Query("GetAS;",x=>System.Text.RegularExpressions.Regex.IsMatch(x,@"^AutoSwith:[01]:[01]$")); var fields=switches.Split(':');
             if(Object.ReferenceEquals(d.Link,link)) { d.Light.IsChecked=light=="Light:1"; d.AutoStop.IsChecked=fields[1]=="1"; d.AutoResume.IsChecked=fields[2]=="1"; }
+        }
+        async Task ApplySettings(Device d)
+        {
+            var link=d.Link;int generation=d.Generation;
+            bool Current()=>!closing&&d.Connected&&link!=null&&generation==d.Generation&&ReferenceEquals(d.Link,link);
+            if(!Current())return;
+            string light="Light:"+(d.Light.IsChecked==true?"on":"off")+";";
+            string switches="AutoSwith:"+(d.AutoStop.IsChecked==true?"On":"Off")+":"+(d.AutoResume.IsChecked==true?"On":"Off")+";";
+            await link.Command(light);
+            if(!Current())return;
+            await link.Command(switches);
+            if(Current())await ReadSettings(d);
         }
         async Task Disconnect(Device d)
         {

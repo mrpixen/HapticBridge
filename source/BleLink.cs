@@ -44,7 +44,13 @@ namespace LovenseConnector
         public void Dispose() { Stop(); }
     }
 
-    internal sealed class BleLink : IDisposable, ICommandLink, ILatestCommandLink
+    internal interface IDeviceLink : IDisposable, ICommandLink
+    {
+        bool Connected { get; }
+        Task<string> Query(string command,Func<string,bool> match);
+    }
+
+    internal sealed class BleLink : IDeviceLink, ILatestCommandLink
     {
         BluetoothLEDevice device;
         GattDeviceService service;

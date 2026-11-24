@@ -1,5 +1,13 @@
 # Release verification
 
+## 0.8.6 — Settings and integration requests — 2026-11-23
+
+Two more reconnection bugs were reproduced before correction. Apply settings could send its remaining commands to a replacement connection. A multi-motor API frame could start a reconnected motor while waiting for an earlier motor to stop; a cancelled pattern admission could also report acceptance after its connection changed.
+
+Settings now retain the original connection and chosen values. Motor, frame and pattern API requests check their captured connection and session before and after awaited work, returning 409 if ownership changes. Earlier commands in a partial frame can already have applied; clients must refresh state before preparing another request.
+
+Offline regressions exercise late settings replies, multi-motor API handoffs, rejected pattern admission, cancellation, accepted-output leases and fresh requests after reconnect. An injectable device-link contract also tests power-off acknowledgement and cleanup without Bluetooth. These checks do not establish real reconnect performance, physical power-off, gameplay recognition or ARM64 execution.
+
 ## 0.8.5 — Pending device controls — 2026-11-23
 
 Reconnection races were reproduced in the advanced device controls. A pending power-off could release a replacement connection; Start, Test 2s, Play pattern and Play hardware preset could use a new connection after waiting for other output to stop. Each request now retains its original connection before that wait. Power-off also checks ownership before sending its command and before releasing the connection.

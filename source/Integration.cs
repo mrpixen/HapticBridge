@@ -117,6 +117,13 @@ namespace LovenseConnector
                 return new { sessionId=integration.Id,ttlMs=integration.TtlMs,heartbeatMs=Math.Max(100,integration.TtlMs/3) };
             }
             string sessionId=FieldString(body,"sessionId"); var session=RequireSession(sessionId);
+            bool CurrentTarget(Device device,Playback player,int generation)=>
+                !request.Cancellation.IsCancellationRequested&&!closing&&apiEnabled&&sweep==null&&ReferenceEquals(integration,session)&&!session.Expired&&
+                device.Connected&&device.Generation==generation&&ReferenceEquals(device.Player,player);
+            void RequireTarget(Device device,Playback player,int generation) {
+                request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId);
+                if(!CurrentTarget(device,player,generation))throw new ApiFault(409,"Device connection changed. Refresh devices and send a new request.");
+            }
             if(request.Path=="/api/v1/heartbeat") { session.Touch(); return new { renewed=true,ttlMs=session.TtlMs }; }
             if(request.Path=="/api/v1/release") { await RevokeIntegration(false); return new { released=true }; }
             if(request.Path=="/api/v1/motor"||request.Path=="/api/v1/frame")
@@ -130,17 +137,20 @@ namespace LovenseConnector
                 if(outputs.Count<1||outputs.Count>16) throw new ApiFault(400,"Send 1–16 motor outputs per frame.");
                 int duration=FieldInt(body,"durationMs",1000,0,600000);
                 int transition=FieldInt(body,"transitionMs",0,0,10000);
-                var commands=new List<Tuple<Device,int,int>>(); var keys=new HashSet<string>();
+                var commands=new List<(Device Device,Playback Player,int Generation,int Channel,int Level)>(); var keys=new HashSet<string>();
                 foreach(var output in outputs) {
                     var d=ApiDevice(output); int channel=FieldInt(output,"motor",-1,0,3); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                     int level=FieldInt(output,"level",-1,0,20); if(level<0) throw new ApiFault(400,"level is required.");
-                    if(!keys.Add(d.Address.ToString("X12")+"/"+channel)) throw new ApiFault(400,"Duplicate motor in frame."); commands.Add(Tuple.Create(d,channel,level));
+                    if(!keys.Add(d.Address.ToString("X12")+"/"+channel)) throw new ApiFault(400,"Duplicate motor in frame."); commands.Add((d,d.Player,d.Generation,channel,level));
                 }
                 request.Cancellation.ThrowIfCancellationRequested();session.Touch();
                 foreach(var command in commands) {
-                    request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); var d=command.Item1; if(d.Player==null) throw new ApiFault(409,"Toy disconnected."); session.Motors.Add(d.Address.ToString("X12")+"/"+command.Item2);
-                    if(command.Item3==0) { if(d.Player.Active(command.Item2)||d.Player.Level(command.Item2)!=0) await d.Player.Stop(command.Item2); }
-                    else if(!d.Player.UpdateSteady(command.Item2,command.Item3,duration,transition,()=>!request.Cancellation.IsCancellationRequested)) await d.Player.Start(command.Item2,new PatternSpec { mode="Steady",high=command.Item3,durationMs=duration,transitionMs=transition },20,isCurrent:()=>!request.Cancellation.IsCancellationRequested);
+                    var d=command.Device;var player=command.Player;int generation=command.Generation;
+                    bool Current()=>CurrentTarget(d,player,generation);
+                    RequireTarget(d,player,generation);session.Motors.Add(d.Address.ToString("X12")+"/"+command.Channel);
+                    if(command.Level==0) { if(player.Active(command.Channel)||player.Level(command.Channel)!=0) await player.Stop(command.Channel); }
+                    else if(!player.UpdateSteady(command.Channel,command.Level,duration,transition,Current))await player.Start(command.Channel,new PatternSpec { mode="Steady",high=command.Level,durationMs=duration,transitionMs=transition },20,isCurrent:Current);
+                    RequireTarget(d,player,generation);
                 }
                 request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); return new { accepted=true,outputs=commands.Count,ttlMs=session.TtlMs };
             }
@@ -148,7 +158,10 @@ namespace LovenseConnector
             {
                 var d=ApiDevice(body); int channel=FieldInt(body,"motor",-1,0,3); if(!d.Motors.ContainsKey(channel)) throw new ApiFault(400,"Unsupported motor channel.");
                 object value; if(!body.TryGetValue("pattern",out value)) throw new ApiFault(400,"pattern is required."); var pattern=json.Deserialize<PatternSpec>(json.Serialize(value)); if(pattern==null) throw new ApiFault(400,"pattern is required."); pattern.Validate();
-                request.Cancellation.ThrowIfCancellationRequested();session.Touch(); session.Motors.Add(d.Address.ToString("X12")+"/"+channel); await d.Player.Start(channel,pattern,20,isCurrent:()=>!request.Cancellation.IsCancellationRequested); request.Cancellation.ThrowIfCancellationRequested();RequireSession(sessionId); return new { accepted=true };
+                var player=d.Player;int generation=d.Generation;
+                RequireTarget(d,player,generation);session.Touch();session.Motors.Add(d.Address.ToString("X12")+"/"+channel);
+                await player.Start(channel,pattern,20,isCurrent:()=>CurrentTarget(d,player,generation));
+                RequireTarget(d,player,generation);return new { accepted=true };
             }
             throw new ApiFault(404,"Route not found.");
         }

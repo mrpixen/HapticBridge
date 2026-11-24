@@ -60,6 +60,8 @@ internal static partial class StudioIntegrationTests
         await CancelledApiFrameStopsBeforeNextMotor();
         await CancelledApiStartCannotEscapePlaybackWaits();
         await AcceptedApiOutputKeepsItsLease();
+        await ApiFrameCannotRetargetReconnectedDevice();
+        await ApiPatternRejectsConnectionChangeDuringAdmission();
         await ExportOrderMatchesImportSlots();
         await InvertedPatternRequiresRestart();
         await DraftRecoverySurvivesRestartAndFailures();
@@ -88,6 +90,8 @@ internal static partial class StudioIntegrationTests
         await PowerOffCannotRetargetDuringHandoff();
         await PowerOffFailureStillReleasesOriginal();
         await PendingDeviceStartsStayOnOriginalConnection();
+        await DeviceSettingsCannotReachReplacement();
+        await PowerOffAcknowledgementCannotReleaseReplacement();
         await ImportIsAtomic();
         await UnassignedMixLanesSurviveRoundTrip();
         await NoDeviceDraftRoundTripAndPreview();

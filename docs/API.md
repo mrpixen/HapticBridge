@@ -91,7 +91,7 @@ The response contains `accepted`, the number of `outputs`, and `ttlMs`.
 | `transitionMs` | Integer 0–10000; default 0; smooths nonzero steady changes |
 | `outputs` | 1–16 entries; no duplicate device/channel pair |
 
-The entire frame is validated before output begins. Bluetooth writes are ordered per device and are not a hardware-atomic operation. An I/O failure can leave some commands accepted and others unconfirmed. Omitted motors retain their previous job; send explicit zeros to stop them. Send current desired state at a measured rate instead of queuing obsolete game events.
+The entire frame is validated before output begins. Bluetooth writes are ordered per device and are not a hardware-atomic operation. An I/O failure can leave some commands accepted and others unconfirmed. Pending motor, frame and pattern requests stay bound to the connections validated for that request. A disconnection or replacement returns 409; the old request cannot start the replacement. Earlier commands in a partial frame may already have applied. Refresh devices and prepare a new request after resolving the conflict; do not replay the old event. Omitted motors retain their previous job; send explicit zeros to stop them. Send current desired state at a measured rate instead of queuing obsolete game events.
 
 ## Play a pattern
 
@@ -139,7 +139,7 @@ Errors use the HTTP status code and `{"error":"description"}`. Typical statuses:
 | 403 | Browser Origin or unexpected Host header |
 | 404 | Unknown route or device |
 | 405 | Method other than GET or POST |
-| 409 | Integration paused, session unavailable/revoked, testing active, or device disconnected |
+| 409 | Integration paused, session unavailable/revoked, testing active, or device connection changed |
 | 413 / 431 | Body over 64 KiB / headers over 8 KiB |
 | 415 | POST content type is not JSON |
 | 500 / 503 | Output failure / app closing |

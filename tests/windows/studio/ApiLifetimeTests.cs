@@ -90,6 +90,42 @@ internal static partial class StudioIntegrationTests
         }
     }
 
+    static async Task ApiFrameCannotRetargetReconnectedDevice()
+    {
+        await using var fixture=new Fixture();var session=SyntheticApiSession(fixture);
+        await NativeApi(fixture,"motor",ApiMotor(session,"000000000001",1,4));
+        await Until(()=>fixture.Levels()[0]==4,"API frame starts with an active first motor");
+        fixture.Dual.HoldNextLaneStop=true;
+        var request=NativeApi(fixture,"frame",new() { ["sessionId"]=session.Id,
+            ["outputs"]=new[]{ApiMotor(session,"000000000001",1,0),ApiMotor(session,"000000000002",0,17)} });
+        await fixture.Dual.LaneStopEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var device=fixture.Rows[2].Device;device.Player.CancelAll();device.Generation+=2;
+        var link=new FakeLink("replacement");var replacement=new Playback(link,new[]{0});device.Player=replacement;
+        fixture.Dual.ReleaseLaneStop.TrySetResult();bool rejected=false;
+        try{await request.WaitAsync(TimeSpan.FromSeconds(3));}catch(ApiFault fault)when(fault.Status==409){rejected=true;}
+        await Task.Delay(100);
+        Check(!replacement.Running&&!link.Snapshot().Any(command=>command.Nonzero),
+            "a pending multi-motor API frame cannot start output on a connection replaced during an earlier stop");
+        Check(rejected&&fixture.Levels()[0]==0,"stale API frame reports conflict while preserving the completed first stop");
+        await NativeApi(fixture,"motor",ApiMotor(session,"000000000002",0,6));
+        await Until(()=>replacement.Level(0)==6,"a fresh API request can address the reconnected device");
+    }
+
+    static async Task ApiPatternRejectsConnectionChangeDuringAdmission()
+    {
+        await using var fixture=new Fixture();var session=SyntheticApiSession(fixture);
+        Set(fixture.App,"json",new System.Web.Script.Serialization.JavaScriptSerializer());
+        var device=fixture.Rows[2].Device;var original=device.Player;var controls=Get<SemaphoreSlim>(original,"controls");
+        await controls.WaitAsync();
+        var request=NativeApi(fixture,"pattern",new() { ["sessionId"]=session.Id,["deviceId"]="000000000002",["motor"]=0,
+            ["pattern"]=new Dictionary<string,object> { ["mode"]="Steady",["high"]=17,["durationMs"]=10000 } });
+        original.CancelAll();device.Generation+=2;device.Player=new Playback(new FakeLink("replacement"),new[]{0});
+        controls.Release();bool rejected=false;
+        try{await request.WaitAsync(TimeSpan.FromSeconds(3));}catch(ApiFault fault)when(fault.Status==409){rejected=true;}
+        Check(rejected,"API pattern must report a connection conflict instead of accepted after replacement cancelled its pending admission");
+        Check(!original.Running&&!device.Player.Running,"neither old nor replacement player starts the stale API pattern");
+    }
+
     static async Task AcceptedApiOutputKeepsItsLease()
     {
         await using var fixture = new Fixture(); var session = SyntheticApiSession(fixture);
