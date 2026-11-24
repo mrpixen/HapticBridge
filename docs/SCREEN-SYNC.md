@@ -22,7 +22,7 @@ To stop feedback while spectating, freeze a spectator frame, select **Spectator 
 
 For shield damage, turn on **Read shield damage** in Calibration, choose **Shield**, then freeze and select only its current 0–50 number. Exclude the icon and regeneration reserve. Enter the visible number and use **Learn digits** if needed. Check the shield readout, then **Save calibration**. Shield reading is off by default; changing it disarms output. An unreadable or absent number is unknown, not zero, so health detection continues but some shield breaks may be missed.
 
-Depleted armor can display a dim zero. When normal shield matching fails, the reader tries local contrast within the selected digit region, retaining its usual shape-confidence checks. Keep the region tight around the number. Flat or weak-contrast crops remain unknown. You can also learn a dim shield digit; this fallback does not change health or badge recognition.
+Depleted armor can display a dim zero. When normal shield matching fails, the reader tries local contrast within the selected digit region, retaining its usual shape-confidence checks. Keep the region tight around the number. Flat or weak-contrast crops remain unknown. You can also learn a dim shield digit; health uses a separate bright-foreground contrast fallback, while badge recognition is unchanged.
 
 **Undo calibration** restores a changed region, learned digits or badge, including after Reset. It keeps the last 20 edits until the app closes. Press **Save calibration** after undoing to keep the restored setup. Feedback strengths are unchanged.
 
@@ -33,10 +33,10 @@ Under **Calibration → More**, **Save setup** exports a `.hud.json` file; **Ope
 ## Feedback
 
 - **Damage:** a brief pulse on confirmed health or enabled shield loss, stronger at lower remaining health. The slider sets its maximum. Simultaneously confirmed losses become one event; shield regeneration produces no event.
-- **Kill:** two short pulses, ending at the selected strength.
+- **Kill:** a short lead-in followed by a peak at the selected strength. Simultaneous kills add a separate peak per kill, up to six.
 - **Death:** a brief pulse when zero health is confirmed, or calibrated death text appears as your health HUD disappears. Output then disarms.
 
-Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Each motor has a 450 ms cooldown: death takes priority over kills, and kills over damage. A higher-priority cue can replace a lower-priority one; repeated or lower-priority cues are skipped during cooldown. Events assigned to different motors can play together. Muted or unassigned events do not consume a cooldown. Rapid badges that never disappear may count as one kill. Output is bounded to at most 450 ms per event, even if a device command is delayed.
+Each event and motor supports native levels 0–20. Zero disables that event or motor. Motor maximums apply to every event. Each motor has a 450 ms cooldown: death takes priority over kills, and kills over damage. A higher-priority cue can replace a lower-priority one. Distinct kills can retrigger during cooldown; repeated damage and lower-priority cues are skipped. Events assigned to different motors can play together. Muted or unassigned events do not consume a cooldown. Rapid badges that never disappear may count as one kill. Damage lasts 220 ms, death 350 ms, and a single kill 450 ms. Combined kills last up to 1.95 seconds. Delayed device commands do not extend these deadlines.
 
 Under each motor, choose **Damage**, **Kill** and **Death** independently. For example, one motor can follow damage while another handles kills. New motors start with all three choices selected. Changing a choice, strength or maximum turns output off; select **Enable output** again when ready.
 
@@ -54,7 +54,9 @@ To re-enable feedback after death or focus loss, open **Settings → Enable Scre
 
 ## Recognition limits
 
-The event preview reports matches, not authoritative game events. Use it before enabling output. Three identical health readings confirm a loss or an initial baseline. Once health is known, three gradually rising readings can update the healing baseline without waiting for healing to stop. Unknown frames break an unconfirmed healing trend. Two badge matches after a cleared interval confirm a new kill. For rapid kills without a full clear, the detector requires a deep visibility drop, two rebuilding frames and three strong matches within a short window. A brief disappearance that returns directly to the same badge does not count again. Some animations can still be missed or mistaken for a restart. Unreadable frames are ignored and sustained signal loss disarms output.
+The event preview reports matches, not authoritative game events. Use it before enabling output. Three identical health readings confirm a loss or an initial baseline. Once health is known, three gradually rising readings can update the healing baseline without waiting for healing to stop. Unknown frames break an unconfirmed healing trend. Two badge matches after a cleared interval confirm a new kill. For rapid kills without a full clear, the detector requires a deep visibility drop, two rebuilding frames and three strong matches within a short window. A brief disappearance that returns directly to the same badge does not count again. Some animations can still be missed or mistaken for a restart.
+
+Kill-feed output also requires readable positive health; detecting a feed row alone does not enable feedback. Unreadable health for over one second disarms output. Bright effects can cause this even when the feed remains visible. Once output switches off, enable it again after health is readable.
 
 Health loss from abilities or decay can resemble damage. Hits absorbed without changing health require shield reading and readable shield digits. Health loss and shield changes must each repeat across three frames; a shield baseline is discarded when that number becomes unreadable, preventing a false hit on reacquisition. Spectating and replay HUDs may resemble your own HUD: keep output off in those modes. A disappearing death HUD may produce signal loss instead of a death cue. Background effects, overlays, compressed video, HDR, font changes and animated badges can cause missed or incorrect detections.
 
@@ -62,7 +64,7 @@ Native Windows capture, calibration, damage and kill previews were tested agains
 
 ## Implementation references
 
-- [OpenCV: Otsu thresholding](https://docs.opencv.org/4.5.5/d7/d4d/tutorial_py_thresholding.html). The shield fallback uses a local luminance histogram; it adds no OpenCV runtime dependency.
+- [OpenCV: Otsu thresholding](https://docs.opencv.org/4.5.5/d7/d4d/tutorial_py_thresholding.html). The health and shield contrast fallbacks use a local luminance histogram and add no OpenCV runtime dependency.
 - [Microsoft: Windows screen capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture) and [window capture interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow).
 - [Microsoft: RegisterHotKey](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey). Both shortcut actions use separate application ID ranges and suppress keyboard auto-repeat. Conflicting bindings keep the existing working shortcut.
 - [Riot: VALORANT developer policies](https://developer.riotgames.com/docs/valorant). Avoiding game hooks is an implementation choice, not a guarantee of approval or exemption from product-registration rules.
