@@ -34,6 +34,8 @@ Event history shows **preview**, **muted**, **cooldown**, or how many motors a c
 
 Leaving the selected window, losing a usable HUD signal, resizing it, changing the source or losing a selected device disarms output. Returning to the window does not re-enable it. **Stop capture** releases capture; **Stop all** also stops the other output sources. Escape invokes Stop all while HapticBridge has focus, not while the game has focus.
 
+**Stopping output** means a device stop is still pending. **Output stop unconfirmed** stays visible if that stop fails, even after capture ends or calibration changes. It clears after a successful retry or when that playback is replaced. Stopping capture alone does not confirm that the device has stopped.
+
 To stop without switching windows, opt into **Settings → Global Stop all** and choose an unused shortcut. The status must say **Active**. This uses a Windows-registered shortcut, with no game hook or input injection, and stops all sources rather than toggling output. The setting is off by default. Registration and stopping logic have offline test coverage; delivery during actual gameplay remains unverified.
 
 ## Recognition limits

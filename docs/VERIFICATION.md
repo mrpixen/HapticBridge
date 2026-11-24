@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.11 — Capture stop status — 2026-11-23
+
+A failed device stop could leave the output level unknown while **Stop capture** displayed **output off**. Capture-error and focus-loss messages could also replace the stop warning. Screen status now preserves pending or unconfirmed stops across capture and calibration messages. A successful retry clears the warning; the change does not alter motor commands or detection thresholds.
+
+The failure was reproduced before correction. Passed: 300 Studio, 142 screen, 21 audio and 17 legacy-import assertions. New checks cover immediate and delayed stops, capture errors, focus loss and retry recovery using invisible controls, synthetic frames and fake transport. No game window, real capture or physical device was used. Live-game recognition and ARM64 execution remain unverified.
+
 ## 0.8.10 — Portable HUD setups — 2026-11-23
 
 **Calibration → More** can save and open `.hud.json` setups containing recognition regions, learned digit/badge templates and the shield-reading choice. Import preserves motor assignments and event strengths, stops output, and creates one calibration Undo action. It never starts capture or output; **Save calibration** keeps the loaded setup across launches.

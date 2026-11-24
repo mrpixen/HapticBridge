@@ -181,9 +181,39 @@ internal static partial class ScreenSyncTests
             Call(app,"SaveScreenProfile");var restored=System.Text.Json.JsonSerializer.Deserialize<ScreenProfile>(File.ReadAllText(Path.Combine(temp,"screen-profile.json")));
             Check(restored.Validate()&&restored.ReadShield&&restored.Shield.X==.5&&restored.Shield.Width==.5,"saved profile preserves shield region and enabled state");
             await CalibrationFiles(app,capture,temp,links,players);
+            capture=await CaptureStopFailures(app,capture,links,players);
             await EventRoutingAndPersistence(app,capture,temp);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static async Task<Capture> CaptureStopFailures(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
+    {
+        foreach(string reason in new[]{"stop","delayed stop","capture failure","focus loss"}) {
+            Set(app,"screenCapture",capture);capture.Foreground=true;
+            await Feed(app,capture,"100",3,"25");await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3,"25");
+            Check(Get<bool>(app,"screenArmed"),reason+" fixture starts armed with a current synthetic HUD");
+            links[0].FailZero=1;
+            if(reason=="delayed stop") {
+                links[0].Block=new TaskCompletionSource<bool>();links[0].Entered=new TaskCompletionSource<bool>();
+                var pending=Invoke(app,"StopScreenCapture");
+                try {
+                    await links[0].Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                    Check(Get<TextBlock>(app,"screenStatus").Text=="Stopping output…","capture stopping does not claim output is off before its stop returns");
+                }finally {links[0].Block.TrySetResult(true);await pending;links[0].Block=null;}
+            }
+            else if(reason=="stop")await Invoke(app,"StopScreenCapture");
+            else {
+                if(reason=="capture failure")Set(app,"screenFailure","Capture interrupted · restart preview");
+                else capture.Foreground=false;
+                await Invoke(app,"ScreenTick");
+            }
+            Check(!Get<bool>(app,"screenArmed")&&players[0].Level(0)<0&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),reason+" retains the failed device-stop warning");
+            await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);
+            Check(players[0].Level(0)==0&&!Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),reason+" clears the warning only after a confirmed retry");
+            await Invoke(app,"StopScreenCapture");capture=new Capture();
+        }
+        Set(app,"screenCapture",capture);return capture;
     }
 
     static async Task EventRoutingAndPersistence(ConnectorApp app,Capture capture,string folder)

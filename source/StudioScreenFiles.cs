@@ -26,7 +26,7 @@ namespace LovenseConnector
             if(!await stopped||closing||operation!=operatorGeneration)return;
             var dialog=new SaveFileDialog {Filter="HapticBridge HUD setups|*.hud.json",FileName="My HUD.hud.json",DefaultExt=".hud.json",AddExtension=true};
             if(dialog.ShowDialog(window)!=true)return;
-            ScreenCalibrationFiles.Save(dialog.FileName,text);screenStatus.Text="HUD setup saved";
+            ScreenCalibrationFiles.Save(dialog.FileName,text);SetScreenStatus("HUD setup saved");
         }
         async Task OpenScreenCalibration()
         {
@@ -44,7 +44,7 @@ namespace LovenseConnector
             RememberScreenCalibration();
             screenProfile.Health=incoming.Health;screenProfile.Shield=incoming.Shield;screenProfile.ReadShield=incoming.ReadShield;
             screenProfile.Badge=incoming.Badge;screenProfile.BadgeMask=incoming.BadgeMask;screenProfile.Digits=incoming.Digits;
-            RefreshScreenCalibration();screenStatus.Text="Setup loaded · Save calibration to keep it";RefreshScreenStopStatus();
+            RefreshScreenCalibration();SetScreenStatus("Setup loaded · Save calibration to keep it");
         }
     }
 }
