@@ -166,3 +166,20 @@ The server deadline and server shutdown cancel requests still waiting to dispatc
 | `position` | `value`: 0–100 | Solace Pro point move; stops after the documented 300 ms movement interval |
 
 Successful responses contain `accepted: true` and `playbackStopped: true`. Zero position moves to an endpoint. Use `/stop` to stop motion. Point moves do not automatically resume speed patterns. The existing `/motor`, `/frame` and `/pattern` endpoints also control non-vibration outputs: use their discovered channel and the common 0–20 scale. `nativeMax` reports physical command resolution; pumping maps that scale to levels 0–3.
+
+## Python client
+
+The dependency-free [example client](../examples/gateway_client.py) lists devices when run without arguments. Use the returned device ID, actuator channel and function flags. Commands below produce output or change motion settings on a compatible device:
+
+```shell
+python examples/gateway_client.py
+python examples/gateway_client.py --pulse --device DEVICE_ID --motor 7 --level 10 --seconds 2
+python examples/gateway_client.py --function stroke --device DEVICE_ID --value 20 --high 80
+python examples/gateway_client.py --function position --device DEVICE_ID --value 0
+python examples/gateway_client.py --function depth --device DEVICE_ID --value 2
+python examples/gateway_client.py --function reverse --device DEVICE_ID
+```
+
+`--motor` accepts discovered channels 0–9. Motion commands stop playback on the selected device; stroke settings apply to subsequent thrusting. Reverse toggles direction. Position zero moves to an endpoint. Each invocation releases its session when finished.
+
+For programmatic use, `Session.frame(...)` controls continuous outputs and `Session.function(device_id, function, value=None, high=None)` applies motion settings inside `with gateway.session() as session:`. Both reject an inactive session. Run the offline client checks with `python -m unittest discover -s tests -p test_gateway_client.py`.

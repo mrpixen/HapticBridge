@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native, loopback-only HapticBridge client. Python 3.10+, no dependencies.
 
-Running with no arguments lists devices. Output requires an explicit --pulse.
+Running with no arguments lists devices. Output requires an explicit --pulse or --function.
 Never publish your integration.json file or include it in a mod package.
 """
 
@@ -91,13 +91,25 @@ class Session:
                 self.finished.set()
                 # A user stop or lost lease never triggers automatic reacquisition.
 
-    def frame(self, outputs, duration_ms=1000, transition_ms=0):
+    def _request(self, route, fields):
         if self.failure:
             raise self.failure
         if self.finished.is_set() or self.session_id is None:
             raise GatewayError("The session is not active.")
-        return self.gateway.request("/frame", {
-            "sessionId": self.session_id, "outputs": outputs,
+        return self.gateway.request(route, {**fields, "sessionId": self.session_id})
+
+    def function(self, device_id, function, value=None, high=None):
+        """Apply a discovered motion setting; stops playback on that device."""
+        fields = {"deviceId": device_id, "function": function}
+        if value is not None:
+            fields["value"] = value
+        if high is not None:
+            fields["high"] = high
+        return self._request("/function", fields)
+
+    def frame(self, outputs, duration_ms=1000, transition_ms=0):
+        return self._request("/frame", {
+            "outputs": outputs,
             "durationMs": duration_ms, "transitionMs": transition_ms,
         })
 
@@ -123,20 +135,43 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     default = Path(os.environ.get("LOCALAPPDATA", ".")) / "HapticBridge" / "integration.json"
     parser.add_argument("--config", type=Path, default=default)
-    parser.add_argument("--pulse", action="store_true", help="Explicitly send a brief motor output")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--pulse", action="store_true", help="Explicitly send a brief motor output")
+    actions.add_argument("--function", choices=("reverse", "depth", "stroke", "position"),
+                         help="Apply a motion setting; stops playback on the selected device")
+    parser.add_argument("--value", type=int, help="Depth 0-3, position 0-100, or stroke lower endpoint")
+    parser.add_argument("--high", type=int, help="Stroke upper endpoint, 0-100")
     parser.add_argument("--device", help="Device id returned by this client with no arguments")
-    parser.add_argument("--motor", type=int, choices=(0, 1, 2, 3))
+    parser.add_argument("--motor", type=int, choices=range(0, 10), help="Discovered actuator channel (0-9)")
     parser.add_argument("--level", type=int, choices=range(0, 21), default=2)
     parser.add_argument("--seconds", type=float, default=2.0)
     args = parser.parse_args()
     if args.pulse and (not args.device or args.motor is None or not 0 < args.seconds <= 30):
         parser.error("--pulse requires --device, --motor, and --seconds greater than 0 and at most 30")
+    if args.function:
+        if not args.device:
+            parser.error("--function requires --device")
+        if args.function == "reverse":
+            if args.value is not None or args.high is not None:
+                parser.error("reverse takes no --value or --high; it toggles direction")
+        elif args.value is None or not 0 <= args.value <= (3 if args.function == "depth" else 100):
+            parser.error("--value is required and must be within the function's range")
+        if args.function == "stroke":
+            if args.high is None or not args.value + 20 <= args.high <= 100:
+                parser.error("stroke requires --high at least 20 above --value and at most 100")
+        elif args.high is not None:
+            parser.error("--high is only used with stroke")
+    elif args.value is not None or args.high is not None:
+        parser.error("--value and --high require --function")
     try:
         gateway = Gateway(args.config)
-        if not args.pulse:
+        if not args.pulse and not args.function:
             print(json.dumps(gateway.request("/devices"), indent=2))
             return
         with gateway.session() as session:
+            if args.function:
+                print(json.dumps(session.function(args.device, args.function, args.value, args.high)))
+                return
             session.frame([{"deviceId": args.device, "motor": args.motor, "level": args.level}],
                           duration_ms=max(1, int(args.seconds * 1000)), transition_ms=150)
             session.wait(args.seconds)
