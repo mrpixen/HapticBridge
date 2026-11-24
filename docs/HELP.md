@@ -10,6 +10,8 @@ In **Controls → Live**, choose motors and set their individual 0–20 levels. 
 
 In **Pattern**, choose a motor tab and draw its curve. Double-click to add a point, drag to edit it, or use **Edit point** for exact time and level. **More** contains pattern length, looping, presets, linking and mix files. Link selected motors to share one curve, or leave their curves independent. All selected motors use the same playback clock. Undo and Redo work on curve edits. Editing a playing curve stops it before applying changes.
 
+If a preset needs a longer cycle, it extends the shared cycle and shows the new length. One Undo restores both the curve and its previous length.
+
 Without a device, choose **Create a pattern**. **Preview** animates the curve and shows its sampled level without sending any motor commands. Editing, changing modes, or Stop all ends the preview. **More → Add unassigned curve** adds another draft; **Duplicate curve** makes an independent copy of the active curve. **Assign curve to motor** copies an unassigned curve to a connected motor. Starting device output still requires **Start selected**.
 
 **More → Invert levels** flips the active curve's strengths (`0 ↔ 20`, `6 ↔ 14`) while preserving its timing. Linked curves change together; duplicate first for an independent opposite pattern. One Undo restores the original. Changing a playing pattern stops output until **Start selected** is pressed again.

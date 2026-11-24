@@ -283,14 +283,22 @@ namespace LovenseConnector
         }
         void ApplyStudioPreset(string shape)
         {
-            int length=studioDocument.LengthMs;double[] times,levels;CurveInterpolation mode=CurveInterpolation.Smooth;
-            switch(shape){case "Pulse":times=new[]{0.0,.25,.5,.75,1.0};levels=new[]{0.0,1.0,0.0,1.0,0.0};mode=CurveInterpolation.Step;break;
-                case "Heartbeat":times=new[]{0.0,.14,.28,.42,.58,1.0};levels=new[]{0.0,1.0,0.0,.8,0.0,0.0};break;
-                case "Surge":times=new[]{0.0,.2,.6,.8,1.0};levels=new[]{0.0,.2,1.0,1.0,0.0};break;
-                case "Staircase":times=new[]{0.0,.25,.5,.75,1.0};levels=new[]{0.0,.25,.5,1.0,0.0};mode=CurveInterpolation.Step;break;
-                default:times=new[]{0.0,.25,.5,.75,1.0};levels=new[]{0.0,.5,1.0,.5,0.0};break;}
-            studioDocument.ReplaceCurve(studioEditor.ActiveLaneId,times.Select((t,i)=>new CurvePoint((int)Math.Round(t*length),(int)Math.Round(levels[i]*20))),mode);
+            int previousLength=studioDocument.LengthMs;int[] times;double[] levels;CurveInterpolation mode=CurveInterpolation.Smooth;
+            switch(shape){case "Pulse":times=new[]{0,25,50,75,100};levels=new[]{0.0,1.0,0.0,1.0,0.0};mode=CurveInterpolation.Step;break;
+                case "Heartbeat":times=new[]{0,14,28,42,58,100};levels=new[]{0.0,1.0,0.0,.8,0.0,0.0};break;
+                case "Surge":times=new[]{0,20,60,80,100};levels=new[]{0.0,.2,1.0,1.0,0.0};break;
+                case "Staircase":times=new[]{0,25,50,75,100};levels=new[]{0.0,.25,.5,1.0,0.0};mode=CurveInterpolation.Step;break;
+                default:times=new[]{0,25,50,75,100};levels=new[]{0.0,.5,1.0,.5,0.0};break;}
+            int smallestGap=times.Zip(times.Skip(1),(a,b)=>b-a).Min();
+            int length=Math.Max(previousLength,(CurveDocument.MinimumPointSpacingMs*100+smallestGap-1)/smallestGap);
+            string active=studioEditor.ActiveLaneId;studioDocument.BeginEdit();
+            try {
+                studioDocument.SetLength(length);
+                studioDocument.ReplaceCurve(active,times.Select((t,i)=>new CurvePoint((int)Math.Round((decimal)t*length/100),(int)Math.Round(levels[i]*20))),mode);
+                studioDocument.CommitEdit();
+            }catch { studioDocument.CancelEdit();throw; }
             bool wasLoading=studioLoading;studioLoading=true;try{studioPresetChoice.SelectedItem=shape;}finally{studioLoading=wasLoading;}
+            if(length!=previousLength)hint.Text=shape+" applied · cycle increased to "+length+" ms";
         }
 
         void RefreshStudioMotors()

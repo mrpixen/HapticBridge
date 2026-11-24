@@ -147,4 +147,26 @@ internal static partial class StudioIntegrationTests
         }
         Check(retargeted.Count==0,"pending device starts must not switch to a replacement connection: "+string.Join(", ",retargeted));
     }
+
+    static async Task ShortCyclesAcceptBuiltInPresets()
+    {
+        await using var fixture=new Fixture(false);Call(fixture.App,"AddStudioDraft");
+        var document=Get<CurveDocument>(fixture.App,"studioDocument");var editor=Get<CurveEditorControl>(fixture.App,"studioEditor");
+        string active=editor.ActiveLaneId;document.SetLength(200);document.ClearHistory();
+        foreach(var preset in new[]{(Name:"Wave",Length:400),(Name:"Pulse",Length:400),(Name:"Heartbeat",Length:715),(Name:"Surge",Length:500),(Name:"Staircase",Length:400)})
+        {
+            var before=document.ExportPoints(active);Call(fixture.App,"ApplyStudioPreset",preset.Name);
+            Check(document.LengthMs==preset.Length&&document.GetLane(active).Points.Zip(document.GetLane(active).Points.Skip(1),(a,b)=>b.Ms-a.Ms).All(gap=>gap>=100),
+                preset.Name+" expands a short cycle just enough to keep valid point spacing");
+            Check(Get<ComboBox>(fixture.App,"studioPresetChoice").SelectedItem as string==preset.Name&&Get<TextBox>(fixture.App,"studioLength").Text==preset.Length.ToString(),
+                "preset selection and cycle field reflect the applied "+preset.Name+" shape");
+            Check(document.Undo()&&document.LengthMs==200&&document.ExportPoints(active).SequenceEqual(before)&&!document.CanUndo,
+                "one Undo restores the original curve and short cycle after "+preset.Name);
+            Check(document.Redo()&&document.LengthMs==preset.Length,"Redo restores "+preset.Name+" and its required cycle");
+            document.Undo();document.ClearHistory();
+        }
+        document.SetLength(5000);document.ClearHistory();Call(fixture.App,"ApplyStudioPreset","Heartbeat");
+        Check(document.LengthMs==5000,"a preset preserves a cycle that already has enough spacing");
+        Check(fixture.Commands().Length==0,"building, undoing and redoing presets never sends motor output");
+    }
 }

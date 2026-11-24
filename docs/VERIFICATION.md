@@ -1,5 +1,11 @@
 # Release verification
 
+## 0.8.7 — Presets on short cycles — 2026-11-23
+
+All five built-in presets rejected the allowed 200 ms cycle because their points were too close together. Applying a preset now increases the shared cycle only when its spacing requires it, preserving longer cycles. The curve and length change form one Undo/Redo action, and the controls show the applied preset and length.
+
+The failure was reproduced with an invisible editor and no devices. Regression checks cover every preset, valid spacing, unchanged longer cycles, Undo/Redo, matching controls and no motor commands. This changes preset authoring; hardware timing and real-game recognition are unchanged.
+
 ## 0.8.6 — Settings and integration requests — 2026-11-23
 
 Two more reconnection bugs were reproduced before correction. Apply settings could send its remaining commands to a replacement connection. A multi-motor API frame could start a reconnected motor while waiting for an earlier motor to stop; a cancelled pattern admission could also report acceptance after its connection changed.

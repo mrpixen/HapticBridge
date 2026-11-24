@@ -90,6 +90,7 @@ internal static partial class StudioIntegrationTests
         await PowerOffCannotRetargetDuringHandoff();
         await PowerOffFailureStillReleasesOriginal();
         await PendingDeviceStartsStayOnOriginalConnection();
+        await ShortCyclesAcceptBuiltInPresets();
         await DeviceSettingsCannotReachReplacement();
         await PowerOffAcknowledgementCannotReleaseReplacement();
         await ImportIsAtomic();
