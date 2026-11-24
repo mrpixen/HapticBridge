@@ -1,5 +1,13 @@
 # Release verification
 
+## Calibrated death text — development branch, 2026-11-24
+
+The production image reader and temporal filter were replayed together on three private recording segments at 10 fps, using one learned KILLED YOU template. The 350-frame calibration segment produced one death at 56.6 seconds, and a separate 100-frame segment produced one at 117.0 seconds without retraining. A 450-frame negative segment with a lingering report produced zero deaths. These are limited recorded examples, not a general accuracy rate.
+
+Mean image-reading and event-filter time was 1.7–2.5 ms per frame on the test PC, excluding video decoding and capture. The reader searches vertically for the calibrated text. A new marker must coincide with recent loss of established positive health; report presence alone is insufficient. The existing one-second HUD-loss cutoff remains unchanged.
+
+Passed: 18 core suites (272 screen assertions), 343 native Studio assertions and 211 Screen sync assertions. Synthetic transport checks cover bounded death output, no automatic rearming, old-report suppression, later zero-health deduplication, calibration edits and undo. Portable setups use version 4; older setups leave death-text detection disabled. No live game capture, physical output or installed-app replacement was performed. Recordings and learned templates are not distributed.
+
 ## Recorded spectator follow-up — 2026-11-24
 
 Replayed 956 frames from a separate recorded match using a spectator marker learned from another recording. There were no suspected or confirmed spectator matches in 715 sampled own-player frames before death and after respawn. Within a 111-frame spectator window, 85 frames matched the marker threshold and 75 met consecutive confirmation. This is limited cross-recording evidence, not a general accuracy rate.
