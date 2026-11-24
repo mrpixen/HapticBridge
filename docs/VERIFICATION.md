@@ -4,7 +4,7 @@
 
 The Sound tab can select one visible program and its child processes using Windows process loopback (build 20348 or later). Selection and refresh stop feedback; Start is explicit. Process identity includes its start time, so PID reuse does not silently select a different program. Capture failure has no whole-system fallback. Program labels use process names, not document titles or command lines.
 
-Offline checks passed: 15 capture lifecycle, 31 adapter/identity, 26 audio routing, 350 Studio, 236 Screen sync and 17 legacy-import assertions. Native argument layout, late activation disposal, silent buffers, process replacement and source switching use fake activation, streams and transport. Final build passed without warnings. Actual Windows audio isolation and visible layout remain unverified. This work is on `feature/process-audio`, not in the published release.
+Offline checks passed: 15 capture lifecycle, 31 adapter/identity, 28 audio routing, 350 Studio, 236 Screen sync and 17 legacy-import assertions. Native argument layout, late activation disposal, silent buffers, process replacement and source switching use fake activation, streams and transport. Unsupported Windows is rejected before stopping independent output or enumerating programs. Both x64 and ARM64 single-file builds passed. Actual Windows audio isolation, ARM64 execution and visible layout remain unverified. This work is on `feature/process-audio`, not in the published release.
 
 ## Unreleased — Stable output motor labels
 

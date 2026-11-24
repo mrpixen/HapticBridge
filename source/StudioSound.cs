@@ -12,6 +12,8 @@ namespace LovenseConnector
         ComboBox audioSourceChoice,audioProgramChoice;
         Func<AudioProgram[]> audioProgramProvider=null;
         Func<AudioProgram,IAudioSource> audioProgramFactory=null;
+        Func<bool> audioProgramSupport=null;
+        bool ProgramAudioSupported => (audioProgramSupport??(()=>WindowsProcessAudio.Supported))();
         bool audioOutputsLoading, audioOutputsLoaded;
         Func<AudioOutput[]> audioOutputProvider=null;
         Func<string,IAudioSource> audioSourceFactory=null;
@@ -64,6 +66,11 @@ namespace LovenseConnector
             await stopped;
             if(generation!=audioGeneration||audioCapture!=null)return;
             try {
+                if(!ProgramAudioSupported) {
+                    audioOutputsLoading=true;
+                    try {audioProgramChoice.Items.Clear();}finally {audioOutputsLoading=false;}
+                    audioLabel.Text=AudioStoppedMessage("Program audio needs a newer Windows version · use Audio output instead");return;
+                }
                 var programs=(audioProgramProvider??AudioProgram.List)();
                 audioOutputsLoading=true;
                 try {

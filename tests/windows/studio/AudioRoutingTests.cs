@@ -88,6 +88,7 @@ internal static class AudioRoutingTests
             Check(player.Active(0)&&link.ZeroCommands==zeros,"old sound Stop cannot revoke a newer manual owner");
             await GuardRetryAtWriteReady();
             var programs=new[]{new AudioProgram(1234,5678,"Example")};
+            Set(app,"audioProgramSupport",new Func<bool>(()=>true));
             Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>programs));
             AudioProgram requestedProgram=null;var programCapture=new Source();
             Set(app,"audioProgramFactory",new Func<AudioProgram,IAudioSource>(p=>{requestedProgram=p;return programCapture;}));
@@ -101,6 +102,14 @@ internal static class AudioRoutingTests
             programs=new[]{new AudioProgram(1234,5679,"Example restarted")};
             await Invoke(app,"RefreshAudioPrograms");
             Check(programCapture.Disposed&&!player.Active(0)&&programPicker.SelectedItem==null,"refresh stops output and does not retain a reused process id");
+            Set(app,"audioProgramSupport",new Func<bool>(()=>false));
+            Set(app,"audioProgramProvider",new Func<AudioProgram[]>(()=>throw new Exception("Unsupported Windows must not enumerate programs")));
+            await Invoke(app,"RefreshAudioPrograms");
+            Check(programPicker.Items.Count==0&&label.Text.Contains("newer Windows"),"unsupported Windows explains availability without enumerating processes");
+            await player.Start(0,new PatternSpec { mode="Steady",high=7,durationMs=2000 },20);
+            zeros=link.ZeroCommands;bool unsupported=false;
+            try {await Invoke(app,"StartAudio");}catch(PlatformNotSupportedException){unsupported=true;}
+            Check(unsupported&&link.ZeroCommands==zeros&&player.Active(0),"unsupported program capture is rejected before disrupting independent output");
             Get<ComboBox>(app,"audioSourceChoice").SelectedIndex=0;
             Check(Get<IAudioSource>(app,"audioCapture")==null,"switching source mode never automatically starts capture");
         }finally{await Invoke(app,"StopAudioMotors");await player.StopAll();Get<SemaphoreSlim>(app,"feelWriteGate").Dispose();window.Close();}

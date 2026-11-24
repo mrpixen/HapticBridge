@@ -68,6 +68,7 @@ namespace LovenseConnector
             string outputId=(audioOutputChoice?.SelectedItem as AudioOutput)?.Id;
             bool programMode=audioSourceChoice?.SelectedIndex==1;
             var program=audioProgramChoice?.SelectedItem as AudioProgram;
+            if(programMode&&!ProgramAudioSupported)throw new PlatformNotSupportedException("Program audio needs a newer Windows version. Choose Audio output instead.");
             if(programMode&&program==null)throw new InvalidOperationException("Choose a program first.");
             await Task.WhenAll(devices.Values.Where(d=>d.Player!=null).Select(d=>d.Player.StopAll()));
             if(generation!=audioGeneration||operation!=operatorGeneration||closing||integration!=null)return;
