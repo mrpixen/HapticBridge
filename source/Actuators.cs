@@ -78,10 +78,16 @@ namespace LovenseConnector
         }
         public Actuator Get(int channel)=>Outputs.FirstOrDefault(a=>a.Channel==channel)??throw new ArgumentException("Unsupported actuator channel.");
         public string Command(int channel,int level)=>Get(channel).Command(level);
-        public void SetStroke(int low,int high)
+        public void ValidateStroke(int low,int high)
         {
             if(!HasStroke)throw new NotSupportedException("Stroke range is not supported by this model.");
-            if(low<0||high>100||high-low<20)throw new ArgumentException("Stroke endpoints must be 0–100 and at least 20 apart.");
+            // Bound both operands before subtraction: arbitrary integers from the
+            // controls must never wrap into an apparently valid physical range.
+            if(low<0||low>100||high<0||high>100||high-low<20)throw new ArgumentException("Stroke endpoints must be 0–100 and at least 20 apart.");
+        }
+        public void SetStroke(int low,int high)
+        {
+            ValidateStroke(low,high);
             stroke=Tuple.Create(low,high);
             PropertyChanged?.Invoke(this,new System.ComponentModel.PropertyChangedEventArgs(nameof(StrokeLow)));
             PropertyChanged?.Invoke(this,new System.ComponentModel.PropertyChangedEventArgs(nameof(StrokeHigh)));

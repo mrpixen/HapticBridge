@@ -11,9 +11,7 @@ namespace LovenseConnector
             switch(function) {
                 case "depth":profile.DepthCommand(value);break;
                 case "position":profile.PositionCommand(value);break;
-                case "stroke":
-                    if(!profile.HasStroke)throw new NotSupportedException("Stroke range is not supported by this model.");
-                    if(value<0||high>100||high-value<20)throw new ArgumentException("Stroke endpoints must be 0–100 and at least 20 apart.");break;
+                case "stroke":profile.ValidateStroke(value,high);break;
                 case "reverse":if(!profile.HasRotation)throw new NotSupportedException("Rotation is not supported by this model.");break;
                 default:throw new ArgumentException("Unknown device function.");
             }

@@ -1,5 +1,9 @@
 # Release verification
 
+## Unreleased - Stroke range validation
+
+An actuator regression reproduced extreme integer endpoints being accepted after subtraction overflow. Both stroke endpoints are now checked against 0-100 before the minimum-span calculation, using shared validation for direct settings and playback preflight. Targeted actuator tests pass: invalid values preserve the previous range and send no commands, while valid minimum-span ranges at both endpoints still work. Physical motion compatibility remains unverified.
+
 ## Unreleased - VALORANT kill feed
 
 Feedback follow-up: a synthetic transport test reproduced a second rapid kill being dropped by the motor cooldown. Distinct kills now retrigger their reward; simultaneous kills are combined into one bounded pattern rather than overwriting each other. Damage cooldown and death priority remain in force. Passed 18 core suites (293 screen-detection assertions), 243 Screen sync assertions and 350 Studio assertions. Fake transports verified two full-strength peaks per assigned motor for a same-frame double kill, stopped output afterward, and death preemption.
