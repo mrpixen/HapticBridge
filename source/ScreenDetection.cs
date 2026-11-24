@@ -22,8 +22,8 @@ namespace LovenseConnector
     public sealed class ScreenProfile
     {
         public int Version { get; set; }=1;
-        public HudRegion Health { get; set; }=new HudRegion { X=.265,Y=.915,Width=.065,Height=.055 };
-        public HudRegion Shield { get; set; }=new HudRegion { X=.225,Y=.925,Width=.035,Height=.04 };
+        public HudRegion Health { get; set; }=new HudRegion { X=.3005,Y=.9315,Width=.04,Height=.036 };
+        public HudRegion Shield { get; set; }=new HudRegion { X=.2828125,Y=.9425925925925925,Width=.0125,Height=.014814814814814815 };
         public bool ReadShield { get; set; }
         public bool ReadKillFeed { get; set; }
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
