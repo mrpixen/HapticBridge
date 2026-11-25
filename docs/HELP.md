@@ -32,7 +32,7 @@ For a single app, choose **One program**, select its process name, then start. T
 
 ## Screen sync
 
-Choose a window and **Start preview**, then calibrate your health digits and kill badge. Optional shield reading detects damage absorbed by shields. Each motor has its own maximum and **Damage**, **Kill** and **Death** choices. Feedback settings save automatically; calibration uses **Save calibration**. Changes turn output off until **Enable output** is selected again. See **SCREEN-SYNC** for setup and recognition limits.
+Choose **VALORANT → Start preview**. Automatic setup enables health, shield, kill-feed and ammo reading while keeping saved calibration. Check the preview, then **Enable output**. Set strengths and kill/death durations in Feedback; each motor has independent event choices. Use Calibration only to correct a missed HUD region. See **SCREEN-SYNC** for recognition limits.
 
 **Calibration → More → Save setup** keeps a separate `.hud.json` file. **Open setup** restores its regions and learned templates without changing motor choices or strengths. Loading is undoable and leaves output off. After checking it, **Save calibration** keeps the loaded setup across launches.
 

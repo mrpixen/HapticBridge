@@ -16,7 +16,7 @@ internal static partial class ScreenSyncTests
         string path=Path.Combine(folder,"Synthetic HUD.hud.json");ScreenCalibrationFiles.Save(path,original);
         using(var document=JsonDocument.Parse(original)) {
             var names=document.RootElement.EnumerateObject().Select(p=>p.Name).OrderBy(s=>s).ToArray();
-            Check(names.SequenceEqual(new[]{"Format","Version","Health","Shield","ReadShield","ReadKillFeed","Badge","BadgeMask","BadgeVariants","Spectator","SpectatorMask","DeathMarker","DeathMarkerMask","DeathMarkerFrameWidth","DeathMarkerFrameHeight","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
+            Check(names.SequenceEqual(new[]{"Ammo","Reserve","ReadAmmo","Format","Version","Health","Shield","ReadShield","ReadKillFeed","Badge","BadgeMask","BadgeVariants","Spectator","SpectatorMask","DeathMarker","DeathMarkerMask","DeathMarkerFrameWidth","DeathMarkerFrameHeight","Digits"}.OrderBy(s=>s)),"portable setup exports only its format and calibration fields");
         }
         var legacy=ScreenCalibrationFiles.Decode(original);legacy.Version=1;
         Check(legacy.Valid(),"version one calibration remains readable with no additional badges");
@@ -26,7 +26,7 @@ internal static partial class ScreenSyncTests
         var bank=ScreenCalibrationFiles.Decode(original);bank.BadgeMask=new byte[1024];bank.BadgeMask[0]=1;
         bank.BadgeVariants.Add(Enumerable.Repeat((byte)1,1024).ToArray());
         var bankCopy=ScreenCalibrationFiles.Decode(ScreenCalibrationFiles.Encode(bank.Snapshot()));
-        Check(bankCopy.Version==5&&bankCopy.BadgeVariants.Count==1&&bankCopy.BadgeMask[0]==1,"portable current version preserves multiple badge appearances");
+        Check(bankCopy.Version==6&&bankCopy.BadgeVariants.Count==1&&bankCopy.BadgeMask[0]==1,"portable current version preserves multiple badge appearances");
         var snapshot=bankCopy.Snapshot();bankCopy.BadgeVariants[0][0]=0;
         Check(snapshot.BadgeVariants[0][0]==1,"badge variants are deep copied");
         bank.Version=1;Check(!bank.Valid(),"version one cannot claim multiple badge support");

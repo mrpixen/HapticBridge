@@ -13,20 +13,25 @@ namespace LovenseConnector
     {
         public bool Enabled { get; set; }=true;
         public int Maximum { get; set; }=20;
-        public int Events { get; set; }=7;
-        public bool Valid()=>Maximum>=0&&Maximum<=20&&Events>=0&&Events<=7;
-        public static int EventMask(string kind)=>kind=="Damage"?1:kind=="Kill"?2:kind=="Death"?4:0;
+        public int Events { get; set; }=31;
+        public bool Valid()=>Maximum>=0&&Maximum<=20&&Events>=0&&Events<=31;
+        public static int EventMask(string kind)=>kind=="Damage"?1:kind=="Kill"?2:kind=="Death"?4:kind=="Shoot"?8:kind=="Reload"?16:0;
         public static int EventPriority(string kind)=>kind=="Death"?3:kind=="Kill"?2:kind=="Damage"?1:0;
     }
 
     internal sealed class ScreenFeedbackPreferences
     {
-        public int Version { get; set; }=1;
+        public int Version { get; set; }=2;
+        public bool AutoSetupValorant { get; set; }=true;
         public int DamageLevel { get; set; }=14;
+        public int ShootLevel {get;set;}=8;
+        public int ReloadLevel {get;set;}=10;
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
+        public int KillDurationMs { get; set; }=1500;
+        public int DeathDurationMs { get; set; }=2000;
         public Dictionary<string,ScreenMotorFeedback> Motors { get; set; }=new Dictionary<string,ScreenMotorFeedback>();
-        public bool Valid()=>Version==1&&DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20&&
+        public bool Valid()=>(Version==1||Version==2)&&ShootLevel>=0&&ShootLevel<=20&&ReloadLevel>=0&&ReloadLevel<=20&&DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20&&KillDurationMs>=450&&KillDurationMs<=5000&&DeathDurationMs>=350&&DeathDurationMs<=5000&&
             Motors!=null&&Motors.Count<=256&&Motors.All(p=>p.Key.Length==64&&p.Key.All(Uri.IsHexDigit)&&p.Value!=null&&p.Value.Valid());
     }
 
@@ -42,14 +47,16 @@ namespace LovenseConnector
         void LoadScreenFeedback()
         {
             screenFeedback=new ScreenFeedbackPreferences { DamageLevel=screenProfile.DamageLevel,KillLevel=screenProfile.KillLevel,DeathLevel=screenProfile.DeathLevel };
+            screenProfile.KillDurationMs=screenFeedback.KillDurationMs;screenProfile.DeathDurationMs=screenFeedback.DeathDurationMs;
             screenFeedbackLoadFailed=false;
             try {
                 if(!File.Exists(ScreenFeedbackPath))return;
                 if(new FileInfo(ScreenFeedbackPath).Length>100000)throw new InvalidDataException();
                 var loaded=json.Deserialize<ScreenFeedbackPreferences>(File.ReadAllText(ScreenFeedbackPath));
                 if(loaded==null||!loaded.Valid())throw new InvalidDataException();
+                if(loaded.Version==1){foreach(var motor in loaded.Motors.Values)if(motor.Events!=0)motor.Events|=24;loaded.Version=2;}
                 screenFeedback=loaded;
-                screenProfile.DamageLevel=loaded.DamageLevel;screenProfile.KillLevel=loaded.KillLevel;screenProfile.DeathLevel=loaded.DeathLevel;
+                screenProfile.DamageLevel=loaded.DamageLevel;screenProfile.KillLevel=loaded.KillLevel;screenProfile.DeathLevel=loaded.DeathLevel;screenProfile.KillDurationMs=loaded.KillDurationMs;screenProfile.DeathDurationMs=loaded.DeathDurationMs;
             }catch {screenFeedbackLoadFailed=true;}
         }
 
@@ -57,7 +64,7 @@ namespace LovenseConnector
         {
             string temporary=ScreenFeedbackPath+".tmp";
             try {
-                screenFeedback.DamageLevel=screenProfile.DamageLevel;screenFeedback.KillLevel=screenProfile.KillLevel;screenFeedback.DeathLevel=screenProfile.DeathLevel;
+                screenFeedback.DamageLevel=screenProfile.DamageLevel;screenFeedback.KillLevel=screenProfile.KillLevel;screenFeedback.DeathLevel=screenProfile.DeathLevel;screenFeedback.KillDurationMs=screenProfile.KillDurationMs;screenFeedback.DeathDurationMs=screenProfile.DeathDurationMs;
                 if(!screenFeedback.Valid())throw new InvalidDataException();
                 Directory.CreateDirectory(Path.GetDirectoryName(ScreenFeedbackPath));
                 File.WriteAllText(temporary,json.Serialize(screenFeedback));

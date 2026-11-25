@@ -233,8 +233,47 @@ internal static partial class ScreenSyncTests
             capture=await StoppedCaptureDiscardsPendingTick(app,capture,links);
             capture=await ScreenShortcutGameplay(app,capture,links,players);
             await EventRoutingAndPersistence(app,capture,temp);
+            await LongerCombatFeedback(app,capture,links,players);
+            AutomaticGameSetup(app);
         }finally {foreach(var link in links)link.Block?.TrySetResult(true);await Invoke(app,"StopScreenCapture");foreach(var p in players)await p.StopAll();window.Close();Directory.Delete(temp,true);}
         Console.WriteLine("Screen sync: "+checks+" assertions passed (synthetic pixels and transport; no screen or hardware access).");
+    }
+
+    static void AutomaticGameSetup(ConnectorApp app)
+    {
+        var profile=Get<ScreenProfile>(app,"screenProfile");var prefs=Get<ScreenFeedbackPreferences>(app,"screenFeedback");
+        profile.ReadShield=profile.ReadKillFeed=profile.ReadAmmo=false;var health=profile.Health;var digits=profile.Digits.ToArray();
+        prefs.AutoSetupValorant=true;Call(app,"ApplyScreenGameSetup","Browser - VALORANT guide");
+        Check(!profile.ReadShield&&!profile.ReadAmmo,"unrelated window title cannot activate game setup");
+        Call(app,"ApplyScreenGameSetup","VALORANT");
+        Check(profile.ReadShield&&profile.ReadKillFeed&&profile.ReadAmmo&&ReferenceEquals(health,profile.Health)&&profile.Digits.SequenceEqual(digits),"automatic setup enables all available readers and preserves learned calibration");
+        Check(!Get<bool>(app,"screenArmed"),"automatic detector setup does not send motor commands");
+        prefs.AutoSetupValorant=false;profile.ReadShield=false;Call(app,"ApplyScreenGameSetup","VALORANT");
+        Check(!profile.ReadShield,"manual mode survives capture restarts");
+    }
+    static async Task LongerCombatFeedback(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
+    {
+        var profile=Get<ScreenProfile>(app,"screenProfile");profile.KillDurationMs=1500;profile.DeathDurationMs=2000;
+        profile.ReadShield=false;profile.ReadAmmo=false;profile.Health=new HudRegion {Width=1,Height=1};
+        foreach(var route in ((IDictionary)Get<object>(app,"screenRoutes")).Values.Cast<object>()) {
+            Get<CheckBox>(route,"Include").IsChecked=true;
+            foreach(var choice in Get<Dictionary<string,CheckBox>>(route,"Events").Values)choice.IsChecked=true;
+        }
+        Set(app,"screenCapture",capture);Set(app,"screenFrame",Pixels("100"));await Invoke(app,"ArmScreen");
+        await Invoke(app,"SendScreenCue",new HudEvent {Kind="Kill",Health=100});
+        for(int tick=0;tick<8;tick++){await Task.Delay(100);Set(app,"screenFrame",Pixels("100"));}
+        Check(players.Any(p=>p.Active(0)),"long kill reward remains active beyond old 450ms duration");
+        var times=CueTimes(app);await Invoke(app,"SendScreenCue",new HudEvent {Kind="Damage",Health=80,Amount=20});
+        Check(times.SequenceEqual(CueTimes(app)),"lower priority damage cannot truncate the longer kill reward");
+        await Invoke(app,"DisarmScreen");Set(app,"screenFrame",Pixels("100"));await Invoke(app,"ArmScreen");
+        await Invoke(app,"SendScreenCue",new HudEvent {Kind="Death",Health=0});
+        await Task.Delay(650);Set(app,"screenFrame",Pixels("100"));
+        Check(players.Any(p=>p.Active(0)),"long death feedback survives old deadline");
+        await Invoke(app,"DisarmScreen");Check(players.All(p=>p.Level(0)==0),"manual stop still ends long rewards immediately");
+        Set(app,"screenFrame",Pixels("100"));await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3);await Feed(app,capture,"0",3);await Feed(app,capture,"",9);
+        Check(players.Any(p=>p.Active(0))&&!Get<bool>(app,"screenWaiting"),"fresh blank death HUD does not cut a two-second death cue at one second");
+        await Invoke(app,"DisarmScreen");
+
     }
 
     static async Task<Capture> CaptureStopFailures(ConnectorApp app,Capture capture,Link[] links,Playback[] players)
@@ -323,7 +362,7 @@ internal static partial class ScreenSyncTests
             link.Block.TrySetResult(true);await Task.Delay(200);link.Block=null;
             Check(link.Positive.Count==before,"an excluded event cannot escape an already-queued device write");
             second["Kill"].IsChecked=true;
-            first["Damage"].IsChecked=false;first["Death"].IsChecked=false;second["Kill"].IsChecked=false;
+            foreach(var choice in routes.Values.Cast<object>().SelectMany(r=>Get<Dictionary<string,CheckBox>>(r,"Events").Values))choice.IsChecked=false;
             bool rejected=false;Set(app,"screenFrame",Pixels("100"));try{await Invoke(app,"ArmScreen");}catch(ArgumentException){rejected=true;}
             Check(rejected&&!Get<bool>(app,"screenArmed"),"all event assignments off cannot arm an empty route");
             first["Damage"].IsChecked=true;first["Death"].IsChecked=true;second["Kill"].IsChecked=true;

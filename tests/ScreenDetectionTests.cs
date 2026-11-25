@@ -5,6 +5,21 @@ using LovenseConnector;
 internal static class ScreenDetectionTests
 {
     static int checks;
+    static void AmmoEvents()
+    {
+        var filter=new HudAmmoFilter();double time=0;
+        HudEvent Push(int? ammo,int? reserve,int health=100)=>filter.Push(new HudReading {Health=health,Confidence=1,Ammo=ammo,Reserve=reserve,AmmoConfidence=1,ReserveConfidence=1},time+=.1);
+        Check(Push(30,60)==null&&Push(30,60)==null,"ammo establishes silent baseline");
+        Check(Push(29,60)==null&&Push(28,60)?.Kind=="Shoot","continuous firing confirms magazine loss");
+        Check(Push(28,60)==null&&Push(28,60)==null,"unchanged ammo never repeats shots");
+        Check(Push(30,58)==null&&Push(30,58)?.Kind=="Reload","reload conserves magazine plus reserve");
+        Check(Push(30,60)==null&&Push(30,60)==null,"free ammo refill is not a reload");
+        Check(Push(12,36)==null&&Push(12,36)==null,"weapon switch resets without cue");
+        Push(null,null);Check(Push(10,36)==null&&Push(10,36)==null,"missing HUD establishes a new baseline without catch-up shots");
+        Push(0,36,0);Check(Push(30,60)==null&&Push(30,60)==null,"respawn starts silently");
+        time+=1;Check(Push(20,60)==null&&Push(20,60)==null,"capture gap does not manufacture shots");
+        Push(19,60);Check(Push(20,60)==null&&Push(20,60)==null,"one-frame misread cannot trigger shooting");
+    }
     static void Check(bool ok,string name){checks++;if(!ok)throw new Exception("Screen detection: "+name);}
     static HudReading Read(int? health,double badge=0,double confidence=1)=>new HudReading { Health=health,BadgeScore=badge,Confidence=confidence };
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
@@ -120,6 +135,7 @@ internal static class ScreenDetectionTests
     }
     static int Main()
     {
+        AmmoEvents();
         KillFeedTracking();
         VerticalDeathText();
         DeathMarkerConfirmation();

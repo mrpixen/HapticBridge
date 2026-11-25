@@ -26,6 +26,9 @@ namespace LovenseConnector
         public HudRegion Shield { get; set; }=new HudRegion { X=.2828125,Y=.9425925925925925,Width=.0125,Height=.014814814814814815 };
         public bool ReadShield { get; set; }
         public bool ReadKillFeed { get; set; }
+        public bool ReadAmmo { get; set; }
+        public HudRegion Ammo { get; set; }=new HudRegion {X=.65,Y=1005.0/1080,Width=82.0/1920,Height=43.0/1080};
+        public HudRegion Reserve { get; set; }=new HudRegion {X=1353.0/1920,Y=1018.0/1080,Width=24.0/1920,Height=16.0/1080};
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public HudRegion Spectator { get; set; }=new HudRegion {X=.065625,Y=.785185,Width=.104167,Height=.02963};
         public byte[] SpectatorMask { get; set; }
@@ -39,14 +42,16 @@ namespace LovenseConnector
         public int DamageLevel { get; set; }=14;
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
-        public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
+        public int KillDurationMs { get; set; }=450;
+        public int DeathDurationMs { get; set; }=350;
+        public bool Validate() => Version==1&&Ammo!=null&&Ammo.Valid&&Reserve!=null&&Reserve.Valid&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
             Spectator!=null&&Spectator.Valid&&(SpectatorMask==null||SpectatorMask.Length==4096&&SpectatorMask.All(x=>x<=1))&&
             DeathMarker!=null&&DeathMarker.Valid&&(DeathMarkerMask==null||DeathMarkerMask.Length==4096&&DeathMarkerMask.All(x=>x<=1))&&
             (DeathMarkerFrameWidth==0&&DeathMarkerFrameHeight==0||DeathMarkerFrameWidth>=8&&DeathMarkerFrameWidth<=8192&&DeathMarkerFrameHeight>=8&&DeathMarkerFrameHeight<=4320)&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
             BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
-            DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20;
+            DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20&&KillDurationMs>=450&&KillDurationMs<=5000&&DeathDurationMs>=350&&DeathDurationMs<=5000;
     }
     internal sealed class ScreenPixels
     {
@@ -60,6 +65,8 @@ namespace LovenseConnector
     {
         public int? Health;
         public int? Shield;
+        public int? Ammo,Reserve;
+        public double AmmoConfidence,ReserveConfidence;
         public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore, DeathMarkerScore;
         public HudKillFeedRow[] KillFeed;
     }
@@ -74,6 +81,33 @@ namespace LovenseConnector
             if(kills.Length<2)return all;
             var combined=new HudEvent {Kind="Kill",Health=kills[0].Health,Count=Math.Min(6,kills.Sum(e=>Math.Clamp(e.Count,1,6)))};
             return all.Where(e=>e.Kind!="Kill").Append(combined).ToArray();
+        }
+    }
+    internal sealed class HudAmmoFilter
+    {
+        int? magazine,reserve,pendingMagazine,pendingReserve;
+        int repeats;double last=-1;
+        public void Reset(){magazine=reserve=pendingMagazine=pendingReserve=null;repeats=0;last=-1;}
+        public HudEvent Push(HudReading read,double time)
+        {
+            if(!double.IsFinite(time)||time<=last)return null;
+            if(last>=0&&time-last>.5)Reset();last=time;
+            if(read==null||read.Health<=0||!read.Health.HasValue||!double.IsFinite(read.Confidence)||read.Confidence<.82||read.SpectatorScore>=.85||
+                !read.Ammo.HasValue||read.Ammo<0||read.Ammo>100||!double.IsFinite(read.AmmoConfidence)||read.AmmoConfidence<.82) {
+                magazine=reserve=pendingMagazine=pendingReserve=null;repeats=0;return null;
+            }
+            int a=read.Ammo.Value;int? r=read.ReserveConfidence>=.74&&read.Reserve>=0&&read.Reserve<=300?read.Reserve:null;
+            bool compatible=!r.HasValue||!reserve.HasValue||r==reserve;
+            bool firing=magazine.HasValue&&compatible&&a<magazine&&magazine-a<=4&&a<=pendingMagazine;
+            repeats=pendingMagazine==a&&pendingReserve==r||firing?repeats+1:1;
+            pendingMagazine=a;pendingReserve=r;
+            if(repeats<2)return null;
+            HudEvent result=null;
+            if(magazine.HasValue&&compatible&&a<magazine&&magazine-a<=4)
+                result=new HudEvent {Kind="Shoot",Amount=magazine.Value-a,Health=read.Health.Value};
+            else if(magazine.HasValue&&r.HasValue&&reserve.HasValue&&a>magazine&&r<reserve&&a+r==magazine+reserve)
+                result=new HudEvent {Kind="Reload",Health=read.Health.Value};
+            magazine=a;reserve=r;repeats=0;return result;
         }
     }
     internal sealed class HudSpectatorFilter
@@ -463,7 +497,7 @@ namespace LovenseConnector
             if(parts.Length!=number.Length)throw new ArgumentException("Select just the digits, then try again. The digit count did not match.");
             return parts.Select((p,i)=>new HudGlyph { Digit=number[i]-'0',Aspect=(double)p.Width/p.Height,Mask=Normalize(p) }).ToArray();
         }
-        public static HudReading Read(ScreenPixels frame,ScreenProfile profile,IEnumerable<HudGlyph> defaults)
+        public static HudReading Read(ScreenPixels frame,ScreenProfile profile,IEnumerable<HudGlyph> defaults,IEnumerable<HudGlyph> ammoDefaults=null)
         {
             var templates=profile.Digits.Concat(defaults).ToArray();
             var health=ReadNumber(frame,profile.Health,templates,100);
@@ -474,6 +508,14 @@ namespace LovenseConnector
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true,localContrast:true);
             if(!health.Number.HasValue)health=ReadNearWhite(frame,profile.Health,templates);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
+            if(profile.ReadAmmo) {
+                var glyphs=(ammoDefaults??defaults).Concat(profile.Digits).ToArray();
+                var ammo=ReadNumber(frame,profile.Ammo,glyphs,100,trimDigits:true);
+                if(!ammo.Number.HasValue)ammo=ReadNearWhite(frame,profile.Ammo,glyphs);
+                var reserve=ReadReserve(frame,profile.Reserve,glyphs);
+                result.Ammo=ammo.Number;result.AmmoConfidence=ammo.Confidence;
+                result.Reserve=reserve.Number;result.ReserveConfidence=reserve.Confidence;
+            }
             result.KillFeed=profile.ReadKillFeed?HudKillFeedVision.Read(frame):null;
             if(profile.ReadShield) {
                 var shield=ReadNumber(frame,profile.Shield,templates,50);
@@ -596,17 +638,28 @@ namespace LovenseConnector
             }
             return adjacent?(accepted,confidence):(null,0);
         }
-        static (int? Number,double Confidence) ReadParts(Mask[] parts,HudGlyph[] templates,int maximum)
+        internal static (int? Number,double Confidence) ReadReserve(ScreenPixels frame,HudRegion region,HudGlyph[] templates)
+        {
+            var mask=Extract(frame,region,false);if(mask==null)return (null,0);
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+left+x)*4;
+                int low=Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2])),high=Math.Max(frame.Bgra[p],Math.Max(frame.Bgra[p+1],frame.Bgra[p+2]));
+                mask.Pixels[y*mask.Width+x]=(byte)(low>=155&&high-low<=20?1:0);
+            }
+            return ReadParts(Segment(mask),templates,300,.74);
+        }
+        static (int? Number,double Confidence) ReadParts(Mask[] parts,HudGlyph[] templates,int maximum,double minimum=.82)
         {
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
                     var mask=Normalize(part);double aspect=(double)part.Width/part.Height;
                     var scores=templates.GroupBy(g=>g.Digit).Select(g=>new { Digit=g.Key,Score=g.Max(t=>Similarity(mask,t.Mask)*Math.Min(aspect/t.Aspect,t.Aspect/aspect)) }).OrderByDescending(s=>s.Score).ToArray();
-                    if(scores.Length<2||scores[0].Score<.82||scores[0].Score-scores[1].Score<.045){confidence=0;break;}
+                    if(scores.Length<2||scores[0].Score<minimum||scores[0].Score-scores[1].Score<.045){confidence=0;break;}
                     number=number*10+scores[0].Digit;confidence=Math.Min(confidence,scores[0].Score);
                 }
-                if(confidence>=.82&&number<=maximum)return (number,confidence);
+                if(confidence>=minimum&&number<=maximum)return (number,confidence);
             }
             return (null,0);
         }
