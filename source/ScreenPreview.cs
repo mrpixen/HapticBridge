@@ -35,6 +35,8 @@ namespace LovenseConnector
             if(Profile.DeathMarkerMask!=null||SelectedKind==4)DrawRegion(dc,Profile.DeathMarker,Brushes.Gold,"Death text",view);
             if(Profile.SpectatorMask!=null||SelectedKind==3)DrawRegion(dc,Profile.Spectator,Brushes.Gold,"Spectating",view);
             if(Profile.ReadShield||SelectedKind==2)DrawRegion(dc,Profile.Shield,Brushes.SkyBlue,"Shield",view);
+            if(Profile.ReadAmmo||SelectedKind==5)DrawRegion(dc,Profile.Ammo,Brushes.SkyBlue,"Magazine",view);
+            if(Profile.ReadAmmo||SelectedKind==6)DrawRegion(dc,Profile.Reserve,Brushes.SkyBlue,"Reserve",view);
             if(drag.HasValue)dc.DrawRectangle(null,new Pen(Brushes.White,2),new Rect(drag.Value,current));
         }
         void DrawRegion(DrawingContext dc,HudRegion region,Brush color,string label,Rect view)
@@ -63,13 +65,13 @@ namespace LovenseConnector
     }
     internal static class HudDefaultGlyphs
     {
-        public static HudGlyph[] Create()
+        public static HudGlyph[] Create(int fontSize=64,bool smallDigits=false)
         {
             var list=new List<HudGlyph>();
-            foreach(string font in new[]{"Bahnschrift","Arial","Segoe UI"})foreach(var weight in new[]{FontWeights.Normal,FontWeights.Bold})for(int i=0;i<=9;i++) {
+            foreach(string font in new[]{"Bahnschrift","Arial","Segoe UI"})foreach(var weight in (smallDigits?new[]{FontWeights.Light,FontWeights.Normal,FontWeights.Bold}:new[]{FontWeights.Normal,FontWeights.Bold}))for(int i=0;i<=9;i++) {
                 var visual=new DrawingVisual();using(var dc=visual.RenderOpen()) {
                     dc.DrawRectangle(Brushes.Black,null,new Rect(0,0,100,100));
-                    dc.DrawText(new FormattedText(i.ToString(CultureInfo.InvariantCulture),CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(new FontFamily(font),FontStyles.Normal,weight,FontStretches.Normal),64,Brushes.White,1),new Point(8,8));
+                    dc.DrawText(new FormattedText(i.ToString(CultureInfo.InvariantCulture),CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(new FontFamily(font),FontStyles.Normal,weight,FontStretches.Normal),fontSize,Brushes.White,1),new Point(8,8));
                 }
                 var bitmap=new RenderTargetBitmap(100,100,96,96,PixelFormats.Pbgra32);bitmap.Render(visual);var bytes=new byte[40000];bitmap.CopyPixels(bytes,400,0);
                 var frame=new ScreenPixels(bytes,100,100,0);var parts=HudVision.Segment(HudVision.Extract(frame,new HudRegion { Width=1,Height=1 }));

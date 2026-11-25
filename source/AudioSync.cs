@@ -14,6 +14,7 @@ namespace LovenseConnector
         void Start();
         double Read(bool bassOnly);
     }
+    internal interface IAudioSourceReadiness { bool Ready { get; } }
     internal sealed class AudioOutput
     {
         public string Id { get; set; }

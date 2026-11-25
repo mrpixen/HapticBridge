@@ -71,6 +71,15 @@ internal static partial class StudioIntegrationTests
         await Until(()=>strokeFields[0].Text=="20"&&strokeFields[1].Text=="75","motion fields reflect stroke settings accepted through the API");
         await NativeApi(f,"motor",ApiMotor(session,"000000000003",7,10));
         await Until(()=>link.Sent.Any(c=>c.StartsWith("FLVS:")&&c[5]==10&&c[6]==20&&c[7]==75),"next playback uses the configured stroke endpoints");
+        var applyStroke=MotionDescendants(motion).OfType<Button>().Single(b=>(string)b.Content=="Set stroke");
+        foreach(string invalid in new[]{"not a number","95"}) {
+            int generation=Get<int>(f.App,"operatorGeneration");
+            strokeFields[0].Text=invalid;
+            applyStroke.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+            await Until(()=>applyStroke.IsEnabled,"invalid motion input is reported");
+            Check(Get<int>(f.App,"operatorGeneration")==generation&&d.Player.Running,"invalid motion input preserves active playback and source ownership");
+            Check(profile.StrokeLow==20&&profile.StrokeHigh==75,"invalid motion input preserves configured range");
+        }
         setting["function"]="position";setting["value"]=0;
         await NativeApi(f,"function",setting);
         Check(link.Sent.Contains("FSetSite:0;")&&link.Sent.Last()=="Mply:0:20;","API position endpoint zero moves then stops without leaving a pattern active");

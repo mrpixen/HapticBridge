@@ -53,6 +53,8 @@ internal static partial class StudioIntegrationTests
     }
     static async Task Run()
     {
+        await ProcessAudioTests.Run();
+        await WindowsProcessAudioTests.Run();
         await OutputDockKeepsMotorSlots();
         await ShortcutPreferencesAndConflicts();
         await ScreenShortcutPreferencesAndConflicts();

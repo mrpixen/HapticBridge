@@ -28,9 +28,11 @@ For a shortcut while another app has focus, open **Settings → Global Stop all*
 
 Select motors under **Controls** or **Sound**. In **Sound**, choose the **Audio output** to follow, choose **Bass rumble** or **Full sound**, then **Start sound sync**. Adjust sensitivity and each motor's maximum level. Audio is analyzed in memory without being recorded. Changing the selected output or pressing **Refresh** stops sound sync; start it again when ready. **Windows default** resolves the current default each time you start.
 
+For a single app, choose **One program**, select its process name, then start. This includes its child processes and requires Windows build 20348 or later. Open the app first if it is missing, then **Refresh programs**. If it exits or restarts, refresh and select it again. Program mode does not fall back to system audio if capture fails. It follows audio energy, not game events. This feature is currently in development; live audio isolation has not yet been verified.
+
 ## Screen sync
 
-Choose a window and **Start preview**, then calibrate your health digits and kill badge. Optional shield reading detects damage absorbed by shields. Each motor has its own maximum and **Damage**, **Kill** and **Death** choices. Feedback settings save automatically; calibration uses **Save calibration**. Changes turn output off until **Enable output** is selected again. See **SCREEN-SYNC** for setup and recognition limits.
+Choose **VALORANT → Start preview**. Automatic setup enables health, shield, kill-feed and ammo reading while keeping saved calibration. Check the preview, then **Enable output**. Set strengths and kill/death durations in Feedback; each motor has independent event choices. Use Calibration only to correct a missed HUD region. See **SCREEN-SYNC** for recognition limits.
 
 **Calibration → More → Save setup** keeps a separate `.hud.json` file. **Open setup** restores its regions and learned templates without changing motor choices or strengths. Loading is undoable and leaves output off. After checking it, **Save calibration** keeps the loaded setup across launches.
 

@@ -5,9 +5,83 @@ using LovenseConnector;
 internal static class ScreenDetectionTests
 {
     static int checks;
+    static void AmmoEvents()
+    {
+        var filter=new HudAmmoFilter();double time=0;
+        HudEvent Push(int? ammo,int? reserve,int health=100)=>filter.Push(new HudReading {Health=health,Confidence=1,Ammo=ammo,Reserve=reserve,AmmoConfidence=1,ReserveConfidence=1},time+=.1);
+        Check(Push(30,60)==null&&Push(30,60)==null,"ammo establishes silent baseline");
+        Check(Push(29,60)==null&&Push(28,60)?.Kind=="Shoot","continuous firing confirms magazine loss");
+        Check(Push(28,60)==null&&Push(28,60)==null,"unchanged ammo never repeats shots");
+        Check(Push(30,58)==null&&Push(30,58)?.Kind=="Reload","reload conserves magazine plus reserve");
+        Check(Push(30,60)==null&&Push(30,60)==null,"free ammo refill is not a reload");
+        Check(Push(12,36)==null&&Push(12,36)==null,"weapon switch resets without cue");
+        Push(null,null);Check(Push(10,36)==null&&Push(10,36)==null,"missing HUD establishes a new baseline without catch-up shots");
+        Push(0,36,0);Check(Push(30,60)==null&&Push(30,60)==null,"respawn starts silently");
+        time+=1;Check(Push(20,60)==null&&Push(20,60)==null,"capture gap does not manufacture shots");
+        Push(19,60);Check(Push(20,60)==null&&Push(20,60)==null,"one-frame misread cannot trigger shooting");
+    }
     static void Check(bool ok,string name){checks++;if(!ok)throw new Exception("Screen detection: "+name);}
     static HudReading Read(int? health,double badge=0,double confidence=1)=>new HudReading { Health=health,BadgeScore=badge,Confidence=confidence };
     static void Stable(HudEventFilter filter,int health,double time){for(int i=0;i<3;i++)Check(filter.Push(Read(health),time+i*.1).Length==0,"baseline/healing emits nothing");}
+    static void KillFeedTracking()
+    {
+        var damage=new HudEvent {Kind="Damage",Health=80,Amount=20};
+        var batch=HudEvent.CombineKills(new[]{new HudEvent {Kind="Kill",Health=80},damage,new HudEvent {Kind="Kill",Health=80}});
+        Check(batch.Length==2&&batch.Single(e=>e.Kind=="Kill").Count==2&&batch.Contains(damage),"same-frame kills combine without dropping damage or changing its data");
+        Check(HudEvent.CombineKills(Enumerable.Range(0,10).Select(i=>new HudEvent {Kind="Kill"})).Single().Count==6,"combined kill feedback stays bounded");
+        HudKillFeedRow A(int n)=>new HudKillFeedRow {Mask=Enumerable.Range(0,2048).Select(i=>(byte)(i%7==n?1:0)).ToArray(),Y=96+n*40,Height=32};
+        var a=A(0);var b=A(1);var c=A(2);var f=new HudKillFeedFilter();
+        Check(f.Push(new[]{a},0,true)==0&&f.Push(new[]{a},.1,true)==0,"existing feed row at startup is silent");
+        Check(f.Push(new[]{a,b},.2,true)==0&&f.Push(new[]{a,b},.3,true)==1,"new personal row confirms once");
+        Check(f.Push(new[]{b,a},.4,true)==0,"moving rows cannot repeat kills");
+        Check(f.Push(new[]{b,a,c},.5,true)==0&&f.Push(new[]{b,a,c},.6,true)==1,"rapid distinct kill confirms independently");
+        Check(f.Push(new[]{c},2,true)==0&&f.Push(new[]{c},2.1,true)==0,"capture gap establishes a silent feed baseline");
+        Check(f.Push(new[]{c,a},2.2,false)==0&&f.Push(new[]{c,a},2.3,true)==0,"unreadable or spectator HUD cannot replay a pending kill");
+        Check(f.Push(new[]{a},double.NaN,true)==0&&f.Push(new[]{a},1,true)==0,"invalid feed timestamps ignored");
+        f.Reset();Check(f.Push(Array.Empty<HudKillFeedRow>(),0,true)==0&&f.Push(new[]{a},.1,true)==0&&f.Push(Array.Empty<HudKillFeedRow>(),.2,true)==0&&f.Push(new[]{a},.3,true)==1,"brief missed row still requires two matching observations");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);
+        Check(f.Push(new[]{a,b},.1,false,true)==0&&f.Push(new[]{a,b},.2,false,true)==0&&f.Push(new[]{a,b},.3,true)==2,"two fresh kills survive brief unreadable health");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,false,true);f.Push(new[]{a},.5,false,true);
+        Check(f.Push(new[]{a},.7,true)==0,"pending kills expire rather than replay after HUD recovery");
+        f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,true);f.Push(new[]{a},.2,true);
+        var faded=new HudKillFeedRow {Mask=c.Mask,Y=a.Y,Height=a.Height};f.Push(new[]{faded},.3,true);
+        var moved=new HudKillFeedRow {Mask=a.Mask,Y=a.Y-40,Height=a.Height};
+        Check(f.Push(new[]{moved},.4,true)==0,"fading before row movement preserves confirmed identity");
+        var partlyCovered=a.Mask.Select((v,i)=>(byte)(i%2==0?v:0)).ToArray();
+        foreach(var scenario in new[]{(Offset:-40,Gap:.1,Mask:partlyCovered,Expected:0),(Offset:40,Gap:.1,Mask:partlyCovered,Expected:1),(Offset:-40,Gap:.1,Mask:b.Mask,Expected:1),(Offset:-40,Gap:.4,Mask:partlyCovered,Expected:1)}) {
+            f.Reset();f.Push(Array.Empty<HudKillFeedRow>(),0,true);f.Push(new[]{a},.1,true);f.Push(new[]{a},.2,true);
+            var shifted=new HudKillFeedRow {Mask=scenario.Mask,Y=a.Y+scenario.Offset,Height=a.Height};
+            double at=.2+scenario.Gap;
+            int count=f.Push(new[]{shifted},at,true)+f.Push(new[]{shifted},at+.1,true);
+            Check(count==scenario.Expected,"only continuous upward movement preserves a partly obscured confirmed row: "+scenario.Offset+"/"+scenario.Gap);
+        }
+        f.Reset();f.Push(new[]{a},0,true);
+        var extra=new HudKillFeedRow {Mask=partlyCovered,Y=a.Y-40,Height=a.Height};
+        Check(f.Push(new[]{extra,a},.1,true)+f.Push(new[]{extra,a},.2,true)==1,"a partly matching row is new when the original slot remains occupied");
+        ScreenPixels Image(bool gold,bool friendly,bool rightSide,bool covered=false,bool broad=false,bool extendedTop=false) {
+            var pixels=new byte[1920*1080*4];int left=rightSide?1820:1500;
+            void Pixel(int x,int y,int r,int g,int b){int p=(y*1920+x)*4;pixels[p]=(byte)b;pixels[p+1]=(byte)g;pixels[p+2]=(byte)r;pixels[p+3]=255;}
+            if(gold){for(int x=left;x<left+58;x++){Pixel(x,96,225,225,100);Pixel(x,128,225,225,100);}for(int y=96;y<=128;y++)Pixel(left,y,225,225,100);}
+            for(int y=97;y<128;y++)for(int x=1560;x<1760;x++)Pixel(x,y,friendly?80:230,friendly?170:80,145);
+            for(int y=97;y<128;y++)for(int x=1760;x<1833;x++)Pixel(x,y,240,80,70);
+            for(int y=105;y<120;y++)for(int x=1770;x<1825;x++)if(x%8<3||y==106)Pixel(x,y,250,250,250);
+            if(extendedTop)for(int x=1500;x<1620;x++)Pixel(x,96,225,225,100);
+            if(broad)for(int y=96;y<=128;y++)for(int x=1500;x<1620;x++)Pixel(x,y,225,225,100);
+            if(covered)for(int x=1570;x<1660;x++)for(int y=109;y<=115;y++)Pixel(x,y,255,255,255);
+            return new ScreenPixels(pixels,1920,1080,0);
+        }
+        Check(HudKillFeedVision.Read(Image(true,true,false)).Length==1,"gold killer outline plus friendly row recognized");
+        Check(HudKillFeedVision.Read(Image(true,true,false,true)).Length==1,"weapon covering center scanline does not hide friendly background");
+        Check(HudKillFeedVision.Read(Image(true,false,false,true)).Length==0,"white weapon cannot turn hostile background into friendly team evidence");
+        Check(HudKillFeedVision.Read(Image(false,true,false)).Length==0,"teammate green row without personal outline ignored");
+        Check(HudKillFeedVision.Read(Image(true,false,false)).Length==0,"hostile killer row ignored");
+        Check(HudKillFeedVision.Read(Image(true,true,true)).Length==0,"victim-side personal outline is not a kill");
+        Check(HudKillFeedVision.Read(Image(true,true,false,broad:true)).Length==0,"solid gold scenery beside team colors is not a portrait outline");
+        Check(HudKillFeedVision.Read(Image(true,true,false,extendedTop:true)).Length==1,"portrait top border may extend across the adjacent row without losing a valid kill");
+        var events=new HudEventFilter();for(int i=0;i<4;i++)events.Push(new HudReading {Health=100,Confidence=1,KillFeed=Array.Empty<HudKillFeedRow>(),BadgeScore=0},i*.1);
+        Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.4).Length==0,"feed mode does not emit a simultaneous badge");
+        Check(events.Push(new HudReading {Health=100,Confidence=1,KillFeed=new[]{a},BadgeScore=1},.5).Count(e=>e.Kind=="Kill")==1,"feed and badge together produce exactly one kill");
+    }
     static void VerticalDeathText()
     {
         ScreenPixels Frame(int top,int left=80) {
@@ -20,6 +94,13 @@ internal static class ScreenDetectionTests
         var region=new HudRegion {X=80.0/128,Y=50.0/128,Width=24.0/128,Height=10.0/128};
         var template=HudVision.Normalize(HudVision.Extract(Frame(50),region,false),128,32);
         Check(HudVision.MatchVerticalText(Frame(50),region,template)>.99,"death text matches at learned position");
+        var redBanner=Frame(50);
+        for(int p=0;p<redBanner.Bgra.Length;p+=4)if(redBanner.Bgra[p]==0){redBanner.Bgra[p]=40;redBanner.Bgra[p+1]=65;redBanner.Bgra[p+2]=220;}
+        var bannerTemplate=HudVision.Normalize(HudVision.ExtractDeathText(redBanner,region),128,32);
+        Check(bannerTemplate.SequenceEqual(template),"respawn banner learning excludes its red background");
+        Check(HudVision.MatchVerticalText(redBanner,region,template)>.99,"white death text remains recognizable over a red banner");
+        for(int p=0;p<redBanner.Bgra.Length;p+=4){redBanner.Bgra[p]=40;redBanner.Bgra[p+1]=65;redBanner.Bgra[p+2]=220;}
+        Check(HudVision.MatchVerticalText(redBanner,region,template)<.1,"red banner without lettering cannot imply a death");
         Check(HudVision.MatchVerticalText(Frame(60),region,template)>.99,"death text follows a shifted report row");
         Check(HudVision.MatchVerticalText(Frame(90),region,template)<.9,"death text search stays vertically bounded");
         Check(HudVision.MatchVerticalText(Frame(50,10),region,template)<.9,"death text does not search unrelated horizontal HUD areas");
@@ -54,10 +135,13 @@ internal static class ScreenDetectionTests
     }
     static int Main()
     {
+        AmmoEvents();
+        KillFeedTracking();
         VerticalDeathText();
         DeathMarkerConfirmation();
         ContinuousHealing();
         ShieldDamage();
+        RapidCombinedDamage();
         NumberColorMask();
         DimShieldDigits();
         DigitBoundaryFallback();
@@ -88,6 +172,27 @@ internal static class ScreenDetectionTests
         var bytes=new byte[32*32*4];var frame=new ScreenPixels(bytes,32,32,0);Check(frame.Valid,"valid packed frame");Check(!new ScreenPixels(bytes,64,64,0).Valid,"short buffer rejected");
         Check(HudVision.Segment(HudVision.Extract(frame,new HudRegion{Width=1,Height=1})).Length==0,"black frame has no number");
         Console.WriteLine("Screen detection: "+checks+" assertions passed.");return 0;
+    }
+    static void RapidCombinedDamage()
+    {
+        HudReading Pair(int hp,int? armor,double confidence=1)=>new HudReading {Health=hp,Confidence=1,Shield=armor,ShieldConfidence=confidence};
+        var f=new HudEventFilter();
+        void Baseline(){f.Reset();for(int i=0;i<3;i++)f.Push(Pair(100,50),i*.1);}
+        Baseline();
+        Check(f.Push(Pair(89,26),.3).Length==0&&f.Push(Pair(83,15),.4).Length==0,"rapid paired losses wait for three observations");
+        var events=f.Push(Pair(83,15),.5);
+        Check(events.Length==1&&events[0].Kind=="Damage"&&events[0].Amount==52&&events[0].ShieldAmount==35,"rapid paired losses confirm before a disappearing death HUD");
+        Check(f.Push(Pair(83,15),.6).Length==0,"confirmed rapid loss is not counted again");
+        foreach(var middle in new[]{Pair(95,30),Pair(83,null),Pair(83,15,.5),Pair(83,15,double.NaN)}) {
+            Baseline();f.Push(Pair(89,26),.3);f.Push(middle,.4);
+            Check(f.Push(Pair(83,15),.5).Length==0,"rising or uncertain readings break rapid loss confirmation");
+        }
+        Baseline();f.Push(Pair(89,null),.3);f.Push(Pair(83,null),.4);
+        Check(f.Push(Pair(83,null),.5).Length==0,"health-only changing readings retain identical-frame confirmation");
+        Baseline();f.Push(Pair(89,26),.3);f.Push(Pair(83,15),.4);
+        Check(f.Push(Pair(0,0),.5).Length==0,"paired loss does not bypass zero-health death confirmation");
+        Baseline();f.Push(Pair(89,26),.3);f.Push(Pair(83,15),.4);
+        Check(f.Push(Pair(83,15),1.3).Length==0,"capture gaps cannot complete a rapid loss");
     }
     static void ContinuousHealing()
     {
@@ -198,6 +303,30 @@ internal static class ScreenDetectionTests
         var dim=Frame(145,70);var reading=HudVision.Read(dim,profile,other);
         Check(reading.Shield==0&&reading.ShieldConfidence>=.82,"dim shield zero uses contrast without treating an absent number as zero");
         Check(reading.Health==null,"shield fallback does not relax health reading");
+        var washed=Frame(255,220);
+        Check(HudVision.ExtractLocalContrast(washed,region)!=null,"local contrast extracts bright strokes from washed-out background");
+        Check(HudVision.Read(washed,profile,other).Health==0,"washed-out zero retains its correct value");
+        foreach(var empty in new[]{Frame(255,255),Frame(195,185),Frame(145,70)})
+            Check(HudVision.ExtractLocalContrast(empty,region)==null,"local fallback rejects uniform, weak-contrast or dim foreground");
+        var ambiguous=new[]{new HudGlyph {Digit=1,Aspect=profile.Digits[0].Aspect,Mask=profile.Digits[0].Mask}};
+        Check(HudVision.Read(washed,profile,ambiguous).Health==null,"local fallback does not resolve ambiguous templates by guessing");
+        var nearWhiteTemplates=profile.Digits.Concat(other).ToArray();
+        Check(HudVision.ReadNearWhite(Frame(255,245),region,nearWhiteTemplates).Number==0,"near-white health separates from a nearly white background");
+        Check(HudVision.Read(Frame(255,245),profile,other).Health==0,"near-white fallback participates in health reading");
+        Check(HudVision.ReadNearWhite(Frame(255,245),region,profile.Digits.Concat(ambiguous).ToArray()).Number==null,"near-white fallback rejects ambiguous glyphs");
+        Check(HudVision.ReadNearWhite(Frame(242,0),region,nearWhiteTemplates).Number==null,"one successful white threshold is insufficient");
+        Check(HudVision.ReadNearWhite(Frame(243,0),region,nearWhiteTemplates).Number==0,"neighboring white thresholds must agree");
+        var changing=Frame(255,0);
+        for(int y=14;y<17;y++)for(int x=13;x<19;x++){int i=(y*32+x)*4;changing.Bgra[i]=changing.Bgra[i+1]=changing.Bgra[i+2]=243;}
+        var changingTemplates=profile.Digits.Concat(HudVision.Learn(changing,region,"8",100)).ToArray();
+        Check(HudVision.ReadNearWhite(changing,region,changingTemplates).Number==null,"different valid numbers across white thresholds are rejected");
+        foreach(var empty in new[]{Frame(255,255),Frame(255,250),Frame(240,0),Frame(145,70)})
+            Check(HudVision.ReadNearWhite(empty,region,nearWhiteTemplates).Number==null,"near-white fallback rejects uniform, weak-contrast or nonwhite crops");
+        Check(HudVision.ReadNearWhite(new ScreenPixels(new byte[257*257*4],257,257,0),region,nearWhiteTemplates).Number==null,"oversized near-white crop is skipped");
+        Check(HudVision.ExtractLocalContrast(new ScreenPixels(new byte[257*257*4],257,257,0),region)==null,"oversized local contrast crop is skipped");
+        Check(HudVision.Read(Frame(255,175),profile,other).Health==0,"bright health digits separate from a bright gray background");
+        Check(HudVision.Read(Frame(255,175,true),profile,other).Health==null,"uniform bright health crop remains unknown");
+        Check(HudVision.Read(Frame(195,185),profile,other).Health==null,"low-contrast bright health noise remains unknown");
         Check(HudVision.Read(Frame(145,70,true),profile,other).Shield==null,"uniform shield crop remains unknown");
         Check(HudVision.Read(Frame(100,90),profile,other).Shield==null,"low-contrast shield noise remains unknown");
         Check(HudVision.Learn(dim,region,"0",50).Length==1,"dim shield digits can be learned");

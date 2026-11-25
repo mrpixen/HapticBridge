@@ -56,9 +56,9 @@ internal static partial class ScreenSyncTests
             await Feed(app,capture,"0",3,"80");
             Check(Get<TextBlock>(app,"screenHistory").Text.Split('\n').Count(line=>line.Contains("  Death"))==deathHistory.Split('\n').Count(line=>line.Contains("  Death")),"later zero health does not duplicate the inferred death event");
             await Task.Delay(450);await Invoke(app,"ScreenTick");
-            Check(!Get<bool>(app,"screenArmed")&&players.All(p=>p.Level(0)==0&&!p.Active(0)),"death text cue ends and leaves output disabled");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>p.Level(0)==0&&!p.Active(0)),"death text cue ends and waits for respawn");
             before=links.Sum(l=>l.Positive.Count);await Feed(app,capture,"100",3,"80");
-            Check(!Get<bool>(app,"screenArmed")&&links.Sum(l=>l.Positive.Count)==before,"returning HUD never rearms output");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&links.Sum(l=>l.Positive.Count)==before,"persisting death marker prevents automatic resumption");
             await Invoke(app,"ArmScreen");await Feed(app,capture,"100",3,"80");before=links.Sum(l=>l.Positive.Count);
             await Feed(app,capture,"",3,"80");
             Check(links.Sum(l=>l.Positive.Count)==before,"persisting old death text plus missing HUD does not trigger another cue");

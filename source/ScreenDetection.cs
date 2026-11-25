@@ -22,9 +22,13 @@ namespace LovenseConnector
     public sealed class ScreenProfile
     {
         public int Version { get; set; }=1;
-        public HudRegion Health { get; set; }=new HudRegion { X=.265,Y=.915,Width=.065,Height=.055 };
-        public HudRegion Shield { get; set; }=new HudRegion { X=.225,Y=.925,Width=.035,Height=.04 };
+        public HudRegion Health { get; set; }=new HudRegion { X=.3005,Y=.9315,Width=.04,Height=.036 };
+        public HudRegion Shield { get; set; }=new HudRegion { X=.2828125,Y=.9425925925925925,Width=.0125,Height=.014814814814814815 };
         public bool ReadShield { get; set; }
+        public bool ReadKillFeed { get; set; }
+        public bool ReadAmmo { get; set; }
+        public HudRegion Ammo { get; set; }=new HudRegion {X=.65,Y=1005.0/1080,Width=82.0/1920,Height=43.0/1080};
+        public HudRegion Reserve { get; set; }=new HudRegion {X=1353.0/1920,Y=1018.0/1080,Width=24.0/1920,Height=16.0/1080};
         public HudRegion Badge { get; set; }=new HudRegion { X=.462,Y=.765,Width=.076,Height=.13 };
         public HudRegion Spectator { get; set; }=new HudRegion {X=.065625,Y=.785185,Width=.104167,Height=.02963};
         public byte[] SpectatorMask { get; set; }
@@ -38,14 +42,16 @@ namespace LovenseConnector
         public int DamageLevel { get; set; }=14;
         public int KillLevel { get; set; }=20;
         public int DeathLevel { get; set; }=16;
-        public bool Validate() => Version==1&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
+        public int KillDurationMs { get; set; }=450;
+        public int DeathDurationMs { get; set; }=350;
+        public bool Validate() => Version==1&&Ammo!=null&&Ammo.Valid&&Reserve!=null&&Reserve.Valid&&Health!=null&&Health.Valid&&Shield!=null&&Shield.Valid&&Badge!=null&&Badge.Valid&&
             Spectator!=null&&Spectator.Valid&&(SpectatorMask==null||SpectatorMask.Length==4096&&SpectatorMask.All(x=>x<=1))&&
             DeathMarker!=null&&DeathMarker.Valid&&(DeathMarkerMask==null||DeathMarkerMask.Length==4096&&DeathMarkerMask.All(x=>x<=1))&&
             (DeathMarkerFrameWidth==0&&DeathMarkerFrameHeight==0||DeathMarkerFrameWidth>=8&&DeathMarkerFrameWidth<=8192&&DeathMarkerFrameHeight>=8&&DeathMarkerFrameHeight<=4320)&&
             (BadgeMask==null||BadgeMask.Length==1024&&BadgeMask.All(x=>x<=1))&&
             BadgeVariants!=null&&BadgeVariants.Count<=7&&(BadgeMask!=null||BadgeVariants.Count==0)&&BadgeVariants.All(m=>m!=null&&m.Length==1024&&m.All(x=>x<=1))&&Digits!=null&&Digits.Count<=100&&
             Digits.All(d=>d!=null&&d.Digit>=0&&d.Digit<=9&&double.IsFinite(d.Aspect)&&d.Aspect>.05&&d.Aspect<3&&d.Mask!=null&&d.Mask.Length==384&&d.Mask.All(x=>x<=1))&&
-            DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20;
+            DamageLevel>=0&&DamageLevel<=20&&KillLevel>=0&&KillLevel<=20&&DeathLevel>=0&&DeathLevel<=20&&KillDurationMs>=450&&KillDurationMs<=5000&&DeathDurationMs>=350&&DeathDurationMs<=5000;
     }
     internal sealed class ScreenPixels
     {
@@ -59,12 +65,50 @@ namespace LovenseConnector
     {
         public int? Health;
         public int? Shield;
+        public int? Ammo,Reserve;
+        public double AmmoConfidence,ReserveConfidence;
         public double Confidence, ShieldConfidence, BadgeScore, SpectatorScore, DeathMarkerScore;
+        public HudKillFeedRow[] KillFeed;
     }
     internal sealed class HudEvent
     {
         public string Kind;
         public int Amount,Health,ShieldAmount;
+        public int Count=1;
+        public static HudEvent[] CombineKills(IEnumerable<HudEvent> events)
+        {
+            var all=events.ToArray();var kills=all.Where(e=>e.Kind=="Kill").ToArray();
+            if(kills.Length<2)return all;
+            var combined=new HudEvent {Kind="Kill",Health=kills[0].Health,Count=Math.Min(6,kills.Sum(e=>Math.Clamp(e.Count,1,6)))};
+            return all.Where(e=>e.Kind!="Kill").Append(combined).ToArray();
+        }
+    }
+    internal sealed class HudAmmoFilter
+    {
+        int? magazine,reserve,pendingMagazine,pendingReserve;
+        int repeats;double last=-1;
+        public void Reset(){magazine=reserve=pendingMagazine=pendingReserve=null;repeats=0;last=-1;}
+        public HudEvent Push(HudReading read,double time)
+        {
+            if(!double.IsFinite(time)||time<=last)return null;
+            if(last>=0&&time-last>.5)Reset();last=time;
+            if(read==null||read.Health<=0||!read.Health.HasValue||!double.IsFinite(read.Confidence)||read.Confidence<.82||read.SpectatorScore>=.85||
+                !read.Ammo.HasValue||read.Ammo<0||read.Ammo>100||!double.IsFinite(read.AmmoConfidence)||read.AmmoConfidence<.82) {
+                magazine=reserve=pendingMagazine=pendingReserve=null;repeats=0;return null;
+            }
+            int a=read.Ammo.Value;int? r=read.ReserveConfidence>=.74&&read.Reserve>=0&&read.Reserve<=300?read.Reserve:null;
+            bool compatible=!r.HasValue||!reserve.HasValue||r==reserve;
+            bool firing=magazine.HasValue&&compatible&&a<magazine&&magazine-a<=4&&a<=pendingMagazine;
+            repeats=pendingMagazine==a&&pendingReserve==r||firing?repeats+1:1;
+            pendingMagazine=a;pendingReserve=r;
+            if(repeats<2)return null;
+            HudEvent result=null;
+            if(magazine.HasValue&&compatible&&a<magazine&&magazine-a<=4)
+                result=new HudEvent {Kind="Shoot",Amount=magazine.Value-a,Health=read.Health.Value};
+            else if(magazine.HasValue&&r.HasValue&&reserve.HasValue&&a>magazine&&r<reserve&&a+r==magazine+reserve)
+                result=new HudEvent {Kind="Reload",Health=read.Health.Value};
+            magazine=a;reserve=r;repeats=0;return result;
+        }
     }
     internal sealed class HudSpectatorFilter
     {
@@ -115,12 +159,14 @@ namespace LovenseConnector
     }
     internal sealed class HudEventFilter
     {
+        readonly HudKillFeedFilter feed=new HudKillFeedFilter();
         int? health,candidate,shield,shieldCandidate,healingCandidate;
         int repeat,badgeRepeat,shieldRepeat,rapidRebuilding,healingSteps;
+        int combinedSteps,combinedHealth,combinedShield;
         double lastTime=-1,invalidSince=-1,badgeOffSince=-1,lastKill=-100,rapidSince=-1;
         bool badgeLatched=true;
         public int? Health => health;
-        public void Reset() { health=candidate=null;ResetHealing();ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
+        public void Reset() { feed.Reset();health=candidate=null;ResetHealing();ResetShield();repeat=badgeRepeat=0;lastTime=-1;invalidSince=-1;badgeOffSince=-1;badgeLatched=true;lastKill=-100;rapidSince=-1;rapidRebuilding=0; }
         void ResetHealing(){healingCandidate=null;healingSteps=0;}
         void TrackHealing(int value)
         {
@@ -130,16 +176,32 @@ namespace LovenseConnector
             } else healingSteps=1;
             healingCandidate=value;
             // Three rising observations are evidence of gradual healing, not damage.
-            // Do not relax the identical-frame confirmation for health loss or startup.
+            // Health-only loss and startup still require identical-frame confirmation.
             if(healingSteps>=3){health=value;ResetShield();}
         }
-        void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;}
+        void ResetCombinedLoss(){combinedSteps=0;combinedHealth=combinedShield=int.MaxValue;}
+        bool TrackCombinedLoss(HudReading read)
+        {
+            // Corroborating HP and armor drops can change on every rapid hit.
+            // Still require three consecutive non-increasing positive-HP readings;
+            // unknown armor, recovery and zero HP keep their existing strict rules.
+            if(!health.HasValue||!shield.HasValue||read.Health<=0||read.Health>=health||
+                !read.Shield.HasValue||read.Shield<0||read.Shield>=shield||
+                !double.IsFinite(read.ShieldConfidence)||read.ShieldConfidence<.82) {ResetCombinedLoss();return false;}
+            combinedSteps=read.Health<=combinedHealth&&read.Shield<=combinedShield?combinedSteps+1:1;
+            combinedHealth=read.Health.Value;combinedShield=read.Shield.Value;
+            return combinedSteps>=3;
+        }
+        void ResetShield(){shield=shieldCandidate=null;shieldRepeat=0;ResetCombinedLoss();}
         public HudEvent[] Push(HudReading read,double time)
         {
             var events=new List<HudEvent>();
             if(!double.IsFinite(time)||time<=lastTime)return events.ToArray();
             if(lastTime>=0&&time-lastTime>.75)Reset();
             lastTime=time;
+            // Track even during unreadable HUD frames, so recovery cannot replay an old row.
+            int feedKills=feed.Push(read?.KillFeed,time,read!=null&&read.Health>0&&read.Confidence>=.82&&read.SpectatorScore<.85,
+                health>0&&read!=null&&read.Health!=0&&read.SpectatorScore<.85);
             if(read==null||read.Confidence<.82||!read.Health.HasValue||read.Health<0||read.Health>100) {
                 if(invalidSince<0)invalidSince=time;
                 candidate=null;ResetHealing();repeat=badgeRepeat=0;badgeOffSince=rapidSince=-1;rapidRebuilding=0;ResetShield();
@@ -149,8 +211,9 @@ namespace LovenseConnector
             invalidSince=-1;
             if(candidate==read.Health)repeat++;else{candidate=read.Health;repeat=1;}
             TrackHealing(read.Health.Value);
+            bool combinedLoss=TrackCombinedLoss(read);
             int healthLoss=0,shieldLoss=0;
-            if(repeat>=3&&candidate!=health) {
+            if((repeat>=3||combinedLoss)&&candidate!=health) {
                 if(health.HasValue&&candidate<health)healthLoss=health.Value-candidate.Value;
                 if(health.HasValue&&candidate>health)ResetShield(); // Respawn/healing establishes a fresh shield baseline.
                 health=candidate;
@@ -159,12 +222,17 @@ namespace LovenseConnector
             else {
                 if(shieldCandidate==read.Shield)shieldRepeat++;else{shieldCandidate=read.Shield;shieldRepeat=1;}
                 // Wait for health too, so a simultaneous HP/shield drop becomes one event.
-                if(shieldRepeat>=3&&repeat>=3&&shieldCandidate!=shield) {
+                if((shieldRepeat>=3&&repeat>=3||combinedLoss)&&shieldCandidate!=shield) {
                     if(shield.HasValue&&shieldCandidate<shield&&health>0)shieldLoss=shield.Value-shieldCandidate.Value;
                     shield=shieldCandidate;
                 }
             }
+            if(combinedLoss)ResetCombinedLoss();
             if(healthLoss>0||shieldLoss>0)events.Add(new HudEvent { Kind=health==0?"Death":"Damage",Amount=healthLoss+shieldLoss,ShieldAmount=shieldLoss,Health=health.Value });
+            if(read.KillFeed!=null) {
+                if(health>0)for(int i=0;i<feedKills;i++)events.Add(new HudEvent {Kind="Kill",Health=health.Value});
+                return events.ToArray(); // One selected kill source; never double-count a badge and feed row.
+            }
             // Rapid kills can restart the badge without a full clear interval. Require a deep
             // disappearance, a rebuilding phase, then three strong frames; a black-frame flicker
             // returning directly to the held badge is not a new kill.
@@ -186,6 +254,127 @@ namespace LovenseConnector
             return events.ToArray();
         }
     }
+    // Own-player feed entries have a gold portrait border on the killer (left)
+    // side. Team color alone is deliberately insufficient. No names are retained.
+    internal sealed class HudKillFeedRow {public byte[] Mask;public int Y,Height;}
+    internal static class HudKillFeedVision
+    {
+        public static HudKillFeedRow[] Read(ScreenPixels frame)
+        {
+            var rows=new List<HudKillFeedRow>();
+            if(frame==null||!frame.Valid)return rows.ToArray();
+            double s=frame.Height/1080.0;
+            int left=(int)(frame.Width*.55),right=(int)(frame.Width*.985);
+            int h=Math.Max(12,(int)Math.Round(32*s)),portrait=(int)Math.Round(58*s);
+            int topMinimum=(int)Math.Ceiling(portrait*.75);
+            bool Gold(int x,int y) {
+                if(x<0||x>=frame.Width||y<0||y>=frame.Height)return false;
+                int p=(y*frame.Width+x)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                return r>140&&g>140&&b<Math.Min(r,g)*.8&&Math.Abs(r-g)<70;
+            }
+            for(int y=(int)(70*s);y<(int)(370*s)-h;y++) {
+                bool found=false;int run=0;
+                for(int x=left;x<right-portrait-(int)(100*s);x++) {
+                    run=Gold(x,y)?run+1:0;
+                    // Every later pixel in this same run has the same candidate start.
+                    // Evaluate its geometry once rather than repeating it across scenery.
+                    if(run!=topMinimum)continue;
+                    int start=x-run+1,vertical=0,bottom=0,green=0;
+                    for(int dy=0;dy<=h;dy++)if(Gold(start,y+dy)||Gold(start+1,y+dy)||Gold(start-1,y+dy))vertical++;
+                    for(int dx=0;dx<portrait;dx++)if(Gold(start+dx,y+h)||Gold(start+dx,y+h+1)||Gold(start+dx,y+h-1))bottom++;
+                    if(vertical<h*.75||bottom<portrait*.65)continue;
+                    // A gold border encloses portrait detail, not a mostly solid patch.
+                    // Scenery can match the outer edges and unrelated team colors.
+                    int interiorGold=0,interiorSamples=0,step=Math.Max(1,(int)Math.Round(2*s));
+                    for(int iy=step;iy<h-step;iy+=step)for(int ix=step;ix<portrait-step;ix+=step) {
+                        interiorSamples++;if(Gold(start+ix,y+iy))interiorGold++;
+                    }
+                    if(interiorSamples==0||interiorGold>=interiorSamples*.75)continue;
+                    int gx=start+portrait+(int)(12*s),gy=y+h/2;
+                    // Weapon silhouettes can cover the middle scanline, especially
+                    // after downsampling. Require the same amount of team background
+                    // on one of three interior lines; never infer ownership from white ink.
+                    for(int line=1;line<=3;line++) {
+                        int lineGreen=0,scanY=y+h*line/4;
+                        for(int dx=0;dx<(int)(90*s)&&gx+dx<right;dx++) {
+                            int p=(scanY*frame.Width+gx+dx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                            if(g>r*1.15&&b>r*1.05&&g>90)lineGreen++;
+                        }
+                        green=Math.Max(green,lineGreen);
+                    }
+                    if(green<25*s)continue;
+                    // Fingerprint the victim text only. Weapon icons are identical across
+                    // many kills and otherwise dominate similarity between different rows.
+                    int redStart=-1,redRun=0;
+                    for(int rx=gx;rx<right-portrait;rx++) {
+                        int p=(gy*frame.Width+rx)*4,g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                        redRun=r>130&&r>g*1.4?redRun+1:0;
+                        if(redRun>=6*s){redStart=rx-redRun+1;break;}
+                    }
+                    if(redStart<0)continue;
+                    int textLeft=redStart+(int)(7*s),textRight=right-portrait,textTop=y+(int)(7*s),textHeight=h-(int)(14*s);
+                    if(textRight-textLeft<20*s)continue;
+                    var text=new HudVision.Mask {Width=textRight-textLeft,Height=textHeight,Pixels=new byte[(textRight-textLeft)*textHeight]};
+                    for(int ty=0;ty<textHeight;ty++)for(int tx=0;tx<text.Width;tx++) {
+                        int p=((textTop+ty)*frame.Width+textLeft+tx)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                        text.Pixels[ty*text.Width+tx]=(byte)(Math.Min(r,Math.Min(g,b))>=175&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<65?1:0);
+                    }
+                    var mask=HudVision.Normalize(text,128,16);
+                    if(mask!=null&&mask.Count(v=>v!=0)>40){rows.Add(new HudKillFeedRow {Mask=mask,Y=y,Height=h});found=true;break;}
+                }
+                if(found)y+=h;
+                if(rows.Count>=6)break;
+            }
+            return rows.ToArray();
+        }
+    }
+    internal sealed class HudKillFeedFilter
+    {
+        sealed class Track {public byte[] Mask;public int Y;public double Last,First;public int Hits;public bool Done;}
+        readonly List<Track> tracks=new List<Track>();
+        double last=-1;
+        public void Reset(){tracks.Clear();last=-1;}
+        public int Push(HudKillFeedRow[] rows,double time,bool eligible,bool waitForHud=false)
+        {
+            if(!double.IsFinite(time)||time<=last)return 0;
+            if(rows==null){Reset();return 0;}
+            bool baseline=last<0||time-last>.75;
+            if(baseline)tracks.Clear();
+            last=time;tracks.RemoveAll(t=>time-t.Last>1);
+            var used=new HashSet<Track>();int count=0;
+            foreach(var row in rows.Take(6)) {
+                if(row==null||row.Mask==null||row.Mask.Length!=2048)continue;
+                var match=tracks.Where(t=>!used.Contains(t)).Select(t=>new {Track=t,Score=HudVision.Similarity(row.Mask,t.Mask)}).OrderByDescending(t=>t.Score).FirstOrDefault();
+                Track track;
+                // A continuously visible row may fade or change contrast over the world.
+                // Its existing slot remains the same event; new rows append below it.
+                var held=tracks.Where(t=>!used.Contains(t)&&time-t.Last<.2&&Math.Abs(t.Y-row.Y)<row.Height*.3).FirstOrDefault();
+                // An expiring row above can move a confirmed kill out from under
+                // an overlay. Keep that identity only for a unique, recent upward
+                // single-row move with partial text agreement and no row left in
+                // its old slot. Appended rows and capture gaps do not qualify.
+                Track shifted=null;
+                if(held==null&&(match==null||match.Score<.7)) {
+                    var candidates=tracks.Where(t=>t.Done&&!used.Contains(t)&&time-t.Last<.2&&
+                        t.Y-row.Y>=row.Height*.8&&t.Y-row.Y<=row.Height*1.5&&
+                        HudVision.Similarity(row.Mask,t.Mask)>=.6&&
+                        !rows.Any(r=>r!=null&&Math.Abs(r.Y-t.Y)<row.Height*.3)).Take(2).ToArray();
+                    if(candidates.Length==1)shifted=candidates[0];
+                }
+                if(match!=null&&match.Score>=.7) {track=match.Track;track.Hits=time-track.Last<=.3?track.Hits+1:1;}
+                else if(held!=null) {track=held;track.Hits++;}
+                else if(shifted!=null) {track=shifted;track.Hits++;}
+                else {track=new Track {Mask=row.Mask,Y=row.Y,First=time,Hits=1,Done=baseline};tracks.Add(track);}
+                used.Add(track);track.Last=time;track.Y=row.Y;
+                // Keep the confirmed appearance: learning every fading frame corrupts
+                // identity just before older rows expire and the remaining rows move up.
+                if(track.Hits==2)track.Mask=row.Mask;
+                if(!eligible&&!waitForHud||time-track.First>.5)track.Done=true;
+                if(eligible&&track.Hits>=2&&!track.Done){track.Done=true;count++;}
+            }
+            return count;
+        }
+    }
     internal static class HudVision
     {
         internal sealed class Mask
@@ -202,13 +391,24 @@ namespace LovenseConnector
             if(w*h>1000000)return null;
             return ExtractPixels(frame,x,y,w,h,includeTeal);
         }
-        static Mask ExtractPixels(ScreenPixels frame,int x,int y,int w,int h,bool includeTeal)
+        internal static Mask ExtractDeathText(ScreenPixels frame,HudRegion region)
+        {
+            var mask=Extract(frame,region,false);
+            if(mask==null)return null;
+            int x=(int)(region.X*frame.Width),y=(int)(region.Y*frame.Height);
+            for(int j=0;j<mask.Height;j++)for(int i=0;i<mask.Width;i++) {
+                int p=((y+j)*frame.Width+x+i)*4,b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
+                mask.Pixels[j*mask.Width+i]=(byte)(Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85?1:0);
+            }
+            return mask;
+        }
+        static Mask ExtractPixels(ScreenPixels frame,int x,int y,int w,int h,bool includeTeal,bool includeRed=true)
         {
             var result=new Mask { Width=w,Height=h,Pixels=new byte[w*h] };
             for(int j=0;j<h;j++)for(int i=0;i<w;i++) {
                 int p=((j+y)*frame.Width+i+x)*4;int b=frame.Bgra[p],g=frame.Bgra[p+1],r=frame.Bgra[p+2];
                 // Numbers use white/red text. Teal belongs to badge matching, not armor outlines or ability effects behind digits.
-                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
+                result.Pixels[j*w+i]=(byte)((Math.Min(r,Math.Min(g,b))>=155&&Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<85||includeRed&&r>=190&&r-g>=65&&r-b>=65||includeTeal&&g>=185&&b>=145&&r<145)?1:0);
             }
             return result;
         }
@@ -223,7 +423,7 @@ namespace LovenseConnector
             int bandHeight=bottom-top+height;if((long)width*bandHeight>1000000)return 0;
             // Extract once, then score normalized windows without allocating one
             // image and normalized mask for every candidate vertical position.
-            var band=ExtractPixels(frame,x,top,width,bandHeight,false);
+            var band=ExtractPixels(frame,x,top,width,bandHeight,false,false);
             var columns=new int[128];var rows=new int[32];
             for(int i=0;i<128;i++)columns[i]=Math.Min(width-1,(int)((i+.5)*width/128));
             for(int i=0;i<32;i++)rows[i]=Math.Min(height-1,(int)((i+.5)*height/32));
@@ -297,12 +497,26 @@ namespace LovenseConnector
             if(parts.Length!=number.Length)throw new ArgumentException("Select just the digits, then try again. The digit count did not match.");
             return parts.Select((p,i)=>new HudGlyph { Digit=number[i]-'0',Aspect=(double)p.Width/p.Height,Mask=Normalize(p) }).ToArray();
         }
-        public static HudReading Read(ScreenPixels frame,ScreenProfile profile,IEnumerable<HudGlyph> defaults)
+        public static HudReading Read(ScreenPixels frame,ScreenProfile profile,IEnumerable<HudGlyph> defaults,IEnumerable<HudGlyph> ammoDefaults=null)
         {
             var templates=profile.Digits.Concat(defaults).ToArray();
             var health=ReadNumber(frame,profile.Health,templates,100);
             if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true);
+            // Bright scenery can join white digits under the fixed color mask.
+            // Retry contrast separation without relaxing health brightness or shape scores.
+            if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,contrast:true);
+            if(!health.Number.HasValue)health=ReadNumber(frame,profile.Health,templates,100,trimDigits:true,localContrast:true);
+            if(!health.Number.HasValue)health=ReadNearWhite(frame,profile.Health,templates);
             var result=new HudReading { Health=health.Number,Confidence=health.Confidence };
+            if(profile.ReadAmmo) {
+                var glyphs=(ammoDefaults??defaults).Concat(profile.Digits).ToArray();
+                var ammo=ReadNumber(frame,profile.Ammo,glyphs,100,trimDigits:true);
+                if(!ammo.Number.HasValue)ammo=ReadNearWhite(frame,profile.Ammo,glyphs);
+                var reserve=ReadReserve(frame,profile.Reserve,glyphs);
+                result.Ammo=ammo.Number;result.AmmoConfidence=ammo.Confidence;
+                result.Reserve=reserve.Number;result.ReserveConfidence=reserve.Confidence;
+            }
+            result.KillFeed=profile.ReadKillFeed?HudKillFeedVision.Read(frame):null;
             if(profile.ReadShield) {
                 var shield=ReadNumber(frame,profile.Shield,templates,50);
                 if(!shield.Number.HasValue)shield=ReadNumber(frame,profile.Shield,templates,50,true);
@@ -318,10 +532,10 @@ namespace LovenseConnector
             foreach(var variant in profile.BadgeVariants)result.BadgeScore=Math.Max(result.BadgeScore,Similarity(badge,variant));
             return result;
         }
-        static Mask ExtractContrast(ScreenPixels frame,HudRegion region)
+        static Mask ExtractContrast(ScreenPixels frame,HudRegion region,int minimumInk=0)
         {
-            // Depleted armor digits fade below the white-text threshold. Separate their local
-            // luminance classes (Otsu), then keep the normal shape and ambiguity checks.
+            // Separate local luminance classes (Otsu), retaining shape/ambiguity checks.
+            // Armor may be dim; health callers retain a minimum foreground brightness.
             var mask=Extract(frame,region,false);if(mask==null)return null;
             int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
             var values=new byte[mask.Pixels.Length];var histogram=new int[256];
@@ -338,22 +552,114 @@ namespace LovenseConnector
                 double a=belowSum/below,b=(sum-belowSum)/above,score=(double)below*above*(a-b)*(a-b);
                 if(score>best){best=score;threshold=i;low=a;high=b;}
             }
-            if(high-low<25)return null;
+            if(high-low<25||high<minimumInk)return null;
             int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold?1:0);ink+=mask.Pixels[i];}
             return ink<12||ink>values.Length*.65?null:mask;
         }
-        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false)
+        // Expand differences near white before separating washed-out text.
+        static readonly byte[] BrightRange=Enumerable.Range(0,256).Select(v=>(byte)Math.Round(255*Math.Pow(v/255.0,2.2))).ToArray();
+        // Separable sliding extrema keep background removal linear in crop size.
+        static byte[] LocalExtrema(byte[] input,int width,int height,int radius,bool minimum,bool horizontal)
         {
-            var parts=Segment(contrast?ExtractContrast(frame,region):Extract(frame,region,false),trimDigits);
+            var output=new byte[input.Length];int length=horizontal?width:height,lines=horizontal?height:width;
+            var deque=new int[length];
+            for(int line=0;line<lines;line++) {
+                int head=0,tail=0,next=0;
+                int At(int position)=>horizontal?line*width+position:position*width+line;
+                for(int position=0;position<length;position++) {
+                    int end=Math.Min(length-1,position+radius);
+                    while(next<=end) {
+                        byte value=input[At(next)];
+                        while(tail>head&&(minimum?input[At(deque[tail-1])]>=value:input[At(deque[tail-1])]<=value))tail--;
+                        deque[tail++]=next++;
+                    }
+                    while(head<tail&&deque[head]<position-radius)head++;
+                    output[At(position)]=input[At(deque[head])];
+                }
+            }
+            return output;
+        }
+        internal static Mask ExtractLocalContrast(ScreenPixels frame,HudRegion region)
+        {
+            var mask=Extract(frame,region,false);if(mask==null||mask.Pixels.Length>65536)return null;
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height),radius=Math.Max(2,mask.Height/5);
+            var original=new byte[mask.Pixels.Length];
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+x+left)*4;
+                original[y*mask.Width+x]=BrightRange[Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2]))];
+            }
+            // Opening removes narrow bright strokes from the background estimate.
+            // Subtracting it preserves those strokes even across an uneven bright effect.
+            var background=original;
+            foreach(bool minimum in new[]{true,false})foreach(bool horizontal in new[]{true,false})
+                background=LocalExtrema(background,mask.Width,mask.Height,radius,minimum,horizontal);
+            var values=new byte[original.Length];var histogram=new int[256];double sum=0;
+            for(int i=0;i<values.Length;i++){values[i]=(byte)Math.Max(0,original[i]-background[i]);histogram[values[i]]++;sum+=values[i];}
+            int below=0,threshold=0;double belowSum=0,best=-1,low=0,high=0;
+            for(int i=0;i<255;i++) {
+                below+=histogram[i];belowSum+=i*histogram[i];int above=values.Length-below;if(below==0||above==0)continue;
+                double a=belowSum/below,b=(sum-belowSum)/above,score=(double)below*above*(a-b)*(a-b);
+                if(score>best){best=score;threshold=i;low=a;high=b;}
+            }
+            if(high-low<25)return null;
+            int ink=0;for(int i=0;i<values.Length;i++){mask.Pixels[i]=(byte)(values[i]>threshold&&original[i]>=155?1:0);ink+=mask.Pixels[i];}
+            return ink<12||ink>values.Length*.65?null:mask;
+        }
+        static (int? Number,double Confidence) ReadNumber(ScreenPixels frame,HudRegion region,HudGlyph[] templates,int maximum,bool contrast=false,bool trimDigits=false,bool localContrast=false)
+        {
+            var parts=Segment(localContrast?ExtractLocalContrast(frame,region):contrast?ExtractContrast(frame,region,maximum==100?155:0):Extract(frame,region,false),trimDigits);
+            return ReadParts(parts,templates,maximum);
+        }
+        internal static (int? Number,double Confidence) ReadNearWhite(ScreenPixels frame,HudRegion region,HudGlyph[] templates)
+        {
+            var mask=Extract(frame,region,false);if(mask==null||mask.Pixels.Length>65536)return (null,0);
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
+            var values=new byte[mask.Pixels.Length];
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+left+x)*4;
+                values[y*mask.Width+x]=Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2]));
+            }
+            // Near-white weapon scenery can join the digits even after background subtraction.
+            // Require the same whole number at neighboring thresholds, and reject conflicting
+            // readings across the range. Keep the usual shape and ambiguity checks.
+            int? accepted=null,previous=null;double confidence=0;bool adjacent=false;
+            for(int threshold=242;threshold<=253;threshold++) {
+                int ink=0,whiteSum=0,darkSum=0;
+                for(int i=0;i<values.Length;i++) {
+                    mask.Pixels[i]=(byte)(values[i]>=threshold?1:0);ink+=mask.Pixels[i];
+                    if(mask.Pixels[i]>0)whiteSum+=values[i];else darkSum+=values[i];
+                }
+                if(ink<12||ink>values.Length*.65||(double)whiteSum/ink-(double)darkSum/(values.Length-ink)<8){previous=null;continue;}
+                var read=ReadParts(Segment(mask,true),templates,100);
+                if(!read.Number.HasValue){previous=null;continue;}
+                if(accepted.HasValue&&accepted!=read.Number)return (null,0);
+                accepted=read.Number;adjacent|=previous==read.Number;previous=read.Number;
+                confidence=Math.Max(confidence,read.Confidence);
+            }
+            return adjacent?(accepted,confidence):(null,0);
+        }
+        internal static (int? Number,double Confidence) ReadReserve(ScreenPixels frame,HudRegion region,HudGlyph[] templates)
+        {
+            var mask=Extract(frame,region,false);if(mask==null)return (null,0);
+            int left=(int)(region.X*frame.Width),top=(int)(region.Y*frame.Height);
+            for(int y=0;y<mask.Height;y++)for(int x=0;x<mask.Width;x++) {
+                int p=((y+top)*frame.Width+left+x)*4;
+                int low=Math.Min(frame.Bgra[p],Math.Min(frame.Bgra[p+1],frame.Bgra[p+2])),high=Math.Max(frame.Bgra[p],Math.Max(frame.Bgra[p+1],frame.Bgra[p+2]));
+                mask.Pixels[y*mask.Width+x]=(byte)(low>=155&&high-low<=20?1:0);
+            }
+            return ReadParts(Segment(mask),templates,300,.74);
+        }
+        static (int? Number,double Confidence) ReadParts(Mask[] parts,HudGlyph[] templates,int maximum,double minimum=.82)
+        {
             if(parts.Length>0) {
                 int number=0;double confidence=1;
                 foreach(var part in parts) {
                     var mask=Normalize(part);double aspect=(double)part.Width/part.Height;
                     var scores=templates.GroupBy(g=>g.Digit).Select(g=>new { Digit=g.Key,Score=g.Max(t=>Similarity(mask,t.Mask)*Math.Min(aspect/t.Aspect,t.Aspect/aspect)) }).OrderByDescending(s=>s.Score).ToArray();
-                    if(scores.Length<2||scores[0].Score<.82||scores[0].Score-scores[1].Score<.045){confidence=0;break;}
+                    if(scores.Length<2||scores[0].Score<minimum||scores[0].Score-scores[1].Score<.045){confidence=0;break;}
                     number=number*10+scores[0].Digit;confidence=Math.Min(confidence,scores[0].Score);
                 }
-                if(confidence>=.82&&number<=maximum)return (number,confidence);
+                if(confidence>=minimum&&number<=maximum)return (number,confidence);
             }
             return (null,0);
         }

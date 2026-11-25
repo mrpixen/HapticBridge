@@ -15,6 +15,10 @@ namespace LovenseConnector
         public HudRegion Health { get; set; }
         public HudRegion Shield { get; set; }
         public bool ReadShield { get; set; }
+        public bool ReadKillFeed { get; set; }
+        public bool ReadAmmo { get; set; }
+        public HudRegion Ammo {get;set;}=new ScreenProfile().Ammo;
+        public HudRegion Reserve {get;set;}=new ScreenProfile().Reserve;
         public HudRegion Badge { get; set; }
         public HudRegion Spectator { get; set; }=new ScreenProfile().Spectator;
         public byte[] SpectatorMask { get; set; }
@@ -27,15 +31,15 @@ namespace LovenseConnector
         public List<byte[]> BadgeVariants { get; set; }=new List<byte[]>();
         public List<HudGlyph> Digits { get; set; }
 
-        public bool Valid()=>Format=="hapticbridge-hud"&&(Version>=1&&Version<=4)&&BadgeVariants!=null&&(Version>=2||BadgeVariants.Count==0)&&(Version>=3||SpectatorMask==null)&&(Version>=4||DeathMarkerMask==null)&&new ScreenProfile {
-            Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits
+        public bool Valid()=>Format=="hapticbridge-hud"&&(Version>=1&&Version<=6)&&(Version>=5||!ReadKillFeed)&&(Version>=6||!ReadAmmo)&&BadgeVariants!=null&&(Version>=2||BadgeVariants.Count==0)&&(Version>=3||SpectatorMask==null)&&(Version>=4||DeathMarkerMask==null)&&new ScreenProfile {
+            Ammo=Ammo,Reserve=Reserve,ReadAmmo=ReadAmmo,Health=Health,Shield=Shield,ReadShield=ReadShield,ReadKillFeed=ReadKillFeed,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits
         }.Validate();
         static HudRegion Copy(HudRegion r)=>new HudRegion {X=r.X,Y=r.Y,Width=r.Width,Height=r.Height};
         public static ScreenCalibrationData Capture(ScreenProfile profile)
         {
             if(profile==null||!profile.Validate())throw new ArgumentException("Invalid HUD calibration.");
             return new ScreenCalibrationData {
-                Format="hapticbridge-hud",Version=4,Health=Copy(profile.Health),Shield=Copy(profile.Shield),ReadShield=profile.ReadShield,
+                Format="hapticbridge-hud",Version=6,Ammo=Copy(profile.Ammo),Reserve=Copy(profile.Reserve),ReadAmmo=profile.ReadAmmo,Health=Copy(profile.Health),Shield=Copy(profile.Shield),ReadShield=profile.ReadShield,ReadKillFeed=profile.ReadKillFeed,
                 Badge=Copy(profile.Badge),Spectator=Copy(profile.Spectator),SpectatorMask=profile.SpectatorMask?.ToArray(),DeathMarker=Copy(profile.DeathMarker),DeathMarkerMask=profile.DeathMarkerMask?.ToArray(),DeathMarkerFrameWidth=profile.DeathMarkerFrameWidth,DeathMarkerFrameHeight=profile.DeathMarkerFrameHeight,BadgeMask=profile.BadgeMask?.ToArray(),
                 BadgeVariants=profile.BadgeVariants.Select(m=>m.ToArray()).ToList(),
                 Digits=profile.Digits.Select(d=>new HudGlyph {Digit=d.Digit,Aspect=d.Aspect,Mask=d.Mask.ToArray()}).ToList()
@@ -44,8 +48,8 @@ namespace LovenseConnector
         public ScreenProfile Snapshot()
         {
             if(!Valid())throw new ArgumentException("This is not a valid HapticBridge HUD setup.");
-            var copy=Capture(new ScreenProfile {Health=Health,Shield=Shield,ReadShield=ReadShield,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits});
-            return new ScreenProfile {Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,Badge=copy.Badge,Spectator=copy.Spectator,SpectatorMask=copy.SpectatorMask,DeathMarker=copy.DeathMarker,DeathMarkerMask=copy.DeathMarkerMask,DeathMarkerFrameWidth=copy.DeathMarkerFrameWidth,DeathMarkerFrameHeight=copy.DeathMarkerFrameHeight,BadgeMask=copy.BadgeMask,BadgeVariants=copy.BadgeVariants,Digits=copy.Digits};
+            var copy=Capture(new ScreenProfile {Ammo=Ammo,Reserve=Reserve,ReadAmmo=ReadAmmo,Health=Health,Shield=Shield,ReadShield=ReadShield,ReadKillFeed=ReadKillFeed,Badge=Badge,Spectator=Spectator,SpectatorMask=SpectatorMask,DeathMarker=DeathMarker,DeathMarkerMask=DeathMarkerMask,DeathMarkerFrameWidth=DeathMarkerFrameWidth,DeathMarkerFrameHeight=DeathMarkerFrameHeight,BadgeMask=BadgeMask,BadgeVariants=BadgeVariants,Digits=Digits});
+            return new ScreenProfile {Ammo=copy.Ammo,Reserve=copy.Reserve,ReadAmmo=copy.ReadAmmo,Health=copy.Health,Shield=copy.Shield,ReadShield=copy.ReadShield,ReadKillFeed=copy.ReadKillFeed,Badge=copy.Badge,Spectator=copy.Spectator,SpectatorMask=copy.SpectatorMask,DeathMarker=copy.DeathMarker,DeathMarkerMask=copy.DeathMarkerMask,DeathMarkerFrameWidth=copy.DeathMarkerFrameWidth,DeathMarkerFrameHeight=copy.DeathMarkerFrameHeight,BadgeMask=copy.BadgeMask,BadgeVariants=copy.BadgeVariants,Digits=copy.Digits};
         }
     }
 

@@ -16,7 +16,7 @@ Client-only Fabric mod for Minecraft **26.3**, Fabric Loader **0.20.1+**, matchi
 | Walk or sneak | Off |
 | Sprint | Strong pulses on all selected outputs |
 | Jump, fall, land | Strong feedback, with landing decay |
-| Mine a block | All selected outputs rise from level 2 toward 18 as breaking progresses |
+| Mine a block | All selected outputs rise smoothly: dirt toward 4, stone 9, ores 15, obsidian 18 (development build) |
 | Break a block | Level 20 completion burst; ores and rare ores have longer rewards |
 | Cancel mining | Mining output stops without a completion reward |
 | Take damage | Stronger as remaining health falls; maximum at 10% health |
@@ -36,7 +36,7 @@ Edit `config/minecraft-immersion.json`, then use `/immersion reload`.
 - `/immersion event block_break` — preview an event after closing chat.
 - `/immersion level damage 20` — set an event maximum from 0 to 20.
 
-Profiles contain `level`, `durationMs`, `shape`, `pulses`, `priority`, `cooldownMs`, and `route`. Shapes are `steady`, `pulse`, `decay`, `wave`, and `ramp`. The default mining profile reaches level 18 before completion; changing its level scales that ramp. Config revision 2 migrates selected older defaults once and preserves subsequent edits.
+Profiles contain `level`, `durationMs`, `shape`, `pulses`, `priority`, `cooldownMs`, and `route`. Shapes are `steady`, `pulse`, `decay`, `wave`, and `ramp`. Mining strength follows material and breaking progress; changing its profile level scales the ramp. Completion rewards still reach level 20. Config revision 2 migrates selected older defaults once and preserves subsequent edits.
 
 ### Output routing
 
@@ -79,3 +79,5 @@ Close Minecraft before copying the JAR into an instance. Remove the older Immers
 ## Verification
 
 Engine/config tests exercise event envelopes, priorities, mining progress, rewards and migration. Offline loopback tests verify discovery and routing of channels 0–9, selected-only routing, reload during connection, and session release after a failed frame or gameplay pause. This does not prove physical behavior for every actuator or game event.
+
+The Minecraft CI workflow runs these tests with JDK 25 and checksum-pinned Gson 2.13.2. It needs no Minecraft installation or devices; it does not build or launch the game mod.

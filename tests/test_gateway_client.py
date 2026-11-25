@@ -25,6 +25,28 @@ class FakeGateway:
         return client.Session(self, "test", 3000)
 
 class ClientTests(unittest.TestCase):
+    def test_session_cannot_be_nested_or_reopened(self):
+        fake = FakeGateway()
+        session = fake.session()
+        with session:
+            with self.assertRaises(client.GatewayError):
+                session.__enter__()
+            self.assertEqual(sum(path == "/session" for path, _ in fake.requests), 1)
+            session.frame([], duration_ms=0)
+        count = len(fake.requests)
+        with self.assertRaises(client.GatewayError):
+            session.__enter__()
+        self.assertEqual(len(fake.requests), count)
+        self.assertEqual(sum(path == "/release" for path, _ in fake.requests), 1)
+
+    def test_closed_unused_session_cannot_acquire_lease(self):
+        fake = FakeGateway()
+        session = fake.session()
+        session.close()
+        with self.assertRaises(client.GatewayError):
+            session.__enter__()
+        self.assertEqual(fake.requests, [])
+
     def invoke(self, *args):
         fake = FakeGateway()
         with patch.object(client, "Gateway", return_value=fake), patch.object(sys, "argv", ["client", *args]), contextlib.redirect_stdout(io.StringIO()):

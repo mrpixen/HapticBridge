@@ -1,5 +1,43 @@
 # Release verification
 
+## Unreleased - Health against bright backgrounds
+
+A saved 3840×2160 frame reproduced white health digits merging with bright weapon pixels under the fixed color mask. Rejected health readings now retry local contrast separation while retaining minimum foreground brightness, digit confidence and ambiguity checks. In the eight-second recorded segment, readable health improved from 39/80 to 73/80 frames; every recognized value was the visible 100, and the one kill appeared at 0.6 seconds using natural health readings. Four existing 1080p segments retain their nine kills and damage amounts; some events confirm earlier. Synthetic checks reject dim, uniform and low-contrast health crops. Seven 4K frames remain unreadable, and this small sample does not establish general resolution or live-game accuracy.
+
+## Unreleased - Moving kill-feed rows under overlays
+
+A recorded 3840×2160 row moved upward out from beneath performance graphs and was counted twice in a feed-only replay with diagnostic health held constant. Tracking now retains a unique recent upward row move with partial text agreement and an empty former slot. Tests keep unrelated text, downward additions, longer gaps and occupied former slots distinct. The isolated replay now produces one event; all nine kills in the existing 80 seconds of 1080p footage remain detected. All 18 core suites passed, followed by 298 focused screen assertions after adding an extra occupied-slot check. Natural health recognition in the 4K segment remains intermittent, so this does not establish full 4K gameplay accuracy.
+
+## Unreleased - Screen sync channel changes
+
+A synthetic reconnect/capability-change check reproduced obsolete motor routes remaining enabled. Screen sync now checks the current channels when displaying routes, arming, monitoring output and admitting a cue. A previously checked obsolete route cannot become an armed target. Tests use fake devices and transport; physical reconnection behavior remains unverified.
+
+## Unreleased - Stroke range validation
+
+UI follow-up: invalid text or an invalid stroke range used to revoke the active output source before showing an error. Motion controls now parse and validate before the manual handoff. An offline button-click regression reproduced the interruption; the fixed suite passes 356 Studio assertions and verifies playback, source ownership and the stored range survive rejected settings. No visible window or physical output was used.
+
+An actuator regression reproduced extreme integer endpoints being accepted after subtraction overflow. Both stroke endpoints are now checked against 0-100 before the minimum-span calculation, using shared validation for direct settings and playback preflight. Targeted actuator tests pass: invalid values preserve the previous range and send no commands, while valid minimum-span ranges at both endpoints still work. Physical motion compatibility remains unverified.
+
+## Unreleased - VALORANT kill feed
+
+Feedback follow-up: a synthetic transport test reproduced a second rapid kill being dropped by the motor cooldown. Distinct kills now retrigger their reward; simultaneous kills are combined into one bounded pattern rather than overwriting each other. Damage cooldown and death priority remain in force. Passed 18 core suites (293 screen-detection assertions), 243 Screen sync assertions and 350 Studio assertions. Fake transports verified two full-strength peaks per assigned motor for a same-frame double kill, stopped output afterward, and death preemption.
+
+Resolution follow-up: a recorded row was missed after resizing to 720p because its weapon icon covered the single color-check line. Three interior scanlines now check the friendly background while retaining the same gold-border and color requirements. All three recorded frames preserve their row counts at 720p, 900p, 1080p, 1440p and 2160p (15 resampled inputs). A 20-second production replay resized to 720p also retains all four personal kills; the original three 1080p replays retain eight with no extra kill events. All 18 core suites pass, including 291 screen-detection assertions. These rescaled frames do not prove native HUD scaling or live capture at those resolutions.
+
+Optional kill-feed mode reads gold personal killer outlines and friendly row color, then tracks victim-text fingerprints locally. Existing rows at startup are silent. Confirmed identities survive fading and row movement; brief unreadable health can hold a fresh event for up to half a second. Feed and badge modes are mutually exclusive.
+
+Production-reader replay of three private 1080p SDR recordings (20 seconds each, 10 frames/second) detected eight visually confirmed personal kills: four, three, and one. This includes a rapid double kill and a segment where the unchanged badge templates detected none. These are limited offline checks, not a general accuracy estimate. Automated validation passed 18 core suites (289 screen-detection assertions), 238 Screen sync assertions and 350 Studio assertions using synthetic inputs and transport. The recordings, names and derived masks are not distributed. Other layouts, color settings, HDR and live capture remain unverified.
+
+## Feature branch — Program audio
+
+Capture readiness: pending native activation now displays Starting audio and produces no output until the stream starts. Stop clears readiness immediately. Focused checks pass: 18 lifecycle, 31 adapter/identity and 35 routing assertions, using fake streams and device transport.
+
+Start-button follow-up: a regression reproduced output ownership changing before an unsupported-program error. Shared selection validation now runs before the manual handoff as well as at capture startup. All 32 focused audio-routing assertions pass, including missing selection, a source switch during a blocked device stop and a successful Start-button path. The prior development EXEs predate this follow-up.
+
+The Sound tab can select one visible program and its child processes using Windows process loopback (build 20348 or later). Selection and refresh stop feedback; Start is explicit. Process identity includes its start time, so PID reuse does not silently select a different program. Capture failure has no whole-system fallback. Program labels use process names, not document titles or command lines.
+
+Offline checks passed: 15 capture lifecycle, 31 adapter/identity, 28 audio routing, 350 Studio, 236 Screen sync and 17 legacy-import assertions. Native argument layout, late activation disposal, silent buffers, process replacement and source switching use fake activation, streams and transport. Unsupported Windows is rejected before stopping independent output or enumerating programs. Both x64 and ARM64 single-file builds passed. Actual Windows audio isolation, ARM64 execution and visible layout remain unverified. This work is on `feature/process-audio`, not in the published release.
+
 ## Unreleased — Stable output motor labels
 
 The output bar now uses the same motor slots as the control tabs. Disconnecting earlier devices no longer renumbers remaining outputs. Its tooltip and accessible name identify each device and actuator. A synthetic disconnect regression reproduced the old mismatch; playback routing is unchanged. Passed 350 Studio, 236 Screen sync, 21 audio and 17 legacy-import assertions without visible windows or hardware.

@@ -18,7 +18,7 @@ Control compatible Lovense devices from one Windows app. Shape vibration pattern
 | **Motor controls** | Set each motor independently or control several together. |
 | **Curve editor** | Draw, preview, save and assign vibration patterns. Preview works without a connected device. |
 | **Sound sync** | Follow a selected audio output, with a bass-focused option. |
-| **Screen sync** | Experimental VALORANT feedback from visible health, shield and kill badges. Learn multiple badge appearances for different skins. |
+| **Screen sync** | Automatic VALORANT setup; damage, kills, deaths, shooting and reload feedback. Adjustable strengths and longer kill/death rewards. Screen recognition remains experimental. |
 | **Video sync** | Pair FeelConnect sessions by code or QR image, including an image pasted from the clipboard. |
 | **Game & app integrations** | Send commands through the local HTTP API. Discover motors and their capabilities at runtime. |
 
@@ -78,6 +78,14 @@ On Windows, install the **.NET 10 SDK**, clone this repository, and run these co
 ```
 
 Output: `dist/win-x64/HapticBridge.exe`.
+
+To install that build with a **HapticBridge - Current app** Start menu entry, close the app and run:
+
+```powershell
+./install.ps1 -Executable ./dist/win-x64/HapticBridge.exe
+```
+
+This installs for your Windows user, preserves settings, and does not launch the app. Run it again with a newer EXE to update. You can also pass the path to a downloaded release.
 
 For Windows on ARM:
 

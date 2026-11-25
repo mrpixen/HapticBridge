@@ -33,6 +33,14 @@ internal static class ActuatorTests
         Check(Encoding.ASCII.GetBytes(pro.Command(7,12)).SequenceEqual(new byte[]{70,76,86,83,58,12,25,80,59}),"stroke packet carries raw speed and endpoint bytes");
         Check(pro.Command(7,0)=="Mply:0:20;"&&pro.PositionCommand(0)=="FSetSite:0;","position zero and motion stop are different commands");
         Reject(()=>pro.SetStroke(90,100),"reject too-short stroke");Reject(()=>pro.PositionCommand(101),"reject position beyond endpoint");Reject(()=>pro.Command(7,21),"reject speed beyond maximum");
+        Reject(()=>pro.SetStroke(int.MaxValue,-100),"reject overflowing stroke endpoints");
+        Reject(()=>pro.SetStroke(int.MinValue,int.MaxValue),"reject extreme stroke bounds");
+        Reject(()=>pro.SetStroke(101,100),"reject stroke start beyond endpoint");
+        Reject(()=>pro.SetStroke(0,-1),"reject negative stroke end");
+        Check(pro.StrokeLow==25&&pro.StrokeHigh==80,"invalid stroke input preserves the previous range");
+        pro.SetStroke(0,20);Check(pro.StrokeLow==0&&pro.StrokeHigh==20,"minimum allowed stroke span remains valid");
+        pro.SetStroke(80,100);Check(pro.StrokeLow==80&&pro.StrokeHigh==100,"minimum span at maximum endpoint remains valid");
+        pro.SetStroke(25,80);
         Check(Profile("Solace","h").Command(7,0)=="Mply:0:0;","Solace stop clears both speed and range");
         var models=new JavaScriptSerializer().Deserialize<ModelInfo[]>(File.ReadAllText(args[0]));
         foreach(var model in models) {
@@ -50,6 +58,9 @@ internal static class ActuatorTests
         try {await player.StopAll();}catch(InvalidOperationException){}
         Check(link.Snapshot().Contains("Air:Level:0;")&&player.Level(5)==-1,"a failed first stop does not skip remaining actuators or report confirmed success");
         link=new FakeLink { DelayMs=1 };player=new Playback(link,pro);
+        Reject(()=>player.ValidateFunction("stroke",int.MaxValue,-100),"function preflight rejects overflowing stroke endpoints");
+        bool invalidStroke=false;try {await player.ApplyFunction("stroke",int.MaxValue,-100);}catch(ArgumentException){invalidStroke=true;}
+        Check(invalidStroke&&link.Snapshot().Length==0&&pro.StrokeLow==25&&pro.StrokeHigh==80,"invalid stroke never reaches transport or changes the configured range");
         await player.ApplyFunction("position",0);
         Check(link.Snapshot().Contains("FSetSite:0;")&&link.Snapshot().Last()=="Mply:0:20;","point move to zero ends in a real motion stop");
         link=new FakeLink { DelayMs=1,Block="FSetSite:50;" };player=new Playback(link,pro);

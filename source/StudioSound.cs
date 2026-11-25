@@ -9,6 +9,11 @@ namespace LovenseConnector
     internal sealed partial class ConnectorApp
     {
         ComboBox audioOutputChoice;
+        ComboBox audioSourceChoice,audioProgramChoice;
+        Func<AudioProgram[]> audioProgramProvider=null;
+        Func<AudioProgram,IAudioSource> audioProgramFactory=null;
+        Func<bool> audioProgramSupport=null;
+        bool ProgramAudioSupported => (audioProgramSupport??(()=>WindowsProcessAudio.Supported))();
         bool audioOutputsLoading, audioOutputsLoaded;
         Func<AudioOutput[]> audioOutputProvider=null;
         Func<string,IAudioSource> audioSourceFactory=null;
@@ -16,12 +21,28 @@ namespace LovenseConnector
         void InitializeStudioAudio()
         {
             var body=new StackPanel { Margin=new Thickness(24) };body.Children.Add(Text("Sound",32));
+            audioSourceChoice=new ComboBox { Width=190,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,0,0,12) };
+            audioSourceChoice.Items.Add("Audio output");audioSourceChoice.Items.Add("One program");audioSourceChoice.SelectedIndex=0;
+            Accessible(audioSourceChoice,"Sound source");body.Children.Add(audioSourceChoice);
+            var programPanel=new StackPanel { Visibility=Visibility.Collapsed };
+            audioProgramChoice=new ComboBox { MinWidth=160,MaxWidth=480,DisplayMemberPath="Name",HorizontalAlignment=HorizontalAlignment.Stretch };
+            Accessible(audioProgramChoice,"Program to follow");programPanel.Children.Add(audioProgramChoice);
+            programPanel.Children.Add(Action("Refresh programs",RefreshAudioPrograms));
+            programPanel.Children.Add(Text("Includes the selected program and its child processes. Windows build 20348 or later.",13));
+            body.Children.Add(programPanel);
             var source=new StackPanel();source.Children.Add(Text("Audio output",18));
             var outputRow=new Grid();outputRow.ColumnDefinitions.Add(new ColumnDefinition());outputRow.ColumnDefinitions.Add(new ColumnDefinition { Width=GridLength.Auto });
             audioOutputChoice=new ComboBox { MinWidth=160,MaxWidth=480,HorizontalAlignment=HorizontalAlignment.Stretch,DisplayMemberPath="Name",SelectedValuePath="Id",Margin=new Thickness(0,0,12,6) };
             Accessible(audioOutputChoice,"Audio output to follow");outputRow.Children.Add(audioOutputChoice);
             var refresh=Action("Refresh",RefreshAudioOutputs);Grid.SetColumn(refresh,1);outputRow.Children.Add(refresh);source.Children.Add(outputRow);
-            source.Children.Add(Text("Follows all sound playing through this output.",13));body.Children.Add(StudioPanel(source));
+            source.Children.Add(Text("Follows all sound playing through this output.",13));var outputPanel=StudioPanel(source);body.Children.Add(outputPanel);
+            audioSourceChoice.SelectionChanged+=async(s,e)=>{
+                bool program=audioSourceChoice.SelectedIndex==1;
+                programPanel.Visibility=program?Visibility.Visible:Visibility.Collapsed;
+                outputPanel.Visibility=program?Visibility.Collapsed:Visibility.Visible;
+                try { await AudioOutputChanged();if(program&&audioSourceChoice.SelectedIndex==1)await RefreshAudioPrograms(); }catch(Exception ex){Report(ex);}
+            };
+            audioProgramChoice.SelectionChanged+=async(s,e)=>{if(!audioOutputsLoading)try{await AudioOutputChanged();}catch(Exception ex){Report(ex);}};
             audioOutputsLoading=true;audioOutputChoice.Items.Add(new AudioOutput { Id="",Name="Windows default" });audioOutputChoice.SelectedIndex=0;audioOutputsLoading=false;
             audioOutputChoice.SelectionChanged+=async(s,e)=>{if(!audioOutputsLoading)try{await AudioOutputChanged();}catch(Exception ex){Report(ex);}};
             body.Loaded+=async(s,e)=>{if(!audioOutputsLoaded){audioOutputsLoaded=true;await RefreshAudioOutputs();}};
@@ -34,8 +55,38 @@ namespace LovenseConnector
         }
         async Task StartSoundSync()
         {
+            ValidateSoundSelection();
             int request=++audioStartRequest;
             await Manual(async()=>{if(request==audioStartRequest)await StartAudio();});
+        }
+        void ValidateSoundSelection()
+        {
+            if(SelectedMixer().Length==0)throw new InvalidOperationException("Connect and select at least one motor.");
+            if(audioSourceChoice?.SelectedIndex!=1)return;
+            if(!ProgramAudioSupported)throw new PlatformNotSupportedException("Program audio needs a newer Windows version. Choose Audio output instead.");
+            if(!(audioProgramChoice?.SelectedItem is AudioProgram))throw new InvalidOperationException("Choose a program first.");
+        }
+        async Task RefreshAudioPrograms()
+        {
+            audioStartRequest++;
+            var selected=audioProgramChoice.SelectedItem as AudioProgram;
+            var stopped=StopAudioMotors();int generation=audioGeneration;
+            await stopped;
+            if(generation!=audioGeneration||audioCapture!=null)return;
+            try {
+                if(!ProgramAudioSupported) {
+                    audioOutputsLoading=true;
+                    try {audioProgramChoice.Items.Clear();}finally {audioOutputsLoading=false;}
+                    audioLabel.Text=AudioStoppedMessage("Program audio needs a newer Windows version · use Audio output instead");return;
+                }
+                var programs=(audioProgramProvider??AudioProgram.List)();
+                audioOutputsLoading=true;
+                try {
+                    audioProgramChoice.Items.Clear();foreach(var program in programs)audioProgramChoice.Items.Add(program);
+                    audioProgramChoice.SelectedItem=programs.FirstOrDefault(p=>selected!=null&&p.Id==selected.Id&&p.Started==selected.Started);
+                    audioLabel.Text=AudioStoppedMessage(programs.Length==0?"No programs found · open a program and refresh":"Choose a program · press Start sound sync");
+                }finally {audioOutputsLoading=false;}
+            }catch {audioLabel.Text=AudioStoppedMessage("Could not list programs · try Refresh programs");}
         }
         async Task AudioOutputChanged()
         {

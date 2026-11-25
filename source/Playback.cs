@@ -90,6 +90,7 @@ namespace LovenseConnector
         public Stopwatch Renewed=Stopwatch.StartNew();
         public CancellationTokenSource Cancel=new CancellationTokenSource();
         public int Ceiling=20;
+        public Action Failed;
     }
 
     internal readonly record struct PlaybackStopRevision(int Epoch,int Revision);
@@ -134,7 +135,7 @@ namespace LovenseConnector
         }
         public void LiveLevel(int channel,int level) { MotorCommand(channel,level); lock(sync) { MotorJob job; if(jobs.TryGetValue(channel,out job) && job.Spec.mode=="Steady") job.Spec.high=level; } }
         public void Ceiling(int channel,int level) { MotorCommand(channel,level); lock(sync) { MotorJob job; if(jobs.TryGetValue(channel,out job)) job.Ceiling=level; } }
-        public async Task Start(int channel,PatternSpec spec,int ceiling,Stopwatch sharedClock=null,Func<bool> isCurrent=null)
+        public async Task Start(int channel,PatternSpec spec,int ceiling,Stopwatch sharedClock=null,Func<bool> isCurrent=null,Action onFailure=null)
         {
             spec.Validate(); MotorCommand(channel,0);
             if(ceiling<0||ceiling>20) throw new ArgumentOutOfRangeException("ceiling");
@@ -150,7 +151,7 @@ namespace LovenseConnector
                 {
                     if(generation!=epoch || revision!=revisions[channel] || (isCurrent!=null&&!isCurrent())) return;
                     MotorJob previous; if(jobs.TryGetValue(channel,out previous)) previous.Cancel.Cancel();
-                    job=new MotorJob { Spec=spec, Ceiling=ceiling }; if(sharedClock!=null) job.Clock=sharedClock; jobs[channel]=job;
+                    job=new MotorJob { Spec=spec, Ceiling=ceiling, Failed=onFailure }; if(sharedClock!=null) job.Clock=sharedClock; jobs[channel]=job;
                 }
                 Run(channel,job);
             }
@@ -188,7 +189,7 @@ namespace LovenseConnector
                 }
             }
             catch(OperationCanceledException) { }
-            catch(Exception ex) { if(Error!=null) Error(ex.Message); }
+            catch(Exception ex) { job.Failed?.Invoke(); if(Error!=null) Error(ex.Message); }
             // All loop exceptions are handled above; cleanup may await on C# 5.
             {
                 await controls.WaitAsync().ConfigureAwait(false);

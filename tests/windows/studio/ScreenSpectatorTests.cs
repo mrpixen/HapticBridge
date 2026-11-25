@@ -22,15 +22,15 @@ internal static partial class ScreenSyncTests
             int positive=links.Sum(l=>l.Positive.Count);
             await Feed(app,capture,"80",1,"80");Check(Get<bool>(app,"screenArmed"),"single suspected spectator frame does not confirm a stop");
             await Feed(app,capture,"80",2,"80");
-            Check(!Get<bool>(app,"screenArmed")&&players.All(p=>!p.Active(0)&&p.Level(0)==0),"confirmed spectating disarms and stops active motor output");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&players.All(p=>!p.Active(0)&&p.Level(0)==0),"confirmed spectating waits and stops active motor output");
             Check(links.Sum(l=>l.Positive.Count)==positive,"suspected spectator health drop never queues a damage cue");
             Check(Get<TextBlock>(app,"screenStatus").Text.Contains("Spectating detected"),"confirmed spectator status explains the stop");
             bool rejected=false;try{await Invoke(app,"ArmScreen");}catch(ArgumentException){rejected=true;}
-            Check(rejected&&!Get<bool>(app,"screenArmed"),"output cannot be enabled on a visible spectator marker");
-            await Feed(app,capture,"100",3,"");Check(!Get<bool>(app,"screenArmed"),"marker disappearing never automatically re-enables output");
+            Check(rejected&&Get<bool>(app,"screenWaiting"),"output cannot be enabled on a visible spectator marker");
+            await Feed(app,capture,"100",3,"");Check(Get<bool>(app,"screenArmed")&&!Get<bool>(app,"screenWaiting"),"stable own HUD resumes after spectator marker disappears");
             await Invoke(app,"ArmScreen");await Feed(app,capture,"100",1,"");links[0].FailZero=1;
             await Feed(app,capture,"100",3,"80");
-            Check(!Get<bool>(app,"screenArmed")&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),"spectator status cannot hide a failed motor stop");
+            Check(Get<bool>(app,"screenArmed")&&Get<bool>(app,"screenWaiting")&&Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),"spectator status cannot hide a failed motor stop");
             await Invoke(app,"RetryScreenStops",ScreenCapture.Now+1);
             Check(!Get<TextBlock>(app,"screenStatus").Text.Contains("unconfirmed"),"spectator stop warning clears only after a successful retry");
             await Feed(app,capture,"100",3,"");
